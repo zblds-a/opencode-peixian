@@ -32,6 +32,8 @@ const icons: Record<string, string> = {
   edit: "m4 16 12-12 4 4L8 20H4v-4m10-10 4 4",
   copy: "M8 8h12v12H8V8M4 16V4h12",
   shield: "m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3m-4 9 3 3 5-6",
+  eye: "M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12m10-3a3 3 0 1 0 0 6 3 3 0 0 0 0-6",
+  "eye-off": "M3 3l18 18M10.6 6.2A11 11 0 0 1 12 6c6.5 0 10 6 10 6a17 17 0 0 1-2.1 2.8M6.2 6.2C3.4 8.1 2 12 2 12s3.5 6 10 6a10.6 10.6 0 0 0 3.8-.7M9.9 9.9a3 3 0 0 0 4.2 4.2",
 }
 export function Icon(props: { name: string; size?: number }) {
   return (

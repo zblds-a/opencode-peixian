@@ -55,7 +55,7 @@
 
 | 分组 | 公开路径示意 | 说明 |
 | --- | --- | --- |
-| 登录与个人认证 | /auth/login、/auth/logout、/me、/me/password、/tokens | Cookie 登录、首次改密、个人访问令牌创建/撤销 |
+| 登录与个人认证 | /auth/login、/auth/logout、/me、/me/password、/tokens | Cookie 登录、个人主动改密、个人访问令牌创建/撤销 |
 | 模型 | /models | 仅返回本账号获授权的平台模型 ID 与展示信息 |
 | 会话 | /sessions、/sessions/{sid}/messages、/sessions/{sid}/abort | 只处理当前账号固定工作区的会话 |
 | 事件 | /events | SSE 变更通知，客户端随后刷新消息和会话状态 |
@@ -70,7 +70,7 @@
 
 浏览器登录设置 HttpOnly、SameSite=Strict 的 `px_session` Cookie，最长 8 小时。Cookie 写请求必须携带 login/me 返回的 `X-CSRF-Token`，并通过 Origin 校验。Python 可使用个人创建的 Bearer Token；个人令牌有效期 30 天，不需要 Cookie 的 CSRF 头。不要将 Cookie 值当作个人 Bearer Token。
 
-初始密码必须先修改。改密、重置密码、停用账号、注销或撤销令牌会按各自规则撤销认证；SSE 连接持续核验当前认证。三角色与目标账号类型逐接口校验；super_admin/admin 都不能通过普通业务 API 查看某个用户的数据。login/me 的 capabilities 为服务端生成，不接受客户端自报权限。
+登录后不再执行首次强制改密。个人主动改密、管理员重置密码、停用账号、注销或撤销令牌会按各自规则撤销认证；SSE 连接持续核验当前认证。三角色与目标账号类型逐接口校验；super_admin/admin 都不能通过普通业务 API 查看某个用户的数据。login/me 的 capabilities 为服务端生成，不接受客户端自报权限。
 
 `/internal/worker/*` 只接受 `X-Worker-Key`，不是普通 Bearer API。其配置快照可能含运行凭据，仅供可信宿主执行器使用。Gateway 的全部私有请求另用 `X-Peixian-Key`；Gateway 到 Agent 使用固定用户名 opencode 的 Basic Auth。
 

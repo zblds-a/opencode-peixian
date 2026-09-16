@@ -34,6 +34,18 @@ def register_admin(app):
         if target_role == "admin" and ("model_ids" in data or "plugin_ids" in data):
             fail("管理员账号不接受业务授权", 400)
 
+    def save_profile(db, uid, data, old=None):
+        old = old or {}
+        display_name = str(data.get("display_name", old.get("display_name", "")))[:100]
+        police_no = str(data.get("police_no", old.get("police_no", ""))).strip()[:40] or None
+        department_id = data.get("department_id", old.get("department_id"))
+        position = str(data.get("position", old.get("position", "")))[:100]
+        db.execute(
+            "INSERT INTO user_profiles(uid,display_name,police_no,department_id,position) VALUES(?,?,?,?,?) "
+            "ON CONFLICT(uid) DO UPDATE SET display_name=excluded.display_name,police_no=excluded.police_no,department_id=excluded.department_id,position=excluded.position",
+            (uid, display_name, police_no, department_id, position),
+        )
+
     def public_job(job, actor):
         return {"status": job["status"]} if job is not None and actor["role"] == "admin" else job
 
@@ -63,11 +75,22 @@ def register_admin(app):
 
     @app.get(PREFIX + "/admin/users")
     async def users(request: Request, user=Depends(admin)):
-        return {"items": users_list(user), "capacity": {"maximum": int(os.getenv("MAX_RUNTIMES", "4")), "reserved": app.state.store.one("SELECT count(*) AS n FROM runtimes WHERE reserved=1")["n"]}}
+        items = users_list(user)
+        query = request.query_params
+        keyword = query.get("query", "").strip().lower()
+        if keyword:
+            items = [item for item in items if keyword in " ".join(str(item.get(key) or "") for key in ("username", "display_name", "police_no", "position")).lower()]
+        for field in ("department_id", "position", "system_role"):
+            if query.get(field):
+                items = [item for item in items if str(item.get(field) or "") == query[field]]
+        if query.get("status") in ("enabled", "disabled"):
+            enabled = query["status"] == "enabled"
+            items = [item for item in items if item.get("active") is enabled]
+        return {"items": items, "total": len(items), "capacity": {"maximum": int(os.getenv("MAX_RUNTIMES", "4")), "reserved": app.state.store.one("SELECT count(*) AS n FROM runtimes WHERE reserved=1")["n"]}}
 
     @app.post(PREFIX + "/admin/users", status_code=202)
     async def user_create(request: Request, user=Depends(admin)):
-        data = body_fields(await request.json(), ("username", "password", "role", "model_ids", "plugin_ids"))
+        data = body_fields(await request.json(), ("username", "password", "role", "model_ids", "plugin_ids", "display_name", "police_no", "department_id", "position"))
         role = data.get("role", "user")
         if role not in ("user", "admin"):
             fail("仅可创建普通用户或管理员", 403)
@@ -84,6 +107,9 @@ def register_admin(app):
                                          plugin_ids=data.get("plugin_ids"))
         except ValueError as exc:
             fail(str(exc), 409)
+        with s.tx() as db:
+            save_profile(db, created["id"], data)
+        created = s.user(created["id"])
         request.state.management_target = created["id"]
         return {"user": public_user(created, user), "job": public_job(job, user), "password": password}
 
@@ -92,16 +118,23 @@ def register_admin(app):
         raw = await request.json()
         if isinstance(raw, dict) and "role" in raw:
             fail("账号角色不可通过此接口修改", 403)
-        data = body_fields(raw, ("active", "model_ids", "plugin_ids"))
+        data = body_fields(raw, ("active", "model_ids", "plugin_ids", "display_name", "police_no", "department_id", "position"))
         s = app.state.store
         target = target_user(uid, user)
         user_fields(data, user, target["role"])
         if not data:
             fail("请提供需要修改的字段")
+        profile_fields = {key: data.pop(key) for key in ("display_name", "police_no", "department_id", "position") if key in data}
+        if profile_fields.get("department_id") and not s.one("SELECT 1 FROM departments WHERE id=?", (profile_fields["department_id"],)):
+            fail("所属部门不存在")
         try:
-            updated, job = s.update_user(uid, data, allow_admin=user["role"] == "super_admin")
+            updated, job = s.update_user(uid, data, allow_admin=user["role"] == "super_admin") if data else (target, None)
         except ValueError as exc:
             fail(str(exc), 409)
+        if profile_fields:
+            with s.tx() as db:
+                save_profile(db, uid, profile_fields, target)
+            updated = s.user(uid)
         return {"user": public_user(updated, user), "job": public_job(job, user)}
 
     @app.post(PREFIX + "/admin/users/{uid}/reset-password")
@@ -111,7 +144,7 @@ def register_admin(app):
         target_user(uid, user)
         password = password_valid(data.get("password") or secrets.token_urlsafe(20))
         with s.tx() as db:
-            db.execute("UPDATE users SET password=?,must_change=1,auth_version=auth_version+1 WHERE id=?", (s.passwords.hash(password), uid))
+            db.execute("UPDATE users SET password=?,must_change=0,auth_version=auth_version+1 WHERE id=?", (s.passwords.hash(password), uid))
             db.execute("DELETE FROM auth WHERE uid=?", (uid,))
         return {"password": password}
 
@@ -158,14 +191,24 @@ def register_admin(app):
         return {"items": rows}
 
     def model_public(row):
-        return {**{k: row[k] for k in ("id", "name", "description", "base_url", "model_id", "enabled", "is_default")}, "api_key_configured": bool(app.state.store.decrypt(row["secret"]))}
+        metadata = app.state.store.one("SELECT * FROM model_metadata WHERE model_id=?", (row["id"],)) or {}
+        return {
+            **{k: row[k] for k in ("id", "name", "description", "base_url", "model_id", "enabled", "is_default")},
+            "api_key_configured": bool(app.state.store.decrypt(row["secret"])),
+            "provider": metadata.get("provider", ""),
+            "context_length": metadata.get("context_length", 131072),
+            "access_mode": metadata.get("access_mode", "api"),
+            "supports_tools": bool(metadata.get("supports_tools", 1)),
+            "test_status": metadata.get("test_status", "untested"),
+            "updated_at": metadata.get("updated"),
+        }
 
     @app.get(PREFIX + "/admin/models")
     async def models(request: Request, user=Depends(require_capability("models.manage"))):
         return {"items": [model_public(row) for row in app.state.store.rows("SELECT * FROM models ORDER BY name")]}
 
     def model_data(data, old=None):
-        body_fields(data, ("name", "description", "base_url", "model_id", "api_key", "enabled", "is_default"))
+        body_fields(data, ("name", "description", "base_url", "model_id", "api_key", "enabled", "is_default", "provider", "context_length", "access_mode", "supports_tools"))
         result = {**(old or {}), **data}
         for key in ("name", "base_url", "model_id"):
             if not isinstance(result.get(key), str) or not result[key].strip() or len(result[key]) > 500:
@@ -189,6 +232,7 @@ def register_admin(app):
             if data["is_default"]:
                 db.execute("UPDATE models SET is_default=0")
             db.execute("INSERT INTO models VALUES(?,?,?,?,?,?,?,?)", (mid, data["name"], data["description"], data["base_url"], data["model_id"], data["secret"], data["enabled"], data["is_default"]))
+            db.execute("INSERT INTO model_metadata VALUES(?,?,?,?,?,?,?)", (mid, str(data.get("provider", ""))[:100], int(data.get("context_length", 131072)), str(data.get("access_mode", "api"))[:30], bool(data.get("supports_tools", True)), "untested", now()))
         request.state.management_target = mid
         return model_public(s.one("SELECT * FROM models WHERE id=?", (mid,)))
 
@@ -203,6 +247,10 @@ def register_admin(app):
             if data["is_default"]:
                 db.execute("UPDATE models SET is_default=0")
             db.execute("UPDATE models SET name=?,description=?,base_url=?,model_id=?,secret=?,enabled=?,is_default=? WHERE id=?", (data["name"], data["description"], data["base_url"], data["model_id"], data["secret"], data["enabled"], data["is_default"], mid))
+            db.execute(
+                "INSERT INTO model_metadata VALUES(?,?,?,?,?,?,?) ON CONFLICT(model_id) DO UPDATE SET provider=excluded.provider,context_length=excluded.context_length,access_mode=excluded.access_mode,supports_tools=excluded.supports_tools,updated=excluded.updated",
+                (mid, str(data.get("provider", ""))[:100], int(data.get("context_length", 131072)), str(data.get("access_mode", "api"))[:30], bool(data.get("supports_tools", True)), "untested", now()),
+            )
         queued = []
         for row in s.rows("SELECT uid FROM grants WHERE kind='model' AND resource=?", (mid,)):
             try:
@@ -222,6 +270,8 @@ def register_admin(app):
             found = r.status_code == 200 and any(v.get("id") == m["model_id"] for v in r.json().get("data", []))
         except (httpx.HTTPError, ValueError, AttributeError):
             found = False
+        with s.tx() as db:
+            db.execute("INSERT INTO model_metadata(model_id,test_status,updated) VALUES(?,?,?) ON CONFLICT(model_id) DO UPDATE SET test_status=excluded.test_status,updated=excluded.updated", (mid, "success" if found else "failed", now()))
         return {"ok": found, "message": "连接成功，模型 ID 已确认" if found else "未能确认模型，请检查地址、凭据和模型 ID"}
 
     @app.get(PREFIX + "/admin/plugins")

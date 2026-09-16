@@ -48,6 +48,11 @@ def schemas():
         "description": {"type": "string", "maxLength": 500},
         "content": {"type": "string", "minLength": 1, "maxLength": 32000},
         "enabled": BOOL,
+        "source_type": {"type": "string", "enum": ["manual", "requirement", "conversation"]},
+        "dependency_ids": array(ID, maxItems=100),
+        "input_schema": {"type": "object", "additionalProperties": True},
+        "default_rules": array(STRING),
+        "scope": {"type": "string", "enum": ["personal"]},
     }
     model_fields = {
         "name": {"type": "string", "minLength": 1, "maxLength": 500},
@@ -58,9 +63,12 @@ def schemas():
                      "description": "上游服务实际模型 ID；与普通用户选择的平台模型 ID 不同。"},
         "api_key": {"type": "string", "format": "password", "writeOnly": True,
                     "description": "仅写入；更新时省略或空字符串保留原凭据。允许无鉴权的内网模型。"},
-        "enabled": BOOL, "is_default": BOOL,
+        "enabled": BOOL, "is_default": BOOL, "provider": STRING,
+        "context_length": {"type": "integer", "minimum": 1},
+        "access_mode": {"type": "string", "enum": ["api", "local"]},
+        "supports_tools": BOOL,
     }
-    template_fields = {k: v for k, v in skill_fields.items() if k != "enabled"}
+    template_fields = {k: skill_fields[k] for k in ("name", "description", "content")}
     file_states = {"type": "string", "enum": ["uploading", "queued", "parsing", "ready", "partial", "no_text", "unsupported", "failed"]}
     result = {
         "Error": obj({"message": STRING, "code": STRING, "request_id": STRING}, ("message", "code")),
@@ -90,8 +98,12 @@ def schemas():
             "password": {**PASSWORD, "description": "省略时生成初始密码，仅在本次响应返回；首次登录必须修改。"},
             "role": {"type": "string", "enum": ["user", "admin"], "default": "user", "description": "仅超管可提交此字段；admin 操作者即使提交 role=user 也返回403。创建的管理员账号不创建业务环境且不得携带任何授权字段。"},
             "model_ids": ids, "plugin_ids": ids,
+            "display_name": STRING, "police_no": STRING,
+            "department_id": nullable(ID), "position": STRING,
         }, ("username",)),
-        "UserUpdateBody": obj({"active": BOOL, "model_ids": ids, "plugin_ids": ids}),
+        "UserUpdateBody": obj({"active": BOOL, "model_ids": ids, "plugin_ids": ids,
+                               "display_name": STRING, "police_no": STRING,
+                               "department_id": nullable(ID), "position": STRING}),
         "PasswordResetBody": obj({"password": {**PASSWORD, "description": "省略时生成新初始密码。撤销旧认证并要求修改。"}}),
         "ModelCreateBody": obj(model_fields, ("name", "base_url", "model_id")),
         "ModelUpdateBody": obj(model_fields),
@@ -116,7 +128,10 @@ def schemas():
                        ("status",), extra=True, description="普通管理员查看他人环境只返回 status；不返回内部运行环境 ID、配置修订或错误详情。"),
         "User": obj({"id": ID, "username": STRING, "role": {"type": "string", "enum": ["user", "admin", "super_admin"]},
                      "active": BOOL, "must_change_password": BOOL, "runtime": nullable(ref("Runtime")),
-                     "model_ids": ids, "plugin_ids": ids},
+                     "model_ids": ids, "plugin_ids": ids, "display_name": STRING, "police_no": nullable(STRING),
+                     "department_id": nullable(ID), "department": nullable(obj({"id": ID, "name": STRING, "code": nullable(STRING)}, ("id", "name"))),
+                     "position": STRING, "system_role": {"type": "string", "enum": ["user", "admin", "super_admin"]},
+                     "last_login_at": nullable(INTEGER)},
                     ("id", "username", "role", "active", "must_change_password", "runtime"), extra=True),
         "Identity": obj({"user": ref("User"), "csrf_token": nullable(STRING),
                          "capabilities": array({"type": "string", "enum": ["users.manage", "admins.manage", "models.manage", "audit.read", "plugins.manage", "templates.manage", "runtimes.manage", "jobs.read", "business.use"]})},
@@ -134,7 +149,8 @@ def schemas():
         "PasswordReset": obj({"password": {"type": "string", "description": "新初始密码；仅本次响应返回。"}}, ("password",)),
         "Model": obj({"id": ID, "name": STRING, "description": STRING, "is_default": FLAG}, ("id", "name", "description", "is_default")),
         "AdminModel": obj({**{k: v for k, v in model_fields.items() if k != "api_key"},
-                           "id": ID, "enabled": FLAG, "is_default": FLAG, "api_key_configured": BOOL},
+                           "id": ID, "enabled": FLAG, "is_default": FLAG, "api_key_configured": BOOL,
+                           "test_status": STRING, "updated_at": nullable(INTEGER)},
                           ("id", "name", "description", "base_url", "model_id", "enabled", "is_default", "api_key_configured")),
         "ModelChanged": obj({"model": ref("AdminModel"), "jobs": array(ref("Job"))}, ("model", "jobs")),
         "Session": obj({"id": ID, "title": STRING, "time": {"type": "object", "additionalProperties": True},
@@ -222,7 +238,7 @@ def schemas():
         "LegacyStatus": obj({"uid": ID, "runtime_id": ID, "created": BOOL, "status": STRING,
                              "revision": INTEGER, "desired": INTEGER, "reserved": BOOL}, ("uid", "runtime_id", "status"), extra=True),
     }
-    result["UserList"] = obj({"items": array(ref("User")), "capacity": obj({"maximum": INTEGER, "reserved": INTEGER}, ("maximum", "reserved"))}, ("items", "capacity"))
+    result["UserList"] = obj({"items": array(ref("User")), "total": INTEGER, "capacity": obj({"maximum": INTEGER, "reserved": INTEGER}, ("maximum", "reserved"))}, ("items", "capacity"))
     result["ResultList"] = obj({"items": array(ref("Result")), "truncated": BOOL}, ("items", "truncated"))
     connection_fields = {
         "name": {"type": "string", "minLength": 1, "maxLength": 100},
@@ -253,6 +269,51 @@ def schemas():
     installed = result["Plugin"]["properties"]["installed"]["anyOf"][0]["properties"]
     installed["missing_connections"] = array(STRING)
     installed["state"]["enum"].append("unconfigured")
+    result["Capability"] = obj({"id": ID, "kind": {"type": "string", "enum": ["skill", "plugin"]},
+                                "name": STRING, "description": STRING, "version": STRING, "category": STRING,
+                                "recommended": BOOL, "enabled": BOOL, "owned": BOOL, "scope": STRING},
+                               ("id", "kind", "name", "version", "category", "enabled", "owned", "scope"))
+    result["SkillDraftCreate"] = obj({"session_id": ID, "requirement": STRING, "summary": STRING,
+                                      "name": STRING, "description": STRING, "dependency_ids": ids,
+                                      "input_schema": {"type": "object", "additionalProperties": True},
+                                      "default_rules": array(STRING)})
+    result["SkillDraftUpdate"] = obj({"name": STRING, "description": STRING, "content": STRING,
+                                      "dependency_ids": ids, "input_schema": {"type": "object", "additionalProperties": True},
+                                      "default_rules": array(STRING)})
+    result["SkillDraft"] = obj({"id": ID, "session_id": nullable(ID), "source_type": STRING, "name": STRING,
+                                "description": STRING, "content": STRING, "dependency_ids": ids,
+                                "input_schema": {"type": "object", "additionalProperties": True},
+                                "default_rules": array(STRING)}, ("id", "source_type", "name", "content"), extra=True)
+    result["Run"] = obj({"id": ID, "session_id": ID, "model_id": nullable(ID), "query_summary": STRING,
+                         "mode": STRING, "status": STRING, "started": INTEGER, "completed": nullable(INTEGER),
+                         "error": nullable(STRING)}, ("id", "session_id", "status", "started"), extra=True)
+    result["RunEvent"] = obj({"id": ID, "sequence": INTEGER, "step_type": STRING, "name": STRING,
+                              "status": STRING, "started": nullable(INTEGER), "completed": nullable(INTEGER),
+                              "input_summary": STRING, "output_summary": STRING, "record_count": nullable(INTEGER),
+                              "error": nullable(STRING), "capability_id": nullable(ID), "evidence_refs": array(ID)},
+                             ("id", "sequence", "step_type", "name", "status"), extra=True)
+    result["Evidence"] = obj({"conclusion": {"type": "object", "additionalProperties": True},
+                              "tabs": {"type": "object", "additionalProperties": True},
+                              "chain": array({"type": "object", "additionalProperties": True}),
+                              "conditions": {"type": "object", "additionalProperties": True}, "mock": BOOL},
+                             ("conclusion", "tabs", "chain", "conditions"))
+    result["RerunBody"] = obj({"query": STRING})
+    result["DepartmentBody"] = obj({"name": STRING, "parent_id": nullable(ID), "code": nullable(STRING), "sort_order": INTEGER})
+    result["Department"] = obj({"id": ID, "name": STRING, "parent_id": nullable(ID), "code": nullable(STRING),
+                                "sort_order": INTEGER, "created": INTEGER, "updated": INTEGER}, ("id", "name"), extra=True)
+    result["UsersSummary"] = obj({"users": INTEGER, "departments": INTEGER, "enabled": INTEGER}, ("users", "departments", "enabled"))
+    result["AdminCapabilityBody"] = obj({"kind": {"type": "string", "enum": ["skill", "plugin"]},
+                                         "name": STRING, "description": STRING, "version": STRING, "category": STRING,
+                                         "dependency_ids": ids, "visibility": STRING, "enabled": BOOL,
+                                         "config": {"type": "object", "additionalProperties": True}})
+    result["AdminCapability"] = obj({"id": ID, "kind": STRING, "name": STRING, "description": STRING,
+                                     "version": STRING, "category": STRING, "dependency_ids": ids,
+                                     "visibility": STRING, "enabled": BOOL,
+                                     "config": {"type": "object", "additionalProperties": True}},
+                                    ("id", "kind", "name", "version", "enabled"), extra=True)
+    result["Invocation"] = obj({"id": ID, "run_id": ID, "uid": ID, "status": STRING, "created": INTEGER,
+                                "skill_ids": ids, "plugin_ids": ids, "query_summary": STRING},
+                               ("id", "run_id", "uid", "status", "created"), extra=True)
     return result
 
 
@@ -275,6 +336,7 @@ CONTRACTS = {
     ("post", "/tokens"): ("TokenBody", ref("TokenCreated"), "创建访问令牌", "访问令牌", "令牌有效期 30 天，原始值仅本次返回；权限与账号身份一致。"),
     ("delete", "/tokens/{tid}"): (None, ref("Ok"), "撤销自己的访问令牌", "访问令牌", "撤销后新请求被拒绝，使用该令牌的事件流关闭。"),
     ("get", "/models"): (None, items(ref("Model")), "列出本账号获授权模型", "模型", "不公开上游地址或模型密钥。"),
+    ("get", "/capabilities"): (None, items(ref("Capability")), "列出当前用户可用能力", "能力", "聚合个人 Skill、已授权插件工具和管理员配置的官方能力。"),
     ("get", "/sessions"): (None, items(ref("Session")), "列出自己的会话", "会话", "仅固定工作区内的会话；同时返回 idle/busy 等状态。"),
     ("post", "/sessions"): ("SessionBody", ref("Session"), "创建空会话", "会话", "创建空会话本身不发起模型生成。"),
     ("patch", "/sessions/{sid}"): ("SessionBody", ref("Session"), "重命名自己的会话", "会话", ""),
@@ -282,6 +344,11 @@ CONTRACTS = {
     ("get", "/sessions/{sid}/messages"): (None, items(ref("Message")), "读取会话的已保存消息", "会话", "工具展示经过过滤，不返回原始内部配置或工具秘密。"),
     ("post", "/sessions/{sid}/messages"): ("MessageBody", ref("MessageAccepted"), "提交异步模型消息", "会话", "202 只表示已接受，run_id 不是结果查询资源。先订阅 events，收到变更后重新读取会话消息及状态。每次最多五个技能和五个文件；文件引用总计另限 24000 字符，合并文字/技能/文件另限 18000 UTF-8 字节。同一会话请串行提交。"),
     ("post", "/sessions/{sid}/abort"): (None, ref("Ok"), "终止自己的会话生成", "会话", ""),
+    ("get", "/sessions/{sid}/runs/{run_id}"): (None, ref("Run"), "读取研判运行", "研判运行", "仅当前用户及所属会话。"),
+    ("get", "/sessions/{sid}/runs/{run_id}/events"): (None, items(ref("RunEvent")), "读取结构化执行步骤", "研判运行", "不包含模型内部思维过程。"),
+    ("get", "/sessions/{sid}/runs/{run_id}/evidence"): (None, ref("Evidence"), "读取研判依据与证据链", "研判运行", "业务接口未接通的标签明确返回 mock=true。"),
+    ("post", "/sessions/{sid}/runs/{run_id}/rerun"): ("RerunBody", ref("MessageAccepted"), "按修改条件重新研判", "研判运行", "创建新的关联运行。"),
+    ("get", "/sessions/{sid}/runs/{run_id}/report"): (None, None, "导出研判报告", "研判运行", "下载 Markdown 报告。"),
     ("get", "/events"): (None, None, "订阅本账号变更事件", "会话", "SSE 仅发送 event: change 与 data 中 type=connected/updated，另有 heartbeat 注释。不是模型文字增量；收到事件后查询 messages。连接持续检查认证，注销/撤销后关闭。"),
     ("get", "/files"): (None, items(ref("File")), "列出自己的上传文件", "文件", ""),
     ("post", "/files"): ("FileUploadBody", ref("File"), "上传文件并自动排队解析", "文件", "multipart/form-data 中唯一文件字段 file；单文件最大 20 MiB，每账号原始上传累计 1 GiB，实际字节计量。解析 TXT/MD/CSV/XLSX/文本 PDF/DOCX，无 OCR。202 后轮询 files 或 text；queued/parsing 尚未完成。"),
@@ -297,6 +364,12 @@ CONTRACTS = {
     ("delete", "/skills/{sid}"): (None, ref("Queued"), "删除自己的技能", "技能", "排队应用运行环境配置。"),
     ("post", "/skills/{sid}/rollback"): (None, ref("Queued"), "恢复自己的上一版技能", "技能", ""),
     ("post", "/skills/{sid}/test"): (None, ref("ConnectionTest"), "检查技能是否已经加载", "技能", "只核对当前环境是否加载技能，不发起模型效果评测。"),
+    ("post", "/skill-drafts/from-requirement"): ("SkillDraftCreate", ref("SkillDraft"), "从需求创建 Skill 草稿", "Skill Creator", "创建当前用户私有草稿。"),
+    ("post", "/skill-drafts/from-session"): ("SkillDraftCreate", ref("SkillDraft"), "从当前对话创建 Skill 草稿", "Skill Creator", "校验会话归属。"),
+    ("get", "/skill-drafts/{draft_id}"): (None, ref("SkillDraft"), "读取 Skill 草稿", "Skill Creator", "仅草稿所有者。"),
+    ("patch", "/skill-drafts/{draft_id}"): ("SkillDraftUpdate", ref("SkillDraft"), "编辑 Skill 草稿", "Skill Creator", ""),
+    ("post", "/skill-drafts/{draft_id}/test"): (None, ref("ConnectionTest"), "测试 Skill 草稿", "Skill Creator", "返回结构和依赖校验结果。"),
+    ("post", "/skill-drafts/{draft_id}/save"): (None, ref("Queued"), "保存为个人 Skill", "Skill Creator", "固定保存为 personal 范围。"),
     ("get", "/templates"): (None, items(ref("Template")), "列出管理员提供的技能模板", "技能", ""),
     ("post", "/templates/{tid}/copy"): (None, ref("Queued"), "复制模板为自己的技能", "技能", "返回新技能 id 与配置应用任务。"),
     ("get", "/plugins"): (None, items(ref("Plugin")), "列出已授权插件及自己的配置状态", "插件", "仅管理员发布且授权的插件；私密字段仅返回配置状态，不回显值。"),
@@ -309,16 +382,28 @@ CONTRACTS = {
     ("post", "/questions/{rid}/reply"): ("QuestionReplyBody", BOOL, "回答模型问题", "确认", "answers 按问题顺序排列，每题为选项字符串数组。"),
     ("post", "/questions/{rid}/reject"): ("QuestionRejectBody", BOOL, "拒绝回答模型问题", "确认", "仍需 JSON 对象请求体，可传空对象。"),
     ("get", "/admin/users"): (None, ref("UserList"), "列出账号与环境名额", "管理：账号", ""),
+    ("get", "/admin/users/summary"): (None, ref("UsersSummary"), "读取用户与部门汇总", "管理：账号", ""),
+    ("get", "/admin/departments/tree"): (None, items(ref("Department")), "读取部门树", "管理：部门", ""),
+    ("post", "/admin/departments"): ("DepartmentBody", ref("Department"), "新增部门", "管理：部门", ""),
+    ("patch", "/admin/departments/{department_id}"): ("DepartmentBody", ref("Department"), "编辑部门", "管理：部门", ""),
+    ("delete", "/admin/departments/{department_id}"): (None, ref("Ok"), "删除空部门", "管理：部门", "存在用户或下级部门时返回409。"),
     ("post", "/admin/users"): ("UserCreateBody", ref("UserChanged"), "创建普通用户或管理员", "管理：账号", "super_admin 可创建 user/admin；admin 只能创建 user，且不得提交 role 或 plugin_ids，即使值为 user 或空数组。角色默认 user。创建 user 时账号、初始授权与开通任务在同一事务保存；202 不代表环境已就绪。创建 admin 不接受 model_ids/plugin_ids，不创建环境，runtime 与 job 均为 null。未知字段或混合越权字段整笔拒绝。"),
     ("patch", "/admin/users/{uid}"): ("UserUpdateBody", ref("UserChanged"), "修改账号启用状态或授权", "管理：账号", "admin 只能管理全部 user 的 active/model_ids，不得携带 plugin_ids。super_admin 另可管理 user 的插件授权及 admin 的 active；admin 账号不接受模型/插件授权。角色不可更改，super_admin 账号不能作为此接口目标。停用立即撤销认证；user 同事务排队停止环境，admin 无环境任务。原已停用 user 重新启用会同事务预留容量并排队 resume；容量不足或暂停任务仍在途返回409，账号仍停用。已启用但被超管手动暂停的账号不会因重复启用或修改授权自动恢复。混合越权字段整笔拒绝。"),
     ("post", "/admin/users/{uid}/reset-password"): ("PasswordResetBody", ref("PasswordReset"), "重设账号初始密码", "管理：账号", ""),
     ("post", "/admin/users/{uid}/runtime/{action}"): (None, ref("Queued"), "排队执行环境操作", "管理：账号", "pause 保留数据并停止环境；resume 恢复；retry 重试开通；apply 应用当前授权配置。"),
     ("get", "/admin/jobs"): (None, items(ref("Job")), "查看最近环境任务", "管理：审计", "最多最近 200 项。"),
     ("get", "/admin/audit"): (None, items(ref("Audit")), "查看最近管理审计", "管理：审计", "最多最近 500 项。actor 为账号 ID 精确筛选，action 为管理动作精确筛选，result 为 success/denied/failed。仅管理操作元数据；不包含业务调用、迁移负载、密钥、正文或文件路径。"),
+    ("get", "/admin/invocations"): (None, items(ref("Invocation")), "查询业务调用审计", "管理：调用审计", "可按用户、部门、模型、状态和时间筛选。"),
+    ("get", "/admin/invocations/export"): (None, None, "导出调用审计", "管理：调用审计", "按当前筛选条件导出 CSV。"),
+    ("get", "/admin/invocations/{invocation_id}"): (None, ref("Invocation"), "查看调用审计详情", "管理：调用审计", "包含可审计步骤，不包含内部思维过程和敏感原文。"),
     ("get", "/admin/models"): (None, items(ref("AdminModel")), "列出模型配置", "管理：模型", "返回 api_key_configured，不返回密钥值。"),
     ("post", "/admin/models"): ("ModelCreateBody", ref("AdminModel"), "新增可授权模型", "管理：模型", ""),
     ("patch", "/admin/models/{mid}"): ("ModelUpdateBody", ref("ModelChanged"), "修改模型并排队应用", "管理：模型", ""),
     ("post", "/admin/models/{mid}/test"): (None, ref("ConnectionTest"), "检查模型列表接口与模型 ID", "管理：模型", "读取上游 models，不生成聊天回复；不等同于工具调用能力验收。"),
+    ("get", "/admin/capabilities"): (None, items(ref("AdminCapability")), "列出官方能力配置", "管理：能力", "仅超级管理员隐藏入口。"),
+    ("post", "/admin/capabilities"): ("AdminCapabilityBody", ref("AdminCapability"), "新增官方能力", "管理：能力", ""),
+    ("patch", "/admin/capabilities/{capability_id}"): ("AdminCapabilityBody", ref("AdminCapability"), "编辑官方能力", "管理：能力", ""),
+    ("post", "/admin/capabilities/{capability_id}/test"): (None, ref("ConnectionTest"), "测试官方能力配置", "管理：能力", "不返回业务正文或凭据。"),
     ("get", "/admin/plugins"): (None, items(ref("AdminPlugin")), "列出已发布插件版本", "管理：插件", ""),
     ("post", "/admin/plugins"): ("PluginUploadBody", ref("AdminPlugin"), "发布经过管理员审核的插件包", "管理：插件", "版本不可覆盖。ZIP 需安全路径、最多 1000 项、解压最多 100 MiB；加载的代码具有该账号环境内代码执行能力，Skill 指令本身不是安全隔离边界。"),
     ("patch", "/admin/plugins/{pid}/{version}"): ("PluginStateBody", ref("Ok"), "启用或停用插件版本", "管理：插件", "相关账号会排队应用配置。"),

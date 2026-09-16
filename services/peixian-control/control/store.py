@@ -45,7 +45,7 @@ class Store:
             if version > SCHEMA_VERSION:
                 raise ValueError("Control database schema is newer than this application")
             schema = """
-                CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,username TEXT UNIQUE NOT NULL,password TEXT NOT NULL,role TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,must_change INTEGER NOT NULL DEFAULT 1,auth_version INTEGER NOT NULL DEFAULT 1,created INTEGER NOT NULL);
+                CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,username TEXT UNIQUE NOT NULL,password TEXT NOT NULL,role TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,must_change INTEGER NOT NULL DEFAULT 0,auth_version INTEGER NOT NULL DEFAULT 1,created INTEGER NOT NULL);
                 CREATE TABLE IF NOT EXISTS auth(hash TEXT PRIMARY KEY,uid TEXT NOT NULL,kind TEXT NOT NULL,name TEXT,csrf TEXT,expires INTEGER NOT NULL,version INTEGER NOT NULL,created INTEGER NOT NULL);
                 CREATE TABLE IF NOT EXISTS runtimes(uid TEXT PRIMARY KEY,id TEXT UNIQUE NOT NULL,status TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 0,desired INTEGER NOT NULL DEFAULT 1,reserved INTEGER NOT NULL DEFAULT 1,error TEXT,spec TEXT NOT NULL,updated INTEGER NOT NULL);
                 CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,uid TEXT NOT NULL,action TEXT NOT NULL,status TEXT NOT NULL,revision INTEGER NOT NULL,lease TEXT,heartbeat INTEGER,attempts INTEGER NOT NULL DEFAULT 0,error TEXT,created INTEGER NOT NULL,updated INTEGER NOT NULL);
@@ -68,6 +68,7 @@ class Store:
                 self.migrate_roles(db, admin_password_file)
             if version < 3:
                 self.migrate_connections(db)
+            self.ensure_final_platform(db)
             if not db.execute("SELECT 1 FROM users WHERE role='super_admin'").fetchone():
                 raise ValueError("Control database has no super administrator")
             if db.execute("SELECT 1 FROM users WHERE role NOT IN ('super_admin','admin','user')").fetchone():
@@ -87,7 +88,7 @@ class Store:
             password = Path(admin_password_file).read_text().strip()
             if len(password) < 16:
                 raise ValueError("Administrator bootstrap password is invalid")
-            db.execute("INSERT INTO users(id,username,password,role,created) VALUES(?,?,?,?,?)",
+            db.execute("INSERT INTO users(id,username,password,role,must_change,created) VALUES(?,?,?,?,0,?)",
                        (ident(), "admin", self.passwords.hash(password), "super_admin", now()))
         db.execute("UPDATE audit SET actor_role=COALESCE((SELECT role FROM users WHERE id=audit.actor),CASE WHEN actor='worker' THEN 'worker' ELSE 'unknown' END) WHERE actor_role='unknown'")
         db.execute("INSERT INTO audit(id,actor,actor_role,action,target,result,created) VALUES(?,?,?,?,?,?,?)",
@@ -100,6 +101,22 @@ class Store:
         db.execute("INSERT INTO audit(id,actor,actor_role,action,target,result,created) VALUES(?,?,?,?,?,?,?)",
                    (ident(), "system", "system", "schema.migrate", "control.connections.v3", "success", now()))
         db.execute("PRAGMA user_version=3")
+
+    def ensure_final_platform(self, db):
+        db.execute("UPDATE users SET must_change=0 WHERE must_change<>0")
+        db.execute("CREATE TABLE IF NOT EXISTS departments(id TEXT PRIMARY KEY,name TEXT NOT NULL,parent_id TEXT REFERENCES departments(id),code TEXT UNIQUE,sort_order INTEGER NOT NULL DEFAULT 0,created INTEGER NOT NULL,updated INTEGER NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS user_profiles(uid TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,display_name TEXT NOT NULL DEFAULT '',police_no TEXT UNIQUE,department_id TEXT REFERENCES departments(id),position TEXT NOT NULL DEFAULT '',last_login_at INTEGER)")
+        db.execute("CREATE TABLE IF NOT EXISTS model_metadata(model_id TEXT PRIMARY KEY REFERENCES models(id) ON DELETE CASCADE,provider TEXT NOT NULL DEFAULT '',context_length INTEGER NOT NULL DEFAULT 131072,access_mode TEXT NOT NULL DEFAULT 'api',supports_tools INTEGER NOT NULL DEFAULT 1,test_status TEXT NOT NULL DEFAULT 'untested',updated INTEGER NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS skill_metadata(skill_id TEXT PRIMARY KEY REFERENCES skills(id) ON DELETE CASCADE,source_type TEXT NOT NULL DEFAULT 'manual',dependencies TEXT NOT NULL DEFAULT '[]',input_schema TEXT NOT NULL DEFAULT '{}',default_rules TEXT NOT NULL DEFAULT '[]',scope TEXT NOT NULL DEFAULT 'personal',updated INTEGER NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS skill_drafts(id TEXT PRIMARY KEY,uid TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,session_id TEXT,source_type TEXT NOT NULL,name TEXT NOT NULL,description TEXT NOT NULL,content TEXT NOT NULL,dependencies TEXT NOT NULL,input_schema TEXT NOT NULL,default_rules TEXT NOT NULL,created INTEGER NOT NULL,updated INTEGER NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS official_capabilities(id TEXT PRIMARY KEY,kind TEXT NOT NULL,name TEXT NOT NULL,description TEXT NOT NULL,version TEXT NOT NULL,category TEXT NOT NULL,dependencies TEXT NOT NULL,visibility TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1,config TEXT NOT NULL DEFAULT '{}',created INTEGER NOT NULL,updated INTEGER NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY,uid TEXT NOT NULL REFERENCES users(id),session_id TEXT NOT NULL,model_id TEXT,query_summary TEXT NOT NULL,mode TEXT NOT NULL,status TEXT NOT NULL,started INTEGER NOT NULL,completed INTEGER,error TEXT)")
+        db.execute("CREATE TABLE IF NOT EXISTS run_events(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,sequence INTEGER NOT NULL,step_type TEXT NOT NULL,name TEXT NOT NULL,status TEXT NOT NULL,started INTEGER,completed INTEGER,input_summary TEXT NOT NULL DEFAULT '',output_summary TEXT NOT NULL DEFAULT '',record_count INTEGER,error TEXT,capability_id TEXT,evidence_refs TEXT NOT NULL DEFAULT '[]')")
+        db.execute("CREATE TABLE IF NOT EXISTS run_evidence(run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,content TEXT NOT NULL,updated INTEGER NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS invocations(id TEXT PRIMARY KEY,run_id TEXT NOT NULL UNIQUE REFERENCES runs(id) ON DELETE CASCADE,uid TEXT NOT NULL REFERENCES users(id),department_id TEXT,model_id TEXT,skill_ids TEXT NOT NULL,plugin_ids TEXT NOT NULL,status TEXT NOT NULL,duration_ms INTEGER,record_count INTEGER NOT NULL DEFAULT 0,created INTEGER NOT NULL,error TEXT)")
+        db.execute("CREATE TABLE IF NOT EXISTS login_events(id TEXT PRIMARY KEY,uid TEXT,username TEXT NOT NULL,result TEXT NOT NULL,client TEXT NOT NULL DEFAULT '',created INTEGER NOT NULL)")
+        db.execute("CREATE INDEX IF NOT EXISTS invocations_created ON invocations(created DESC)")
+        db.execute("CREATE INDEX IF NOT EXISTS run_events_run ON run_events(run_id,sequence)")
 
     def schema_version(self):
         with self.tx() as db:
@@ -232,6 +249,10 @@ class Store:
             user["active"] = bool(user["active"])
             user["must_change_password"] = bool(user["must_change_password"])
             user["runtime"] = self.one("SELECT id,status,revision,desired,error FROM runtimes WHERE uid=?", (uid,))
+            profile = self.one("SELECT display_name,police_no,department_id,position,last_login_at FROM user_profiles WHERE uid=?", (uid,))
+            user.update(profile or {"display_name": "", "police_no": None, "department_id": None, "position": "", "last_login_at": None})
+            user["system_role"] = user["role"]
+            user["department"] = self.one("SELECT id,name,code FROM departments WHERE id=?", (user.get("department_id"),)) if user.get("department_id") else None
         return user
 
     def create_user(self, username, password, legacy=None, *, model_ids=None, plugin_ids=None, role="user"):
@@ -244,7 +265,7 @@ class Store:
             with self.tx() as db:
                 if db.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
                     raise ValueError("账号已存在")
-                db.execute("INSERT INTO users(id,username,password,role,created) VALUES(?,?,?,?,?)",
+                db.execute("INSERT INTO users(id,username,password,role,must_change,created) VALUES(?,?,?,?,0,?)",
                            (uid, username, self.passwords.hash(password), role, now()))
             return self.user(uid), None
         uid, rid = ident(), ident()
@@ -255,7 +276,7 @@ class Store:
                 raise ValueError("运行环境名额已满，请先暂停其他环境")
             if db.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
                 raise ValueError("账号已存在")
-            db.execute("INSERT INTO users(id,username,password,role,created) VALUES(?,?,?,'user',?)", (uid, username, self.passwords.hash(password), now()))
+            db.execute("INSERT INTO users(id,username,password,role,must_change,created) VALUES(?,?,?,'user',0,?)", (uid, username, self.passwords.hash(password), now()))
             self.set_grants(db, uid, "model", [] if model_ids is None else model_ids)
             self.set_grants(db, uid, "plugin", [] if plugin_ids is None else plugin_ids)
             db.execute("INSERT INTO runtimes(uid,id,status,spec,updated) VALUES(?,?,'pending',?,?)", (uid, rid, self.encrypt(spec), now()))

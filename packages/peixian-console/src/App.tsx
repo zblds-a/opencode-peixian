@@ -1,24 +1,22 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, Switch, Match } from "solid-js"
 import { api, ApiError, BASE, onUnauthorized, post, safeMessage, setAuth } from "./api"
-import type { Auth, Capability, User } from "./types"
+import type { Auth, Capability } from "./types"
 import { roleNames, visibleManagementTabs } from "./access"
-import { Button, ErrorLine, Field, Icon, Spinner, Status } from "./components"
+import { Button, ErrorLine, Field, Icon, Spinner } from "./components"
 import { Context } from "./context"
 import Chat from "./pages/Chat"
-import Files from "./pages/Files"
-import Skills from "./pages/Skills"
-import Plugins from "./pages/Plugins"
-import Settings from "./pages/Settings"
-import Admin from "./pages/Admin"
+import FinalAdmin from "./pages/FinalAdmin"
+import loginPrototype from "./assets/peixian-login-prototype.png"
 import { defaultPlatform, platformMetadata } from "./platform"
 import type { Platform } from "./platform"
 const pages = [
-  { id: "chat", name: "对话", icon: "chat" },
-  { id: "files", name: "我的文件", icon: "file" },
-  { id: "skills", name: "我的技能", icon: "skill" },
-  { id: "plugins", name: "我的插件", icon: "plugin" },
-  { id: "settings", name: "个人设置", icon: "settings" },
+  { id: "chat", name: "智能研判", icon: "chat" },
 ]
+const adminPages = [
+  { id: "admin-models", name: "模型管理", icon: "skill" },
+  { id: "admin-users", name: "用户与部门", icon: "users" },
+  { id: "admin-audit", name: "调用审计", icon: "clock" },
+] as const
 export default function App() {
   const [platform, setPlatform] = createSignal(defaultPlatform)
   const [auth, setSession] = createSignal<Auth>()
@@ -29,12 +27,11 @@ export default function App() {
   const [changed, setChanged] = createSignal(0)
   const [disconnected, setDisconnected] = createSignal(false)
   const [toast, setToast] = createSignal<{ message: string; kind: string }>()
-  const [dark, setDark] = createSignal(localStorage.getItem("peixian-theme") === "dark")
   const capabilities = () => auth()?.capabilities ?? []
   const can = (capability: Capability) => capabilities().includes(capability)
   const management = () => visibleManagementTabs(capabilities()).length > 0
-  const defaultPage = () => (can("business.use") ? "chat" : management() ? "admin" : "settings")
-  const visiblePages = () => pages.filter((item) => item.id === "settings" || can("business.use"))
+  const defaultPage = () => (can("business.use") ? "chat" : "admin-models")
+  const visiblePages = () => pages.filter(() => can("business.use"))
   let timer: ReturnType<typeof setTimeout> | undefined
   function notify(message: string, kind = "success") {
     clearTimeout(timer)
@@ -80,17 +77,13 @@ export default function App() {
   })
   createEffect(() => {
     if (!auth()) return
-    if (page() === "admin" ? !management() : !visiblePages().some((item) => item.id === page())) setPage(defaultPage())
-  })
-  createEffect(() => {
-    document.documentElement.dataset.theme = dark() ? "dark" : "light"
-    localStorage.setItem("peixian-theme", dark() ? "dark" : "light")
+    if (management() && adminPages.some((item) => item.id === page())) return
+    if (!visiblePages().some((item) => item.id === page())) setPage(defaultPage())
   })
   const eventIdentity = createMemo(() => {
     const user = auth()?.user
     return user &&
       can("business.use") &&
-      !user.must_change_password &&
       ["ready", "running", "healthy", "updating", "applying"].includes(user.runtime?.status ?? "")
       ? user.id
       : undefined
@@ -120,7 +113,7 @@ export default function App() {
   })
   const accountPoll = setInterval(() => {
     const user = auth()?.user
-    if (!user || user.must_change_password) return
+    if (!user) return
     void refreshUser().catch(() => {})
     if (
       !can("business.use") ||
@@ -154,12 +147,8 @@ export default function App() {
         fallback={<Login platform={platform()} onSuccess={accept} initialError={initialError()} onRetry={initialize} />}
       >
         {(session) => (
-          <Show
-            when={!session().user.must_change_password}
-            fallback={<PasswordGate user={session().user} onDone={refreshUser} />}
-          >
             <Context.Provider value={{ user: () => auth()!.user, capabilities, can, notify, refreshUser, changed }}>
-              <div class="app-shell">
+              <div class={"app-shell " + (can("business.use") ? "business-shell" : "admin-shell") }>
                 <Show when={menu()}>
                   <button class="nav-overlay" aria-label="关闭导航" onClick={() => setMenu(false)} />
                 </Show>
@@ -202,46 +191,9 @@ export default function App() {
                       )}
                     </For>
                     <Show when={management()}>
-                      <div class="nav-separator" />
-                      <button
-                        class={page() === "admin" ? "active" : ""}
-                        onClick={() => {
-                          setPage("admin")
-                          setMenu(false)
-                        }}
-                      >
-                        <Icon name="shield" />
-                        <span>管理中心</span>
-                      </button>
+                      <For each={adminPages}>{(item) => <button class={page() === item.id ? "active" : ""} onClick={() => { setPage(item.id); setMenu(false) }} aria-current={page() === item.id ? "page" : undefined}><Icon name={item.icon} /><span>{item.name}</span><Show when={page() === item.id}><span class="nav-dot" /></Show></button>}</For>
                     </Show>
                   </nav>
-                  <div class="sidebar-bottom">
-                    <div class="privacy-note">
-                      <Icon name="shield" size={17} />
-                      <span>
-                        {can("business.use")
-                          ? "文件与对话在你的独立空间中保存"
-                          : "按授权管理账号与能力，业务数据由用户自行访问"}
-                      </span>
-                    </div>
-                    <div class="account-row">
-                      <span class="avatar">{session().user.username.slice(0, 1).toUpperCase()}</span>
-                      <span>
-                        <strong>{session().user.username}</strong>
-                        <small>{roleNames[session().user.role]}</small>
-                      </span>
-                      <button
-                        class="icon-button"
-                        aria-label={dark() ? "切换浅色" : "切换深色"}
-                        onClick={() => setDark(!dark())}
-                      >
-                        <Icon name={dark() ? "sun" : "moon"} size={18} />
-                      </button>
-                      <button class="icon-button" aria-label="退出登录" onClick={logout}>
-                        <Icon name="logout" size={18} />
-                      </button>
-                    </div>
-                  </div>
                 </aside>
                 <main class="main-area">
                   <header class="topbar">
@@ -249,19 +201,14 @@ export default function App() {
                       <button class="icon-button mobile-menu" aria-label="打开导航" onClick={() => setMenu(true)}>
                         <Icon name="menu" />
                       </button>
-                      <span class="breadcrumb">
-                        工作台 <span>/</span> {pages.find((item) => item.id === page())?.name ?? "管理中心"}
-                      </span>
+                      <Show when={can("business.use")} fallback={<div class="admin-top-motto"><strong>忠诚　为民　公正　廉洁</strong><small>汉风古韵 · 平安沛县</small></div>}><div class="business-top-motto"><strong>忠诚　为民　公正　廉洁</strong><small>汉风古韵 · 平安沛县</small></div></Show>
                     </div>
                     <div class="topbar-status">
                       <Show when={disconnected()}>
                         <span class="connection-note">正在恢复连接</span>
                       </Show>
-                      <Show
-                        when={can("business.use")}
-                        fallback={<span class="pill">{roleNames[session().user.role]}</span>}
-                      >
-                        <Status value={auth()?.user.runtime?.status} />
+                      <Show when={can("business.use")} fallback={<div class="admin-profile"><span class="admin-avatar">警</span><span><strong>{session().user.display_name || (session().user.username === "admin" ? "张警官" : session().user.username)}</strong><small>{roleNames[session().user.role]}</small></span><button class="icon-button" aria-label="退出登录" title="退出登录" onClick={logout}><Icon name="logout" size={17} /></button></div>}>
+                        <div class="business-profile"><span class="business-location">江苏 · 沛县<small>千年汉风地 · 今日平安城</small></span><span class="admin-avatar">警</span><span><strong>{session().user.display_name || session().user.username}</strong><small>{session().user.position || roleNames[session().user.role]}</small></span><button class="icon-button" aria-label="退出登录" title="退出登录" onClick={logout}><Icon name="logout" size={17} /></button></div>
                       </Show>
                     </div>
                   </header>
@@ -272,21 +219,9 @@ export default function App() {
                       </div>
                     </Show>
                     <Switch>
-                      <Match when={page() === "files" && can("business.use")}>
-                        <Files />
-                      </Match>
-                      <Match when={page() === "skills" && can("business.use")}>
-                        <Skills />
-                      </Match>
-                      <Match when={page() === "plugins" && can("business.use")}>
-                        <Plugins />
-                      </Match>
-                      <Match when={page() === "settings"}>
-                        <Settings />
-                      </Match>
-                      <Match when={page() === "admin" && management()}>
-                        <Admin />
-                      </Match>
+                      <Match when={page() === "admin-models" && management()}><FinalAdmin section="models" /></Match>
+                      <Match when={page() === "admin-users" && management()}><FinalAdmin section="users" /></Match>
+                      <Match when={page() === "admin-audit" && management()}><FinalAdmin section="audit" /></Match>
                     </Switch>
                   </div>
                 </main>
@@ -303,7 +238,6 @@ export default function App() {
                 )}
               </Show>
             </Context.Provider>
-          </Show>
         )}
       </Show>
     </Show>
@@ -315,8 +249,11 @@ function Login(props: {
   initialError: string
   onRetry: () => Promise<void>
 }) {
-  const [username, setUsername] = createSignal("")
+  const rememberedUsername = localStorage.getItem("peixian-remembered-username") ?? ""
+  const [username, setUsername] = createSignal(rememberedUsername)
   const [password, setPassword] = createSignal("")
+  const [remember, setRemember] = createSignal(true)
+  const [showPassword, setShowPassword] = createSignal(false)
   const [busy, setBusy] = createSignal(false)
   const [error, setError] = createSignal("")
   async function submit(event: SubmitEvent) {
@@ -325,6 +262,8 @@ function Login(props: {
     setError("")
     try {
       const data = await post<Auth>("/auth/login", { username: username().trim(), password: password() })
+      if (remember()) localStorage.setItem("peixian-remembered-username", username().trim())
+      else localStorage.removeItem("peixian-remembered-username")
       setPassword("")
       props.onSuccess(data)
     } catch (error) {
@@ -335,134 +274,48 @@ function Login(props: {
   }
   return (
     <div class="login-shell">
-      <div class="login-story">
-        <span class="brand-mark">{props.platform.short_name}</span>
-        <div class="eyebrow">{props.platform.name}</div>
-        <h1>
-          从一个问题开始，
-          <br />
-          让想法更进一步。
-        </h1>
-        <p>
-          {props.platform.description}。
-          <br />
-          对话、文件、技能与插件，在你的独立空间中有序留存。
-        </p>
-        <div class="story-art">
-          <span />
-          <span />
-          <span />
-          <div>
-            <Icon name="skill" size={42} />
-          </div>
-        </div>
-        <small>专属空间 · 随时对话 · 按需扩展</small>
+      <div class="login-story" style={{ "--login-prototype": `url(${loginPrototype})` }}>
+        <span class="login-story-accessible">沛警智枢，沛县公安智能研判平台。汉风古韵，平安沛县。</span>
       </div>
       <div class="login-side">
+        <div class="login-corner-copy">汉风古韵 · 平安沛县</div>
         <form class="login-card" onSubmit={submit}>
-          <div class="eyebrow">欢迎回来</div>
-          <h2>登录工作台</h2>
-          <p>使用管理员为你开通的账号继续。</p>
+          <div class="login-welcome"><span>欢迎登录</span><strong>沛警智枢</strong></div>
+          <p class="login-subtitle">沛 县 公 安 智 能 研 判 平 台</p>
+          <div class="login-account-tab">账号登录</div>
           <ErrorLine message={error() || props.initialError} />
           <Field label="账号">
-            <input
-              required
-              autocomplete="username"
-              value={username()}
-              onInput={(event) => setUsername(event.currentTarget.value)}
-              placeholder="请输入账号"
-            />
+            <div class="login-field-control">
+              <Icon name="users" size={20} />
+              <input required autocomplete="username" value={username()} onInput={(event) => setUsername(event.currentTarget.value)} placeholder="请输入警号/用户名" />
+            </div>
           </Field>
           <Field label="密码">
-            <input
-              required
-              type="password"
-              autocomplete="current-password"
-              value={password()}
-              onInput={(event) => setPassword(event.currentTarget.value)}
-              placeholder="请输入密码"
-            />
+            <div class="login-field-control">
+              <Icon name="lock" size={20} />
+              <input required type={showPassword() ? "text" : "password"} autocomplete="current-password" value={password()} onInput={(event) => setPassword(event.currentTarget.value)} placeholder="请输入密码" />
+              <button type="button" class="login-password-toggle" aria-label={showPassword() ? "隐藏密码" : "显示密码"} onClick={() => setShowPassword(!showPassword())}>
+                <Icon name={showPassword() ? "eye-off" : "eye"} size={19} />
+              </button>
+            </div>
           </Field>
+          <label class="login-remember">
+            <input type="checkbox" checked={remember()} onChange={(event) => setRemember(event.currentTarget.checked)} />
+            <span>记住我</span>
+          </label>
           <Button type="submit" variant="primary" busy={busy()} class="full">
-            登录 <Icon name="arrow" size={16} />
+            登 录
           </Button>
           <Show when={props.initialError}>
             <Button type="button" variant="ghost" onClick={props.onRetry}>
               重新连接
             </Button>
           </Show>
-          <small>账号或密码有问题，请联系管理员。</small>
+          <small>登录遇到问题，请联系系统管理员</small>
         </form>
-        <div class="login-foot">{props.platform.name} · 专属工作空间</div>
+        <div class="login-people-first">人民公安为人民</div>
+        <div class="login-foot">© 2026 沛县公安局　|　建议使用 Chrome / Edge 浏览器</div>
       </div>
-    </div>
-  )
-}
-function PasswordGate(props: { user: User; onDone: () => Promise<void> }) {
-  const [old, setOld] = createSignal("")
-  const [password, setPassword] = createSignal("")
-  const [confirm, setConfirm] = createSignal("")
-  const [busy, setBusy] = createSignal(false)
-  const [error, setError] = createSignal("")
-  async function save(event: SubmitEvent) {
-    event.preventDefault()
-    if (password() !== confirm()) {
-      setError("两次输入的新密码不一致。")
-      return
-    }
-    setBusy(true)
-    setError("")
-    try {
-      await post("/me/password", { current_password: old(), password: password() })
-      await props.onDone()
-    } catch (error) {
-      setError((error as Error).message)
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <div class="password-gate">
-      <form class="login-card" onSubmit={save}>
-        <span class="empty-icon">
-          <Icon name="lock" />
-        </span>
-        <h2>设置你的登录密码</h2>
-        <p>{props.user.username}，首次登录需要更换初始密码。</p>
-        <ErrorLine message={error()} />
-        <Field label="当前密码">
-          <input
-            type="password"
-            required
-            autocomplete="current-password"
-            value={old()}
-            onInput={(e) => setOld(e.currentTarget.value)}
-          />
-        </Field>
-        <Field label="新密码" hint="至少 12 个字符，建议组合使用字母、数字与符号。">
-          <input
-            type="password"
-            required
-            minlength={12}
-            autocomplete="new-password"
-            value={password()}
-            onInput={(e) => setPassword(e.currentTarget.value)}
-          />
-        </Field>
-        <Field label="确认新密码">
-          <input
-            type="password"
-            required
-            minlength={12}
-            autocomplete="new-password"
-            value={confirm()}
-            onInput={(e) => setConfirm(e.currentTarget.value)}
-          />
-        </Field>
-        <Button variant="primary" busy={busy()} type="submit" class="full">
-          保存并进入工作台
-        </Button>
-      </form>
     </div>
   )
 }

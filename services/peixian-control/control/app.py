@@ -73,8 +73,6 @@ def principal(request: Request):
         origin_ok(request)
         if not hmac.compare_digest(request.headers.get("x-csrf-token", ""), record["csrf"] or ""):
             fail("页面验证已过期，请刷新后重试", 403)
-    if record["must_change"] and request.url.path not in (PREFIX + "/me", PREFIX + "/me/password", PREFIX + "/auth/logout"):
-        fail("请先修改初始密码", 403)
     return record
 
 
@@ -389,11 +387,18 @@ def create_app(store=None):
         except (VerificationError, TypeError):
             valid = False
         if not valid:
+            with s.tx() as db:
+                db.execute("INSERT INTO login_events(id,uid,username,result,client,created) VALUES(?,?,?,?,?,?)",
+                           (ident(), user["id"] if user else None, str(data.get("username", ""))[:100], "failed", request.client.host if request.client else "", now()))
             fail("账号或密码不正确", 401)
         app.state.login_attempts.pop(key, None)
         token, csrf = secrets.token_urlsafe(48), secrets.token_urlsafe(32)
         with s.tx() as db:
             db.execute("INSERT INTO auth VALUES(?,?,?,?,?,?,?,?)", (digest(token), user["id"], "session", "browser", csrf, now() + 28800, user["auth_version"], now()))
+            db.execute("INSERT OR IGNORE INTO user_profiles(uid) VALUES(?)", (user["id"],))
+            db.execute("UPDATE user_profiles SET last_login_at=? WHERE uid=?", (now(), user["id"]))
+            db.execute("INSERT INTO login_events(id,uid,username,result,client,created) VALUES(?,?,?,?,?,?)",
+                       (ident(), user["id"], user["username"], "success", request.client.host if request.client else "", now()))
         from .roles import capabilities
         response = JSONResponse({"user": s.user(user["id"]), "csrf_token": csrf, "capabilities": capabilities(user["role"])})
         response.set_cookie("px_session", token, httponly=True, samesite="strict", secure=os.getenv("COOKIE_SECURE") == "true", max_age=28800, path="/")
@@ -496,6 +501,9 @@ def create_app(store=None):
             fail("请输入问题，且单次文字不超过 32000 个字符")
         skills = data.get("skill_ids", [])
         files = data.get("file_ids", [])
+        mode = request.headers.get("X-Analysis-Mode", "standard")
+        if mode not in ("standard", "deep_research"):
+            fail("研判模式不支持")
         if not isinstance(skills, list) or not isinstance(files, list) or len(skills) > 5 or len(files) > 5:
             fail("每次最多选择五个技能和五个文件")
         prelude = []
@@ -523,8 +531,16 @@ def create_app(store=None):
         if input_bytes > 18000:
             fail("文字、技能与文件合计超过当前模型引用预算，请缩短问题或拆分资料后重试", 413)
         parts = [{"type": "text", "text": value, "synthetic": True} for value in prelude] + [{"type": "text", "text": text}]
-        await upstream(request, user, "POST", f"/session/{sid}/prompt_async", json={"model": {"providerID": "peixian", "modelID": model["id"]}, "parts": parts})
-        return {"accepted": True, "run_id": ident()}
+        from .final_platform import create_run
+        run_id = create_run(s, user, sid, model["id"], text.strip(), mode, skills)
+        try:
+            await upstream(request, user, "POST", f"/session/{sid}/prompt_async", json={"model": {"providerID": "peixian", "modelID": model["id"]}, "parts": parts})
+        except Exception:
+            with s.tx() as db:
+                db.execute("UPDATE runs SET status='failed',completed=?,error='runtime_unavailable' WHERE id=?", (now(), run_id))
+                db.execute("UPDATE invocations SET status='failed',error='runtime_unavailable' WHERE run_id=?", (run_id,))
+            raise
+        return {"accepted": True, "run_id": run_id}
 
     @app.post(PREFIX + "/sessions/{sid}/abort")
     async def abort(sid: str, request: Request, user=Depends(normal)):
@@ -578,6 +594,8 @@ def create_app(store=None):
 
     register_catalog(app)
     register_admin(app)
+    from .final_platform import register_final_platform
+    register_final_platform(app)
     from .connections import register_connections
     register_connections(app)
     register_worker(app)

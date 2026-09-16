@@ -25,7 +25,6 @@ def context(tmp_path, monkeypatch):
         r = client.post(P + "/auth/login", json={"username": "admin", "password": PASSWORD})
         assert r.status_code == 200
         client.headers.update({"X-CSRF-Token": r.json()["csrf_token"], "Origin": "http://testserver"})
-        assert client.post(P + "/me/password", json={"current_password": PASSWORD, "password": PASSWORD + "-changed"}).status_code == 200
         yield store, app, client
 
 
@@ -41,7 +40,6 @@ def login_user(app, name):
     r = client.post(P + "/auth/login", json={"username": name, "password": PASSWORD})
     assert r.status_code == 200
     client.headers.update({"X-CSRF-Token": r.json()["csrf_token"], "Origin": "http://testserver"})
-    assert client.post(P + "/me/password", json={"current_password": PASSWORD, "password": PASSWORD + "-changed"}).status_code == 200
     return client
 
 
@@ -50,7 +48,7 @@ def test_initial_password_csrf_and_admin_boundary(context):
     create_user(admin)
     with TestClient(app) as c:
         r = c.post(P + "/auth/login", json={"username": "person-a", "password": PASSWORD})
-        assert c.get(P + "/models").status_code == 403
+        assert c.get(P + "/models").status_code == 200
         assert c.post(P + "/me/password", json={"current_password": PASSWORD, "password": PASSWORD + "-changed"}).status_code == 403
     c = login_user(app, "person-a")
     try:

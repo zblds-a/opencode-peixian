@@ -215,7 +215,7 @@ def test_super_can_disable_and_reset_admin_and_revoke_cookie_and_token(context, 
         assert bearer.get(P + "/me").status_code == 401
         response = superuser.post(P + "/admin/users/" + managed["id"] + "/reset-password", json={"password": PASSWORD})
         assert response.status_code == 200
-        assert s.user(managed["id"])["must_change_password"]
+        assert not s.user(managed["id"])["must_change_password"]
         assert s.rows("SELECT * FROM jobs WHERE uid=?", (managed["id"],)) == []
 
 

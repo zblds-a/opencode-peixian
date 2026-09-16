@@ -4,7 +4,7 @@ import re
 import jsonschema
 from fastapi import Depends, Request
 
-from .store import ident, encode
+from .store import ident, encode, now
 from .plugin_schema import redact, merge_secrets
 from .connections import resolved_bindings
 
@@ -19,7 +19,7 @@ def register_catalog(app):
             fail(str(exc), 409)
 
     def skill_data(data, old=None):
-        body_fields(data, ("name", "description", "content", "enabled"))
+        body_fields(data, ("name", "description", "content", "enabled", "source_type", "dependency_ids", "input_schema", "default_rules", "scope"))
         result = {**(old or {}), **data}
         if not isinstance(result.get("name"), str) or not re.fullmatch(r"[^/\\\r\n\x00]{1,60}", result["name"]):
             fail("技能名称应为 1 至 60 个字符，不能包含路径或换行")
@@ -31,7 +31,19 @@ def register_catalog(app):
 
     @app.get(PREFIX + "/skills")
     async def skills(request: Request, user=Depends(normal)):
-        return {"items": app.state.store.rows("SELECT id,name,description,content,enabled,version FROM skills WHERE uid=? ORDER BY name", (user["uid"],))}
+        items = app.state.store.rows(
+            "SELECT s.id,s.uid AS owner_id,s.name,s.description,s.content,s.enabled,s.version,"
+            "COALESCE(m.source_type,'manual') AS source_type,COALESCE(m.dependencies,'[]') AS dependencies,"
+            "COALESCE(m.input_schema,'{}') AS input_schema,COALESCE(m.default_rules,'[]') AS default_rules,"
+            "COALESCE(m.scope,'personal') AS scope,COALESCE(m.updated,0) AS updated_at "
+            "FROM skills s LEFT JOIN skill_metadata m ON m.skill_id=s.id WHERE s.uid=? ORDER BY s.name",
+            (user["uid"],),
+        )
+        for item in items:
+            item["dependency_ids"] = json.loads(item.pop("dependencies"))
+            item["input_schema"] = json.loads(item["input_schema"])
+            item["default_rules"] = json.loads(item["default_rules"])
+        return {"items": items}
 
     @app.post(PREFIX + "/skills")
     async def skill_create(request: Request, user=Depends(normal)):
@@ -41,7 +53,8 @@ def register_catalog(app):
         with s.tx() as db:
             if db.execute("SELECT 1 FROM skills WHERE uid=? AND name=?", (user["uid"], data["name"])).fetchone():
                 fail("你已有同名技能，请修改名称", 409)
-            db.execute("INSERT INTO skills VALUES(?,?,?,?,?,?,1,'[]')", (sid, user["uid"], data["name"], data["description"], data["content"], data["enabled"]))
+            db.execute("INSERT INTO skills(id,uid,name,description,content,enabled,version,history) VALUES(?,?,?,?,?,?,1,'[]')", (sid, user["uid"], data["name"], data["description"], data["content"], data["enabled"]))
+            db.execute("INSERT INTO skill_metadata VALUES(?,?,?,?,?,?,?)", (sid, str(data.get("source_type", "manual"))[:30], encode(data.get("dependency_ids", [])), encode(data.get("input_schema", {})), encode(data.get("default_rules", [])), "personal", now()))
         return {"id": sid, **data, "version": 1, "job": changed(user["uid"])}
 
     @app.patch(PREFIX + "/skills/{sid}")
@@ -57,6 +70,11 @@ def register_catalog(app):
             if db.execute("SELECT 1 FROM skills WHERE uid=? AND name=? AND id<>?", (user["uid"], data["name"], sid)).fetchone():
                 fail("你已有同名技能", 409)
             db.execute("UPDATE skills SET name=?,description=?,content=?,enabled=?,version=version+1,history=? WHERE id=? AND uid=?", (data["name"], data["description"], data["content"], data["enabled"], encode(history[-20:]), sid, user["uid"]))
+            db.execute(
+                "INSERT INTO skill_metadata(skill_id,source_type,dependencies,input_schema,default_rules,scope,updated) VALUES(?,?,?,?,?,?,?) "
+                "ON CONFLICT(skill_id) DO UPDATE SET source_type=excluded.source_type,dependencies=excluded.dependencies,input_schema=excluded.input_schema,default_rules=excluded.default_rules,updated=excluded.updated",
+                (sid, str(data.get("source_type", old.get("source_type", "manual")))[:30], encode(data.get("dependency_ids", [])), encode(data.get("input_schema", {})), encode(data.get("default_rules", [])), "personal", now()),
+            )
         return {"ok": True, "job": changed(user["uid"])}
 
     @app.delete(PREFIX + "/skills/{sid}")
