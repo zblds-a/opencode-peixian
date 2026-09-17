@@ -228,13 +228,13 @@ git status --short
 | CONF-05 | `POST /permissions/{id}/reply` | 授权/拒绝 | 现有可复用 | P1 |
 | MODEL-01 | `GET /admin/models` | 模型列表 | 补分页筛选字段 | P0 |
 | MODEL-02 | `POST /admin/models` | 新增模型 | 现有可复用 | P0 |
-| MODEL-03 | `PATCH /admin/models/{id}` | 编辑/启停/默认 | 现有可复用 | P0 |
+| MODEL-03 | `PATCH /admin/models/{id}` | 编辑、列表启用/关停、默认 | 现有可复用；状态按钮已接入 | P0 |
 | MODEL-04 | `POST /admin/models/{id}/test` | 已保存模型测试 | 现有可复用 | P0 |
 | MODEL-05 | `POST /admin/models/test` | 保存前测试 | 后端新增 | P0 |
 | USER-01 | `GET /admin/users` | 用户列表 | 补分页、组织属性 | P0 |
 | USER-02 | `POST /admin/users` | 新增用户 | 现有可复用 | P0 |
-| USER-03 | `PATCH /admin/users/{id}` | 编辑/启停 | 现有可复用 | P0 |
-| USER-04 | `POST /admin/users/{id}/reset-password` | 重置密码 | 现有可复用 | P1 |
+| USER-03 | `PATCH /admin/users/{id}` | 编辑、列表禁用 | 现有可复用；禁用按钮已接入 | P0 |
+| USER-04 | `POST /admin/users/{id}/reset-password` | 重置密码 | 现有可复用；按钮已接入 | P1 |
 | USER-05 | `GET /admin/users/summary` | 汇总 | 现有可复用 | P0 |
 | DEPT-01 | `GET /admin/departments/tree` | 部门列表 | 现有可复用 | P0 |
 | DEPT-02 | `POST /admin/departments` | 新增部门 | 现有可复用 | P0 |
@@ -887,6 +887,8 @@ POST /skill-drafts/from-session
 - `POST /admin/models/test`：保存前测试，不落库。
 - `POST /admin/models/{id}/test`：已保存模型测试。
 - 测试响应：`{ "ok": true, "message": "连接成功，模型 ID 已确认", "elapsed_ms": 320 }`。
+- 模型列表状态列固定展示“启用”和“关停”两个按钮：启用调用 `PATCH /admin/models/{id}` 并提交 `{ "enabled": true }`，关停提交 `{ "enabled": false }`。当前状态对应按钮置为选中且不可重复点击。
+- 模型列表操作列只展示“编辑、测试”，不再提供省略号或其他隐式菜单。
 - 同一时刻只能有一个默认且启用的模型。
 - 若后端没有本地模型执行能力，`access_mode=local` 返回 `unsupported_access_mode`，不能假成功。
 
@@ -949,6 +951,8 @@ POST /admin/users
 
 `POST /admin/users/{id}/reset-password` 请求 `{ "password": "可选指定密码" }`，生成密码同样只返回一次，不写日志。
 
+用户列表操作列只展示“编辑、重置密码、禁用”，不再提供省略号菜单。禁用调用 `PATCH /admin/users/{id}` 并提交 `{ "active": false }`；账号已禁用时“禁用”按钮不可重复点击。重新启用暂通过“编辑用户”弹窗完成，不在列表操作列增加第四个按钮。重置密码操作已经绑定正式路径；若后端返回自动生成密码，后续正式联调需以一次性安全弹窗展示，不能写入 Toast、控制台或持久状态。
+
 ### 14.3 部门
 
 当前前端虽使用 `/tree` 路径，实际期待扁平数组：
@@ -978,6 +982,8 @@ POST /admin/users
 
 `GET /admin/invocations` 查询：`page/page_size/query/start/end/uid/department_id/model_id/skill_id/status`。
 
+管理端列表固定展示八列：`时间、用户、部门、模型、问题、会话 ID、结果状态、操作`。因此列表响应中的 `created_at`（兼容现有 `created`）、`display_name/username`、`department_name`、`model_name`、`query_summary`、`session_id` 和 `status` 均为首屏必需字段；Skill 和插件不再占用列表列位，保留在详情接口中用于调用链追溯。
+
 ```json
 {
   "id": "inv_01",
@@ -999,6 +1005,8 @@ POST /admin/users
   "query_summary": "已脱敏的问题摘要"
 }
 ```
+
+`query_summary` 应是短且已脱敏的用户问题摘要，不能返回完整敏感原文；`session_id` 必须是可用于详情关联的真实会话 ID。问题过长时前端单行省略，完整摘要在详情中展示。
 
 详情增加 `steps`，字段与第 10.2 节一致。导出接口接受与列表完全相同的筛选条件，建议输出 UTF-8 BOM CSV。
 
@@ -1112,12 +1120,12 @@ VITE_ENABLE_DEMO_DATA=false
 
 ### 管理端
 
-- [ ] 模型分页、筛选、新增、编辑、测试、启停和默认切换正确。
+- [ ] 模型分页、筛选、新增、编辑、测试、默认切换正确；列表“启用/关停”按钮状态和接口结果一致。
 - [ ] API Key 不回显，保存前测试不落库。
-- [ ] 用户分页筛选、组织属性、启停、重置密码和一次性密码正确。
+- [ ] 用户分页筛选、组织属性、编辑、禁用、重置密码和一次性密码正确；列表只保留三个指定操作。
 - [ ] 职务与系统权限分离。
 - [ ] 非空部门删除返回 409。
-- [ ] 调用审计列表、详情和导出筛选一致，Skill/插件显示名称而不是裸 ID。
+- [ ] 调用审计按“时间、用户、部门、模型、问题、会话 ID、结果状态、操作”八列展示；列表、详情和导出筛选一致。
 - [ ] 审计和错误响应不泄漏敏感数据。
 
 ## 21. 后端交付物

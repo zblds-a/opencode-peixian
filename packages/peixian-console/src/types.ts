@@ -184,7 +184,9 @@ export type Department = { id: string; name: string; parent_id?: string; code?: 
 export type Invocation = {
   id: string
   run_id: string
-  created: number
+  session_id?: string
+  created?: number
+  created_at?: string | number
   username?: string
   display_name?: string
   department_name?: string

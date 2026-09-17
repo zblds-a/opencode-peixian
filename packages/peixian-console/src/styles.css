@@ -4508,13 +4508,51 @@ tr:hover td {
   border-color: #d6e3f1;
   font-size: 11px;
 }
-.square-more {
-  width: 34px;
-  height: 32px;
-  border: 1px solid #d6e3f1;
-  border-radius: 6px;
-  color: #2764aa;
-  background: #fff;
+.status-actions {
+  display: inline-flex;
+  gap: 5px;
+  padding: 3px;
+  border: 1px solid #d8e5f3;
+  border-radius: 7px;
+  background: #f5f9fe;
+}
+.status-actions .button {
+  min-height: 29px;
+  padding: 0 11px;
+  border-color: transparent;
+  background: transparent;
+  font-size: 11px;
+}
+.status-actions .button.selected,
+.status-actions .button.selected:disabled {
+  color: #087348;
+  border-color: #b9ead4;
+  background: #def8eb;
+  opacity: 1;
+}
+.status-actions .button.danger-selected,
+.status-actions .button.danger-selected:disabled {
+  color: #c14343;
+  border-color: #f0c9c9;
+  background: #fff0f0;
+}
+.audit-question {
+  display: block;
+  max-width: 260px;
+  overflow: hidden;
+  color: #264d7c;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-id {
+  display: inline-block;
+  max-width: 150px;
+  overflow: hidden;
+  color: #41658e;
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  vertical-align: middle;
 }
 .prototype-pagination {
   display: flex;
