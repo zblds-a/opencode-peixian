@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://peixian.local/schemas/analysis-result-1.0.json",
+  "title": "Peixian structured analysis result",
+  "type": "object",
+  "required": ["schema", "version", "process", "subjects", "conclusions", "evidence", "clues"],
+  "properties": {
+    "schema": { "const": "peixian.analysis-result" },
+    "version": { "const": "1.0" },
+    "run_id": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "intro": { "type": "string", "maxLength": 1000 },
+    "process": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "status"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string", "maxLength": 100 },
+          "detail": { "type": "string", "maxLength": 500 },
+          "time": { "type": "string" },
+          "status": { "enum": ["pending", "running", "completed", "failed"] }
+        },
+        "additionalProperties": true
+      }
+    },
+    "subjects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "fields"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string", "maxLength": 100 },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["label", "value"],
+              "properties": {
+                "label": { "type": "string", "maxLength": 50 },
+                "value": { "type": "string", "maxLength": 500 }
+              },
+              "additionalProperties": false
+            }
+          },
+          "tags": { "type": "array", "items": { "type": "string", "maxLength": 50 } }
+        },
+        "additionalProperties": true
+      }
+    },
+    "conclusions": { "type": "array", "items": { "type": "string", "maxLength": 1000 } },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "title"],
+        "properties": {
+          "type": { "type": "string" },
+          "title": { "type": "string", "maxLength": 100 },
+          "value": { "type": ["string", "number"] },
+          "unit": { "type": "string", "maxLength": 20 },
+          "summary": { "type": "string", "maxLength": 500 },
+          "items": { "type": "array", "items": { "type": "string", "maxLength": 500 } }
+        },
+        "additionalProperties": true
+      }
+    },
+    "next_steps": { "type": "string", "maxLength": 3000 },
+    "clues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "title", "headline", "summary", "discoveries", "evidence"],
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "type": "string" },
+          "title": { "type": "string", "maxLength": 100 },
+          "headline": { "type": "string", "maxLength": 200 },
+          "summary": { "type": "string", "maxLength": 1000 },
+          "time": { "type": "string" },
+          "level": { "type": "string", "maxLength": 30 },
+          "source": { "type": "string", "maxLength": 100 },
+          "discoveries": { "type": "array", "items": { "type": "string", "maxLength": 500 } },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["type", "label", "content"],
+              "properties": {
+                "type": { "type": "string" },
+                "label": { "type": "string", "maxLength": 100 },
+                "content": { "type": "string", "maxLength": 1000 }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

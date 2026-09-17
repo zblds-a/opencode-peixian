@@ -374,6 +374,8 @@ data: {"type":"run.updated","session_id":"sid","run_id":"rid","updated_at":17895
 - 身份证、电话、地址等字段按项目脱敏规则处理。
 - 不返回模型内部思维过程、插件密钥、内部 URL 或文件路径。
 
+结构化研判结果使用独立消息 Part：`type=analysis_result`，其 `data.schema` 固定为 `peixian.analysis-result`，当前版本为 `1.0`。完整字段、示例和演进规则见 `specs/peixian-structured-analysis-contract.md`，机器可读 Schema 见 `specs/contracts/analysis-result.schema.json`。普通 `type=text` 消息仍按 Markdown 渲染。
+
 ### 7.4 `POST /sessions/{sid}/messages`
 
 当前前端实际发送：

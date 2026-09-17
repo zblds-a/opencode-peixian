@@ -3,7 +3,8 @@ import { api, list, patch, post, remove, safeMessage } from "../api"
 import { Button, Empty, ErrorLine, Field, Icon, Markdown, Modal, Spinner, Status } from "../components"
 import { useConsole } from "../context"
 import BusinessConfirmations from "../BusinessConfirmations"
-import type { CapabilityItem, Evidence, FileItem, Message, Model, RunEvent, Session, Skill, SkillDraft } from "../types"
+import { AnalysisResultView, ClueDrawer, CluePanel, mockAnalysisResult, parseAnalysisResult } from "../StructuredAnalysis"
+import type { AnalysisClue, CapabilityItem, Evidence, FileItem, Message, Model, RunEvent, Session, Skill, SkillDraft } from "../types"
 
 const mockModels: Model[] = [
   { id: "mock-qwen3-32b", name: "Qwen3-32B", model_id: "qwen3-32b", enabled: true, is_default: true },
@@ -25,6 +26,16 @@ const mockCapabilities: CapabilityItem[] = [
   { id: "mock-track-plugin", kind: "plugin", name: "轨迹查询", description: "查询人员轨迹及活动记录", version: "1.5", category: "数据查询", recommended: false, enabled: true, owned: false, scope: "official" },
   { id: "mock-companion-plugin", kind: "plugin", name: "同行人员查询", description: "统计同行人员及共同出现次数", version: "1.2", category: "数据查询", recommended: false, enabled: true, owned: false, scope: "official" },
   { id: "mock-place-plugin", kind: "plugin", name: "场所信息查询", description: "查询场所基本信息及周边情况", version: "1.0", category: "数据查询", recommended: false, enabled: true, owned: false, scope: "official" },
+]
+const mockAnalysisMessages: Message[] = [
+  {
+    info: { id: "mock-question-night", role: "user", time: { created: 1770000000 } },
+    parts: [{ type: "text", text: "请分析张某最近30天的夜间活动情况，以及与其共同出现的人员有哪些？" }],
+  },
+  {
+    info: { id: "mock-result-night", role: "assistant", time: { created: 1770000001, completed: 1770000030 } },
+    parts: [{ id: "mock-analysis-result", type: "analysis_result", data: mockAnalysisResult }],
+  },
 ]
 export default function Chat() {
   const app = useConsole()
@@ -55,6 +66,7 @@ export default function Chat() {
   const [latestRun, setLatestRun] = createSignal<string>()
   const [runEvents, setRunEvents] = createSignal<RunEvent[]>([])
   const [evidence, setEvidence] = createSignal<Evidence>()
+  const [selectedClue, setSelectedClue] = createSignal<AnalysisClue>()
   const [showHistory, setShowHistory] = createSignal(false)
   const [rename, setRename] = createSignal<Session>()
   const [title, setTitle] = createSignal("")
@@ -71,6 +83,11 @@ export default function Chat() {
     const query = slashQuery()
     if (query === undefined) return []
     return shownCapabilities().filter((item) => !query || `${item.name}${item.description ?? ""}`.toLowerCase().includes(query)).slice(0, 7)
+  })
+  const latestAnalysis = createMemo(() => messages().slice().reverse().find((message) => message.info.role === "assistant")?.parts.map(parseAnalysisResult).find((item) => item !== undefined))
+  createEffect(() => {
+    const clue = selectedClue()
+    if (clue && !latestAnalysis()?.clues.some((item) => item.id === clue.id)) setSelectedClue(undefined)
   })
   const ready = createMemo(() => ["ready", "running", "healthy"].includes(app.user().runtime?.status ?? ""))
   const available = createMemo(() => ready() || ["updating", "applying"].includes(app.user().runtime?.status ?? ""))
@@ -158,9 +175,11 @@ export default function Chat() {
     selectionRevision++
     setSelected(id)
     setMessages([])
+    setSelectedClue(undefined)
     setError("")
     setShowHistory(false)
     if (id.startsWith("mock-")) {
+      setMessages(id === "mock-night" ? mockAnalysisMessages : [{ info: { id: "mock-plain-" + id, role: "assistant" }, parts: [{ type: "text", text: "这是一条普通对话回复示例。后端返回 Markdown 文本时，页面会按常规消息正常渲染。" }] }])
       setBusy(false)
       return
     }
@@ -175,6 +194,7 @@ export default function Chat() {
     selectionRevision++
     setSelected(undefined)
     setMessages([])
+    setSelectedClue(undefined)
     setDraft("")
     setSelectedFiles([])
     setSelectedSkills([])
@@ -509,10 +529,14 @@ export default function Chat() {
                     <div class="message-content">
                       <div class="message-author">{message.info.role === "user" ? "你" : "智能助手"}</div>
                       <For each={message.parts}>
-                        {(part) => (
+                        {(part) => {
+                          const structured = parseAnalysisResult(part)
+                          return (
                           <>
-                            <Show when={part.type === "text" && part.text}>
+                            <Show when={structured} fallback={<Show when={part.type === "text" && part.text}>
                               <Markdown text={part.text ?? ""} />
+                            </Show>}>
+                              {(result) => <AnalysisResultView result={result()} />}
                             </Show>
                             <Show when={part.type === "tool"}>
                               <details
@@ -565,7 +589,8 @@ export default function Chat() {
                               </details>
                             </Show>
                           </>
-                        )}
+                          )
+                        }}
                       </For>
                       <Show when={message.info.error}>
                         <ErrorLine
@@ -690,14 +715,17 @@ export default function Chat() {
           </div>
         </div>
       </section>
-      <aside class="related-capabilities">
+      <Show when={latestAnalysis()?.clues.length} fallback={<aside class="related-capabilities">
         <div class="related-capabilities-head"><div><strong>相关插件技能</strong><small>当前账号全部可用能力</small></div><span>{shownCapabilities().length}</span></div>
         <div class="related-capabilities-list">
           <For each={shownCapabilities()}>
             {(item, index) => <button class={(item.kind === "skill" ? selectedSkills() : selectedPlugins()).includes(item.id) ? "selected" : ""} onClick={() => toggleCapability(item)}><span class={"capability-icon tone-" + (index() % 5)}><Icon name={item.kind === "skill" ? "skill" : "plugin"} size={18} /></span><span><strong>{item.name}<em>v{item.version}</em></strong><small>{item.description}</small><i>{item.kind === "skill" ? (item.owned ? "个人 Skill" : "官方 Skill") : "插件工具"}</i></span><b>{(item.kind === "skill" ? selectedSkills() : selectedPlugins()).includes(item.id) ? "已选" : "使用"}</b></button>}
           </For>
         </div>
-      </aside>
+      </aside>}>
+        <CluePanel clues={latestAnalysis()?.clues ?? []} onSelect={setSelectedClue} />
+      </Show>
+      <Show when={selectedClue()}>{(clue) => <ClueDrawer clue={clue()} onClose={() => setSelectedClue(undefined)} />}</Show>
       <Show when={picker()}>
         {(type) => (
           <Modal

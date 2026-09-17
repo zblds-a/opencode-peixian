@@ -34,6 +34,7 @@ export type Part = {
   id?: string
   type: string
   text?: string
+  data?: Json | AnalysisResult
   tool?: string
   details?: { inputs?: Record<string, string | number | boolean>; outputs?: Record<string, string | number | boolean> }
   state?: { status?: string; title?: string; output?: string; error?: string }
@@ -88,6 +89,53 @@ export type Skill = {
   default_rules?: string[]
   scope?: "personal" | "department" | "public"
   updated_at?: number
+}
+
+export type AnalysisStep = {
+  id: string
+  title: string
+  detail?: string
+  time?: string
+  status: "pending" | "running" | "completed" | "failed"
+}
+export type SubjectProfile = {
+  id: string
+  name: string
+  fields: { label: string; value: string }[]
+  tags?: string[]
+}
+export type AnalysisEvidenceCard = {
+  type: "trajectory" | "companion" | "vehicle" | "place" | string
+  title: string
+  value?: string | number
+  unit?: string
+  summary?: string
+  items?: string[]
+}
+export type AnalysisClue = {
+  id: string
+  type: "person" | "vehicle" | "place" | "trajectory" | string
+  title: string
+  headline: string
+  summary: string
+  time?: string
+  level?: string
+  source?: string
+  discoveries: string[]
+  evidence: { type: string; label: string; content: string }[]
+}
+export type AnalysisResult = {
+  schema: "peixian.analysis-result"
+  version: "1.0"
+  run_id?: string
+  generated_at?: string
+  intro?: string
+  process: AnalysisStep[]
+  subjects: SubjectProfile[]
+  conclusions: string[]
+  evidence: AnalysisEvidenceCard[]
+  next_steps?: string
+  clues: AnalysisClue[]
 }
 export type CapabilityItem = {
   id: string

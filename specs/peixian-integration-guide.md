@@ -4,6 +4,8 @@
 
 本文供原项目开发人员执行代码评审、分支合并、本地启动、接口替换和联合验收。接口字段以 `peixian-api-contract.md` 和 `services/peixian-control/docs/openapi.json` 为准；需求目标以 `peixian-backend-requirements.md` 为准。
 
+结构化研判消息和智能发现线索的前后端基线见 `peixian-structured-analysis-contract.md`，机器可读约束见 `contracts/analysis-result.schema.json`。
+
 ## 2. 推荐合并方式
 
 ```bash
