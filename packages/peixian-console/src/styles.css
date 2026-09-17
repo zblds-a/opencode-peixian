@@ -4733,3 +4733,126 @@ tr:hover td {
     overflow: auto;
   }
 }
+
+/* Readability pass: enlarge content typography without changing brand or primary side navigation. */
+.business-top-motto small,
+.admin-top-motto small { font-size: 12px; }
+.business-profile strong,
+.admin-profile strong { font-size: 15px; }
+.business-profile small,
+.admin-profile small { font-size: 12px; }
+.business-location { font-size: 14px; }
+
+.business-shell .history-head strong { font-size: 16px; }
+.business-shell .new-chat,
+.business-shell .history-panel .search-box input,
+.business-shell .history-item > button { font-size: 14px; }
+.business-shell .history-foot,
+.business-shell .quiet { font-size: 12px; }
+.business-shell .conversation-head h2 { font-size: 17px; }
+.business-shell .model-choice select,
+.business-shell .distill-skill { font-size: 13px; }
+.business-shell .runtime-banner { font-size: 13px; }
+.business-shell .message-author { font-size: 13px; }
+.business-shell .markdown { font-size: 15px; line-height: 1.85; }
+.business-shell .tool-detail,
+.business-shell .business-detail > strong,
+.business-shell .business-detail dt,
+.business-shell .business-detail dd { font-size: 13px; }
+.business-shell .thinking { font-size: 14px; }
+.business-shell .thinking button { font-size: 13px; }
+.business-shell .composer textarea { font-size: 15px; }
+.business-shell .composer-tools > div button,
+.business-shell .composer-tools > .button { font-size: 13px; }
+.business-shell .composer-hint { font-size: 12px; }
+.business-shell .selection-chips button { font-size: 13px; }
+
+.related-capabilities-head strong { font-size: 16px; }
+.related-capabilities-head small { font-size: 11px; }
+.related-capabilities-head > span { font-size: 12px; }
+.related-capabilities-list strong { font-size: 13px; }
+.related-capabilities-list strong em { font-size: 10px; }
+.related-capabilities-list small { font-size: 11px; }
+.related-capabilities-list i { font-size: 10px; }
+.related-capabilities-list b { font-size: 11px; }
+.slash-command-head { font-size: 12px; }
+.slash-command-menu strong { font-size: 13px; }
+.slash-command-menu small,
+.slash-command-menu em { font-size: 11px; }
+
+.analysis-intro { font-size: 15px; }
+.analysis-section > h3,
+.analysis-next > h3 { font-size: 15px; }
+.analysis-step { min-height: 40px; font-size: 12px; }
+.analysis-step strong { font-size: 13px; }
+.analysis-step .step-state { font-size: 12px; }
+.subject-name strong { font-size: 14px; }
+.subject-fields p { font-size: 12px; line-height: 1.65; }
+.subject-tags span { font-size: 11px; }
+.analysis-conclusions ul { font-size: 13px; }
+.analysis-evidence-title { font-size: 12px; }
+.analysis-evidence-card > strong small { font-size: 12px; }
+.analysis-evidence-card > p,
+.analysis-evidence-note { font-size: 11px; }
+.analysis-next > p { font-size: 13px; }
+.clue-panel-head strong { font-size: 17px; }
+.clue-panel-head small { font-size: 11px; }
+.clue-card-head strong { font-size: 13px; }
+.clue-card-head time { font-size: 11px; }
+.clue-card h4 { font-size: 14px; }
+.clue-card p { font-size: 12px; }
+.clue-card > button { font-size: 11px; }
+.clue-drawer > header h2 { font-size: 19px; }
+.clue-drawer-scroll > section > h3 { font-size: 15px; }
+.clue-drawer-scroll > section > p,
+.clue-drawer-scroll > section > ul { font-size: 13px; }
+.clue-name-card small { font-size: 12px; }
+.clue-name-card h3 { font-size: 19px; }
+.clue-meta { font-size: 12px; }
+.clue-evidence-list strong { font-size: 12px; }
+.clue-evidence-list p { font-size: 12px; }
+
+.business-shell .modal,
+.business-shell .modal input,
+.business-shell .modal textarea,
+.business-shell .modal select,
+.business-shell .modal button { font-size: 15px; }
+.business-shell .modal-head p,
+.business-shell .field small,
+.business-shell .pick-row small { font-size: 12px; }
+
+.admin-page-title p { font-size: 16px; }
+.admin-page-hero > .button,
+.admin-list-toolbar > .button { font-size: 16px; }
+.admin-shell .prototype-filter-bar input,
+.admin-shell .prototype-filter-bar select,
+.admin-shell .prototype-filter-bar .button { font-size: 14px; }
+.prototype-table th,
+.prototype-table td { font-size: 14px; }
+.prototype-table th { height: 52px; }
+.prototype-table td { height: 62px; }
+.model-cell strong { font-size: 14px; }
+.model-cell small { font-size: 12px; }
+.provider-tag,
+.access-tag,
+.default-tag,
+.role-tag { font-size: 12px; }
+.row-actions .button { font-size: 12px; }
+.prototype-pagination { font-size: 14px; }
+.admin-summary-cards small { font-size: 14px; }
+.admin-summary-cards em { font-size: 12px; }
+.subsection-tabs button { font-size: 14px; }
+.officer-avatar { font-size: 12px; }
+.officer-cell strong { font-size: 14px; }
+.connection-result { font-size: 12px; }
+.model-options-grid > div > strong,
+.switch-option strong { font-size: 14px; }
+.radio-cards label { font-size: 13px; }
+.switch-option small { font-size: 11px; }
+.admin-shell .modal,
+.admin-shell .modal input,
+.admin-shell .modal textarea,
+.admin-shell .modal select,
+.admin-shell .modal button { font-size: 15px; }
+.admin-shell .modal-head p,
+.admin-shell .field small { font-size: 12px; }
