@@ -170,6 +170,7 @@ python -m pytest -q
 
 - `specs/peixian-change-summary.md`：实际改动和合并注意事项。
 - `specs/peixian-api-contract.md`：当前代码可用接口契约。
+- `specs/peixian-frontend-api-requirements.md`：当前终版前端实际调用、待绑定动作、字段需求和接口缺口。
 - `specs/peixian-integration-guide.md`：合并、启动和联调步骤。
 - `specs/peixian-backend-requirements.md`：正式后端建设目标。
 - `specs/peixian-api-gap-register.md`：接口状态台账。
