@@ -1,0 +1,26 @@
+{
+  "model_test": {
+    "endpoint": "POST /admin/models/{id}/test",
+    "response": { "ok": true, "message": "演示模型连接测试通过。" }
+  },
+  "model_enable": {
+    "endpoint": "PATCH /admin/models/{id}",
+    "request": { "enabled": true },
+    "response": { "ok": true }
+  },
+  "model_disable": {
+    "endpoint": "PATCH /admin/models/{id}",
+    "request": { "enabled": false },
+    "response": { "ok": true }
+  },
+  "user_disable": {
+    "endpoint": "PATCH /admin/users/{id}",
+    "request": { "active": false },
+    "response": { "ok": true }
+  },
+  "user_reset_password": {
+    "endpoint": "POST /admin/users/{id}/reset-password",
+    "request": {},
+    "response": { "ok": true, "password": "仅为结构示例，实际 Mock 服务应运行时生成且不得写入日志" }
+  }
+}

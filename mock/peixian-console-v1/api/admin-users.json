@@ -1,0 +1,17 @@
+{
+  "items": [
+    { "id": "mock-user-0", "username": "320722001", "display_name": "张三", "police_no": "320722001", "department_id": "dept-xj", "department": { "id": "dept-xj", "name": "刑警大队" }, "position": "民警", "system_role": "user", "role": "user", "active": true, "must_change_password": false, "last_login_at": 1726122720 },
+    { "id": "mock-user-1", "username": "320722002", "display_name": "李四", "police_no": "320722002", "department_id": "dept-cg", "department": { "id": "dept-cg", "name": "城关派出所" }, "position": "民警", "system_role": "user", "role": "user", "active": true, "must_change_password": false, "last_login_at": 1726017480 },
+    { "id": "mock-user-2", "username": "320722003", "display_name": "王五", "police_no": "320722003", "department_id": "dept-dt", "department": { "id": "dept-dt", "name": "大屯派出所" }, "position": "民警", "system_role": "user", "role": "user", "active": true, "must_change_password": false, "last_login_at": 1725956820 },
+    { "id": "mock-user-3", "username": "320722004", "display_name": "赵六", "police_no": "320722004", "department_id": "dept-za", "department": { "id": "dept-za", "name": "治安大队" }, "position": "中队长", "system_role": "user", "role": "user", "active": true, "must_change_password": false, "last_login_at": 1726110360 },
+    { "id": "mock-user-4", "username": "320722005", "display_name": "钱七", "police_no": "320722005", "department_id": "dept-jg", "department": { "id": "dept-jg", "name": "交警大队" }, "position": "民警", "system_role": "user", "role": "user", "active": false, "must_change_password": false, "last_login_at": 1724811840 },
+    { "id": "mock-user-5", "username": "320722006", "display_name": "孙八", "police_no": "320722006", "department_id": "dept-zh", "department": { "id": "dept-zh", "name": "指挥中心" }, "position": "科员", "system_role": "user", "role": "user", "active": true, "must_change_password": false, "last_login_at": 1726057080 },
+    { "id": "mock-user-6", "username": "320722007", "display_name": "周九", "police_no": "320722007", "department_id": "dept-wa", "department": { "id": "dept-wa", "name": "网安大队" }, "position": "民警", "system_role": "user", "role": "user", "active": true, "must_change_password": false, "last_login_at": 1726106160 },
+    { "id": "mock-user-7", "username": "320722008", "display_name": "吴十", "police_no": "320722008", "department_id": "dept-xj", "department": { "id": "dept-xj", "name": "刑警大队" }, "position": "民警", "system_role": "user", "role": "user", "active": true, "must_change_password": false, "last_login_at": 1726039200 },
+    { "id": "mock-user-8", "username": "320722009", "display_name": "郑十一", "police_no": "320722009", "department_id": "dept-xj", "department": { "id": "dept-xj", "name": "刑警大队" }, "position": "副大队长", "system_role": "user", "role": "user", "active": true, "must_change_password": false, "last_login_at": 1725947040 },
+    { "id": "mock-user-9", "username": "320722010", "display_name": "陈十二", "police_no": "320722010", "department_id": "dept-cg", "department": { "id": "dept-cg", "name": "城关派出所" }, "position": "民警", "system_role": "user", "role": "user", "active": true, "must_change_password": false, "last_login_at": 1725881580 }
+  ],
+  "total": 10,
+  "page": 1,
+  "page_size": 10
+}

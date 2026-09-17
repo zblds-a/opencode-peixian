@@ -1,0 +1,13 @@
+{
+  "items": [
+    { "id": "mock-night", "title": "张某夜间活动研判", "status": "idle" },
+    { "id": "mock-group", "title": "涉案团伙关系分析", "status": "idle" },
+    { "id": "mock-car", "title": "车辆轨迹研判", "status": "idle" },
+    { "id": "mock-funds", "title": "李某资金流水分析", "status": "idle" },
+    { "id": "mock-focus", "title": "重点人员布控建议", "status": "idle" },
+    { "id": "mock-fraud", "title": "电信诈骗线索核查", "status": "idle" }
+  ],
+  "total": 6,
+  "page": 1,
+  "page_size": 10
+}

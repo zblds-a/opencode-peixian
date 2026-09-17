@@ -1053,6 +1053,8 @@ POST /admin/users
 
 当前为视觉验收准备了模型、历史会话、能力、用户、部门、审计及结构化研判示例数据。它们不是接口已完成的证明。
 
+完整 Mock 数据包位于 `mock/peixian-console-v1/`，压缩包为 `mock/peixian-console-mock-data-v1.zip`。包内包含逐接口 JSON、结构化消息 Schema、无依赖本地 Mock 服务和详细 `README.md`；后端可直接加载 Fixture，前端可在本机 `14090` 端口启动该服务联调。数据包仅含合成数据，不含真实账号密码或密钥。
+
 正式联调建议环境变量：
 
 ```text

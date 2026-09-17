@@ -1,0 +1,19 @@
+{
+  "items": [
+    {
+      "info": {
+        "id": "mock-plain-message",
+        "role": "assistant",
+        "time": { "created": 1770000000, "completed": 1770000001 },
+        "finish": "stop"
+      },
+      "parts": [
+        {
+          "id": "mock-plain-part",
+          "type": "text",
+          "text": "这是一条普通对话回复示例。后端返回 Markdown 文本时，页面会按常规消息正常渲染。"
+        }
+      ]
+    }
+  ]
+}

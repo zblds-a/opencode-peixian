@@ -1,0 +1,14 @@
+{
+  "items": [
+    { "id": "dept-xj", "name": "刑警大队", "code": "32032201", "parent_id": null, "sort_order": 1 },
+    { "id": "dept-cg", "name": "城关派出所", "code": "32032202", "parent_id": null, "sort_order": 2 },
+    { "id": "dept-dt", "name": "大屯派出所", "code": "32032203", "parent_id": null, "sort_order": 3 },
+    { "id": "dept-za", "name": "治安大队", "code": "32032204", "parent_id": null, "sort_order": 4 },
+    { "id": "dept-jg", "name": "交警大队", "code": "32032205", "parent_id": null, "sort_order": 5 },
+    { "id": "dept-zh", "name": "指挥中心", "code": "32032206", "parent_id": null, "sort_order": 6 },
+    { "id": "dept-wa", "name": "网安大队", "code": "32032207", "parent_id": null, "sort_order": 7 }
+  ],
+  "total": 7,
+  "page": 1,
+  "page_size": 20
+}

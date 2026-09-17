@@ -1,0 +1,30 @@
+{
+  "package": "peixian-console-mock-data",
+  "version": "1.0.0",
+  "branch": "peixian-ui-final",
+  "source_commit": "b7cf3e2aa",
+  "api_base": "/api/console/v1",
+  "generated_for": "frontend visual review and backend contract alignment",
+  "contains_real_credentials": false,
+  "fixtures": [
+    { "file": "api/platform.json", "endpoint": "GET /platform", "kind": "standalone-mock-server-support" },
+    { "file": "api/auth-user.json", "endpoint": "POST /auth/login and GET /me", "kind": "standalone-mock-server-support" },
+    { "file": "api/auth-admin.json", "endpoint": "POST /auth/login and GET /me", "kind": "standalone-mock-server-support" },
+    { "file": "api/models.json", "endpoint": "GET /models", "kind": "current-ui-fallback", "items": 1 },
+    { "file": "api/sessions.json", "endpoint": "GET /sessions", "kind": "current-ui-fallback", "items": 6 },
+    { "file": "api/capabilities.json", "endpoint": "GET /capabilities", "kind": "current-ui-fallback", "items": 8 },
+    { "file": "api/messages-structured.json", "endpoint": "GET /sessions/mock-night/messages", "kind": "current-ui-fallback", "items": 2 },
+    { "file": "api/messages-markdown.json", "endpoint": "GET /sessions/{other-mock-id}/messages", "kind": "current-ui-fallback", "items": 1 },
+    { "file": "api/files-empty.json", "endpoint": "GET /files", "kind": "explicit-empty-example", "items": 0 },
+    { "file": "api/skills-empty.json", "endpoint": "GET /skills", "kind": "explicit-empty-example", "items": 0 },
+    { "file": "api/admin-models.json", "endpoint": "GET /admin/models", "kind": "current-ui-fallback", "items": 6 },
+    { "file": "api/admin-departments-tree.json", "endpoint": "GET /admin/departments/tree", "kind": "current-ui-fallback", "items": 7 },
+    { "file": "api/admin-users.json", "endpoint": "GET /admin/users", "kind": "current-ui-fallback", "items": 10 },
+    { "file": "api/admin-users-summary.json", "endpoint": "GET /admin/users/summary", "kind": "current-ui-fallback" },
+    { "file": "api/admin-invocations.json", "endpoint": "GET /admin/invocations", "kind": "current-ui-fallback", "items": 10 },
+    { "file": "api/run-events.json", "endpoint": "GET /sessions/{sid}/runs/{run_id}/events", "kind": "contract-complete-example", "items": 5 },
+    { "file": "api/run-evidence.json", "endpoint": "GET /sessions/{sid}/runs/{run_id}/evidence", "kind": "current-backend-fallback" },
+    { "file": "api/operation-responses.json", "endpoint": "multiple write endpoints", "kind": "ui-simulation-reference" },
+    { "file": "schemas/analysis-result.schema.json", "endpoint": "analysis_result message part", "kind": "contract-schema" }
+  ]
+}

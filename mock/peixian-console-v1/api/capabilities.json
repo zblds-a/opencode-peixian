@@ -1,0 +1,15 @@
+{
+  "items": [
+    { "id": "mock-night-skill", "kind": "skill", "name": "人员夜间活动分析", "description": "分析人员夜间活动规律、高频地点及同行人员", "version": "1.3", "category": "人员研判", "recommended": true, "enabled": true, "owned": false, "scope": "official" },
+    { "id": "mock-person-skill", "kind": "skill", "name": "涉案人员综合分析", "description": "对涉案人员进行多维度综合研判", "version": "2.1", "category": "综合研判", "recommended": true, "enabled": true, "owned": false, "scope": "official" },
+    { "id": "mock-relation-skill", "kind": "skill", "name": "人员关系网络分析", "description": "构建人员关系图谱并识别关键节点", "version": "1.5", "category": "关系研判", "recommended": false, "enabled": true, "owned": true, "scope": "personal" },
+    { "id": "mock-track-skill", "kind": "skill", "name": "车辆轨迹分析", "description": "分析车辆活动轨迹及关联人员", "version": "1.8", "category": "车辆研判", "recommended": false, "enabled": true, "owned": false, "scope": "official" },
+    { "id": "mock-person-plugin", "kind": "plugin", "name": "人员信息查询", "description": "查询人员基础信息及关联数据", "version": "2.0", "category": "数据查询", "recommended": false, "enabled": true, "owned": false, "scope": "official" },
+    { "id": "mock-track-plugin", "kind": "plugin", "name": "轨迹查询", "description": "查询人员轨迹及活动记录", "version": "1.5", "category": "数据查询", "recommended": false, "enabled": true, "owned": false, "scope": "official" },
+    { "id": "mock-companion-plugin", "kind": "plugin", "name": "同行人员查询", "description": "统计同行人员及共同出现次数", "version": "1.2", "category": "数据查询", "recommended": false, "enabled": true, "owned": false, "scope": "official" },
+    { "id": "mock-place-plugin", "kind": "plugin", "name": "场所信息查询", "description": "查询场所基本信息及周边情况", "version": "1.0", "category": "数据查询", "recommended": false, "enabled": true, "owned": false, "scope": "official" }
+  ],
+  "total": 8,
+  "page": 1,
+  "page_size": 20
+}

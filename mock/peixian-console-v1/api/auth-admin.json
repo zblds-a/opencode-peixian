@@ -1,0 +1,19 @@
+{
+  "user": {
+    "id": "mock-current-admin",
+    "username": "admin",
+    "role": "super_admin",
+    "system_role": "super_admin",
+    "active": true,
+    "must_change_password": false,
+    "display_name": "张警官",
+    "police_no": "320722000",
+    "department_id": "dept-xj",
+    "department": { "id": "dept-xj", "name": "刑警大队", "code": "32032201" },
+    "position": "系统管理员",
+    "last_login_at": 1726122720,
+    "runtime": null
+  },
+  "csrf_token": "mock-csrf-token",
+  "capabilities": ["models.manage", "users.manage", "admins.manage", "audit.read"]
+}

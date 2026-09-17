@@ -1,0 +1,9 @@
+{
+  "items": [
+    { "id": "mock-event-1", "sequence": 1, "step_type": "requirement", "name": "获取目标对象信息", "status": "completed", "started": 1770000000, "completed": 1770000002, "input_summary": "识别目标对象和时间范围", "output_summary": "已获得脱敏目标对象信息", "record_count": 1, "error": null },
+    { "id": "mock-event-2", "sequence": 2, "step_type": "plugin", "name": "查询近期轨迹", "status": "completed", "started": 1770000002, "completed": 1770000008, "input_summary": "查询近30天夜间轨迹", "output_summary": "返回42条轨迹记录", "record_count": 42, "error": null },
+    { "id": "mock-event-3", "sequence": 3, "step_type": "analysis", "name": "分析同行人员", "status": "completed", "started": 1770000008, "completed": 1770000015, "input_summary": "执行时空碰撞分析", "output_summary": "识别6名同行人员", "record_count": 6, "error": null },
+    { "id": "mock-event-4", "sequence": 4, "step_type": "plugin", "name": "关联车辆信息", "status": "completed", "started": 1770000015, "completed": 1770000022, "input_summary": "关联共同出行车辆", "output_summary": "识别2辆关联车辆", "record_count": 2, "error": null },
+    { "id": "mock-event-5", "sequence": 5, "step_type": "result", "name": "生成研判结果", "status": "completed", "started": 1770000022, "completed": 1770000030, "input_summary": "汇总多源结果", "output_summary": "已生成结构化研判结果", "record_count": 1, "error": null }
+  ]
+}

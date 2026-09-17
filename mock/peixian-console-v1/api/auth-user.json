@@ -1,0 +1,19 @@
+{
+  "user": {
+    "id": "mock-current-user",
+    "username": "320722001",
+    "role": "user",
+    "system_role": "user",
+    "active": true,
+    "must_change_password": false,
+    "display_name": "张警官",
+    "police_no": "320722001",
+    "department_id": "dept-xj",
+    "department": { "id": "dept-xj", "name": "刑警大队", "code": "32032201" },
+    "position": "民警",
+    "last_login_at": 1726122720,
+    "runtime": { "id": "mock-runtime-user", "status": "ready", "revision": 1, "error": null }
+  },
+  "csrf_token": "mock-csrf-token",
+  "capabilities": ["business.use"]
+}
