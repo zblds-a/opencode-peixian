@@ -3,7 +3,7 @@ import copy
 
 from .backend_contract import iso
 from .trusted_results import claim
-from .theft_provider_result import sentence
+from .theft_provider_result import sentence, SOURCE_SENTENCE_VERSION
 from shared import theft_provider_v2 as adapter
 
 VERSION='native-provider-result-v1'
@@ -11,6 +11,7 @@ VERSION='native-provider-result-v1'
 
 def project(row,snapshot):
     calls=snapshot.get('native_calls',{})
+    sentence_version=snapshot.get('provider_sentence_version')
     identity=snapshot['agent_profile']
     records=[];claims=[];missing=[];modules=[];seen=set()
     for call_id,item in calls.items():
@@ -39,8 +40,8 @@ def project(row,snapshot):
             fields=copy.deepcopy(entry['fields'])
             records.append({'record_id':rid,'module':kind,'source_run_id':row['id'],
                 'call_id':call_id,'snapshot_id':public['response_snapshot_id'],'fields':fields})
-            claims.append(claim(row,identity,'fact','provider.'+kind+'.record.v1',
-                sentence(kind,fields),{'record_id':rid,'fields':fields,
+            claims.append(claim(row,identity,'fact','provider.'+kind+('.record.v2' if kind=='tracks' and sentence_version==SOURCE_SENTENCE_VERSION else '.record.v1'),
+                sentence(kind,fields,sentence_version),{'record_id':rid,'fields':fields,
                 'snapshot_id':public['response_snapshot_id']},[rid]))
         count=public.get('returned_count')
         if type(count) is int and count>=0:
@@ -85,7 +86,7 @@ def project(row,snapshot):
         'narrative':{'status':'unverified','text':None,'claim_refs':[],
             'conflicts':[],'review_version':'native-separate-v1',
             'coverage':'模型自由说明不自动成为已核验事实。'},
-        'versions':{'native_gate':snapshot['native_tool_policy']['version'],
+        'versions':{**({'provider_sentence':sentence_version} if sentence_version else {}),'native_gate':snapshot['native_tool_policy']['version'],
             'task_id':snapshot['native_tool_context']['task_id'],
             'scope_version':snapshot['native_tool_context']['scope_version'],
             'plugin_versions':{item['frozen']['plugin_id']:item['frozen']['plugin_version'] for item in calls.values()}},

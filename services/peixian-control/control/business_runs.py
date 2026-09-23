@@ -96,6 +96,8 @@ def submit(store, user, sid, data, payload, applied, revision, parent=None, draf
             payload['system']=payload.get('system','')+model_context(snapshot['native_tool_context'])
             snapshot['native_tool_policy']={'version':native_version,'allowed_tools':allowed,'revision':revision}
             snapshot['native_calls']={}
+            from .theft_provider_result import SOURCE_SENTENCE_VERSION
+            snapshot['provider_sentence_version']=SOURCE_SENTENCE_VERSION
             snapshot['task_spec']={'schema_version':'native-tools-v1','domain':'theft','agent_id':profile.id,'query_mode':'native','methods':[],'task_id':snapshot['native_tool_context']['task_id']}
             snapshot['data_environment']='acceptance_real'
         from .facts_plan import build, bind_payload
