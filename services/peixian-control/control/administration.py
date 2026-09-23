@@ -405,9 +405,9 @@ def register_admin(app):
     @blocking_endpoint(app, json_body=True)
     def plugin_state(pid: str, version: str, request: Request, user=Depends(require_capability("plugins.manage"))):
         from .runtime_security import block_runtime
-        from .data_plugin_policy import installable
+        from .data_plugin_policy import ACTIVE_VERSION, installable
         data = body_fields(request.state.json_body, ("enabled",))
-        if data.get("enabled") and not installable(pid):
+        if data.get("enabled") and (not installable(pid) or version != ACTIVE_VERSION):
             fail("该资料插件已归档，不可重新启用", 409)
         s = app.state.store
         with s.tx() as db:

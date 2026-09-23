@@ -6,6 +6,7 @@ ACTIVE_KINDS = (
     'incidents', 'captures', 'tracks', 'night', 'community',
     'warning_detail', 'warning_logs', 'profile',
 )
+ACTIVE_VERSION = '3.0.0'
 ACTIVE_PLUGIN_IDS = frozenset('peixian-theft-' + kind.replace('_', '-') for kind in ACTIVE_KINDS)
 
 
@@ -19,4 +20,4 @@ def valid_bundle(manifest):
     if not installable(plugin_id):
         return False
     kind = next(kind for kind in ACTIVE_KINDS if plugin_id == 'peixian-theft-' + kind.replace('_', '-'))
-    return manifest.get('tools') == ['peixian_query_' + kind] and kind in CATALOG
+    return manifest.get('version') == ACTIVE_VERSION and manifest.get('tools') == ['peixian_query_' + kind] and kind in CATALOG
