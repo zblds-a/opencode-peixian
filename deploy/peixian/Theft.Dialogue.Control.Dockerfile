@@ -4,6 +4,9 @@ ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 ARG SOURCE_REVISION
 LABEL org.opencontainers.image.revision="${SOURCE_REVISION}" \
+      org.peixian.source.commit="${SOURCE_REVISION}" \
+      org.peixian.alignment="theft-dialogue-simplification" \
+      org.peixian.frontend.preserved="" \
       org.peixian.control.schema.max="11" \
       org.peixian.dialogue="theft-clarification-v1"
 ENV PX_BACKEND_V6=1
