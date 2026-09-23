@@ -132,7 +132,8 @@ def prepare(store,uid,sid,message_id,call_id,tool,args,revision):
                 'source_refs':copy.deepcopy(context['source_refs']),
                 'selected_source_values':derived if context['source_refs'] else {},
                 'contract_defaults':{k:v for k,v in frozen['query'].items() if k not in query},
-                'query_fields':sorted(frozen['query']),'requested_values':copy.deepcopy(frozen['query'])}}
+                'query_fields':sorted(frozen['query']),'requested_values':copy.deepcopy(frozen['query']),
+                'scoring_requested':bool(context.get('scoring_requested'))}}
 
 
 def approve(store,uid,rid,call_id,plan_digest,decision,revision):

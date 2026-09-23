@@ -17,9 +17,9 @@
       "prompt_sha256": "0887ba3b75efa23834706957e623cb1a2684c59051d8ec76e794a38c65789d15"
     },
     "theft-assistant": {
-      "version": "1.0.0",
-      "profile_sha256": "9422ec59f7ac9a9b9e8b3d7d1a2381aed02ab6668c9a380db47eaf8b32cff245",
-      "prompt_sha256": "6acfc61d2d7f757b7870e331444a2e5bc9e7afc98a6782b1d53eb7b67863b244"
+      "version": "3.0.0",
+      "profile_sha256": "45176acea49549a7d40a5607bb21a4ba6ee685aefe5dbdcc8e3239e112178fe6",
+      "prompt_sha256": "9a264b5ef063c7f825ee4ae9b49fbba060fc11e83247abcd7665f6fde214efb1"
     }
   },
   "github_ci": {

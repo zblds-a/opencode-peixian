@@ -15,6 +15,19 @@ from shared import theft_provider_v2 as adapter
 
 TOOL_TO_KIND={'peixian_query_'+kind:kind for kind in ACTIVE_KINDS}
 FILTERS=re.compile(r'近期|最近|近\s*\d+\s*[天月年]|仅.*盗窃|只.*盗窃|限定时间|限定日期')
+SCORING_REQUEST=re.compile(r'评分|打分|可疑度|嫌疑评估|研判优先级|嫌疑程度')
+SCORING_NEGATE=re.compile(r'不要\s*评分|无需\s*评分|不用\s*评分|不\s*要\s*打分|禁止\s*评分|取消\s*评分')
+
+
+def scoring_requested(text, prior=None):
+    """Freeze whether the user explicitly asked for auxiliary scoring."""
+    if not isinstance(text, str):
+        return bool(prior.get('scoring_requested')) if prior else False
+    if SCORING_NEGATE.search(text):
+        return False
+    if SCORING_REQUEST.search(text):
+        return True
+    return bool(prior.get('scoring_requested')) if prior else False
 
 
 def freeze_context(store,uid,sid,data):
@@ -60,7 +73,8 @@ def freeze_context(store,uid,sid,data):
     return {'version':'native-tool-context-v1','task_id':task_id,
         'scope_version':prior['scope_version']+1 if prior else 1,
         'confirmed':confirmed,'source_refs':refs,
-        'current_text':text,'constraints_text':constraints,'user_conditions':current}
+        'current_text':text,'constraints_text':constraints,'user_conditions':current,
+        'scoring_requested':scoring_requested(text, prior)}
 
 
 def arguments(kind,args,context):

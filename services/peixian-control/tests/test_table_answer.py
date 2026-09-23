@@ -94,6 +94,45 @@ def test_zero_results_distinct_from_missing_profile():
     assert '0条' in view['conclusions'][0]['text'] and view['missing']
 
 
+def test_scoring_requires_dual_trigger():
+    result,snap=fixture()
+    # enrich with enough modules for scoring
+    night={'record_id':'run:call:n1','source_run_id':'run','call_id':'call','module':'night','snapshot_id':'n',
+           'fields':{'id':'1','targetIdCard':'person-one','captureTime':'2026-09-10 01:00:00'}}
+    community={'record_id':'run:call:c1','source_run_id':'run','call_id':'call','module':'community','snapshot_id':'c',
+               'fields':{'id':'1','idCard':'person-one','communityCount':5}}
+    warning={'record_id':'run:call:w1','source_run_id':'run','call_id':'call','module':'warning_detail','snapshot_id':'w',
+             'fields':{'id':'1','idCard':'person-one','warningCount':3,'personName':'测'}}
+    captures={'record_id':'run:call:cap','source_run_id':'run','call_id':'call','module':'captures','snapshot_id':'cap',
+              'fields':{'target_id_card':'person-one','target_name':'测','capture_count':7,'tags':'夜间'}}
+    result['records']+=[night,community,warning,captures]
+    # no scoring_requested in context → no scoring section
+    choose(snap,source_refs=['run:call:snapshot:1'],scoring={'requested':True})
+    view=t.build(result,snap)
+    assert view.get('scoring') is None
+    assert '可疑度评分' not in t.markdown(view)
+    # context true but model false → no scoring
+    snap['native_tool_context']['scoring_requested']=True
+    choose(snap,source_refs=['run:call:snapshot:1'],scoring={'requested':False})
+    assert t.build(result,snap).get('scoring') is None
+    # dual trigger
+    choose(snap,source_refs=['run:call:snapshot:1'],scoring={'requested':True})
+    view=t.build(result,snap)
+    assert view['scoring']['status']=='ready'
+    output=t.markdown(view)
+    assert '### 可疑度评分（辅助参考）' in output
+    assert '不构成犯罪认定' in output
+    assert any('有效得分率' in c['text'] for c in view['conclusions'])
+
+
+def test_accepts_legacy_v1_format_json():
+    result,snap=fixture()
+    snap['model_final_text']=json.dumps({'format':'person-tables-v1','mode':'data','source_refs':['run:call:snapshot:1']},ensure_ascii=False)
+    view=t.build(result,snap)
+    assert view['version']=='person-tables-v2'
+    assert view['selection_status']=='accepted'
+
+
 def test_history_collection_enforces_owner_task_and_person(monkeypatch):
     from control import trusted_results
     result,snap=fixture()
