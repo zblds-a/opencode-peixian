@@ -149,6 +149,7 @@ def test_newly_confirmed_filter_cannot_be_dropped():
 def test_native_scheduler_does_not_cancel_authorized_inflight_tool(provider,monkeypatch):
     from control.run_scheduler import track_messages
     store=provider[0];row=native_candidate(provider,monkeypatch)
+    row=store.one('SELECT * FROM business_runs WHERE id=?',(row['id'],))
     values=[{'info':{'id':row['message_id'],'role':'user'},'parts':[]},
             {'info':{'id':'assistant-native','role':'assistant'},'parts':[{'id':'part-native','type':'tool','tool':tool('tracks'),'callID':'native-observed','state':{'status':'running','input':ARGS}}]}]
     assert not track_messages(store,row,values,{})
