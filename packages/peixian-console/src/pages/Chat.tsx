@@ -1,4 +1,3 @@
-import { toolTraceStatus } from "../tool-trace-status"
 import { createEffect, createMemo, createSignal, For, Index, onCleanup, Show } from "solid-js"
 import { api, ApiError, list, patch, post, remove, safeMessage } from "../api"
 import { Button, Empty, ErrorLine, Field, Icon, Markdown, Modal, Spinner, Status } from "../components"
@@ -14,6 +13,7 @@ import RuntimeStatus from "../RuntimeStatus"
 import { displayName } from "../analysis-display"
 import { canObserve, canSend } from "../runtime-view"
 import { useResourceRefresh } from "../resource-refresh"
+import { chatAssets } from "../chat-assets"
 import type { AnalysisClue, AnalysisResult, CapabilityItem, FileItem, Message, Model, Plugin, Run, RunEvent, RunEvidence, Session, Skill, SkillDraft } from "../types"
 
 export default function Chat() {
@@ -68,6 +68,10 @@ export default function Chat() {
   let scroll!: HTMLDivElement
   let textarea!: HTMLTextAreaElement
   let fileInput!: HTMLInputElement
+  let historyList!: HTMLDivElement
+  let historyScroll = 0
+  let suggestionDrag: { x: number; scroll: number; moved: boolean } | undefined
+  let suggestionWasDragged = false
   const displayedText = new Map<string, number>()
   let scrollFrame = 0
   let followOutput = true
@@ -75,9 +79,30 @@ export default function Chat() {
   let animateUntil = 0
   let selectionRevision = 0
   let messageFlight: { id: string; revision: number; trailing: boolean; detail: boolean; promise: Promise<void> } | undefined
+  const completedToolTraces = new Set<string>()
+  const toolStatuses = new Map<string, string>()
+  const suggestedQuestions = ["你能帮我做什么？", "如何整理并核对已有资料？", "研判结论如何追溯依据？", "如何使用技能或插件？"]
+
+  function updateSessions(values: Session[]) {
+    if (historyList) historyScroll = historyList.scrollTop
+    setSessions((current) => values.map((item) => {
+      const previous = current.find((existing) => existing.id === item.id)
+      return previous && JSON.stringify(previous) === JSON.stringify(item) ? previous : item
+    }))
+    requestAnimationFrame(() => { if (historyList) historyList.scrollTop = historyScroll })
+  }
+  function toolStatus(part: Message["parts"][number], index: number, messageID: string) {
+    const key = `${selected()}:${messageID}:${part.id ?? part.call_id ?? part.step_id ?? index}`
+    const status = part.execution?.status ?? part.state?.status ?? "running"
+    const previous = toolStatuses.get(key)
+    const stable = previous && ["completed", "succeeded", "failed", "cancelled"].includes(previous) ? previous : status
+    toolStatuses.set(key, stable)
+    return stable
+  }
   const shownSessions = createMemo(() => sessions())
   const shownModels = createMemo(() => models())
   const shownCapabilities = createMemo(() => capabilities().filter((item) => item.enabled).map(item=>({...item,name:displayName(item.name),description:displayName(item.name)!==item.name?"整理相关资料并核对来源。":item.description})))
+  const relatedPlugins = createMemo(() => shownCapabilities().filter((item) => item.kind === "plugin"))
   const slashQuery = createMemo(() => draft().match(/^\s*\/([^\s]*)$/)?.[1]?.toLowerCase())
   const slashCapabilities = createMemo(() => {
     if (slashQuery() === undefined) return []
@@ -93,7 +118,7 @@ export default function Chat() {
   })
   const graphRunID = createMemo(() => latestAnalysis()?.run_id ?? currentRun()?.id)
   const hasInsights = createMemo(() => Boolean(latestAnalysis()?.clues.length || latestAnalysis()?.diagram || latestAnalysis()?.run_id))
-  const sideMode = createMemo(() => hasInsights() ? (showClues() ? "insight" : "collapsed") : "empty")
+  const sideMode = createMemo(() => loading() ? "empty" : hasInsights() ? (showClues() ? "insight" : "collapsed") : "plugins")
   type ChatEntry = { message: Message; textParts: { part: Message["parts"][number]; id: string; afterTools: boolean }[]; toolParts: Message["parts"]; error?: Message["info"]["error"]; missingBody: boolean }
   const shownMessages = createMemo<ChatEntry[]>(() => messages().flatMap((message, index, all): ChatEntry[] => {
     if (message.info.role === "user") return [{ message, textParts: message.parts.filter((part) => part.type === "text" && part.text).map((part, partIndex) => ({ part, id: `${message.info.id}:${part.id ?? partIndex}`, afterTools: false })), toolParts: [], missingBody: false }]
@@ -213,7 +238,7 @@ export default function Chat() {
     }
     try {
       const values = await list<Session>("/sessions")
-      setSessions(values)
+      updateSessions(values)
       if (selected()) {
         setBusy(["busy", "retry"].includes(values.find((item) => item.id === selected())?.status ?? "idle"))
         await fetchMessages(selected()!)
@@ -243,7 +268,7 @@ export default function Chat() {
     }
     if (result[1].status === "fulfilled") setFiles(result[1].value as FileItem[])
     if (result[2].status === "fulfilled") setSkills(result[2].value as Skill[])
-    if (result[3].status === "fulfilled") setSessions(result[3].value as Session[])
+    if (result[3].status === "fulfilled") updateSessions(result[3].value as Session[])
     if (result[4].status === "fulfilled") setPlugins(result[4].value as Plugin[])
     if (result[5].status === "fulfilled") setCapabilities((result[5].value as (Omit<CapabilityItem, "kind"> & { kind: "personal_skill" | "plugin" | "official_skill" })[]).map((item) => ({
       ...item,
@@ -290,6 +315,8 @@ export default function Chat() {
   async function choose(id: string) {
     selectionRevision++
     displayedText.clear()
+    completedToolTraces.clear()
+    toolStatuses.clear()
     animateUntil = 0
     followOutput = true
     setSelected(id)
@@ -320,6 +347,8 @@ export default function Chat() {
   function fresh() {
     selectionRevision++
     displayedText.clear()
+    completedToolTraces.clear()
+    toolStatuses.clear()
     animateUntil = 0
     followOutput = true
     setSelected(undefined)
@@ -667,6 +696,16 @@ export default function Chat() {
       app.notify((cause as Error).message, "error")
     }
   }
+  const RelatedCapabilities = () => (
+    <aside class="related-capabilities">
+      <div class="related-capabilities-head"><div><strong>相关插件</strong><small>当前账号可用插件</small></div><span>{relatedPlugins().length}</span></div>
+      <div class="related-capabilities-list">
+        <For each={relatedPlugins()}>
+          {(item, index) => <button onClick={() => { const instruction = `请优先使用${item.name}协助核对`; setDraft((current) => current.includes(instruction) ? current : `${current.trim()}${current.trim() ? "\n" : ""}${instruction}`); textarea?.focus(); app.notify("已将插件需求填入问题；实际调用由研判服务判断。") }}><span class={"capability-icon tone-" + (index() % 5)}><Icon name="plugin" size={18} /></span><span><strong>{item.name}<em>v{item.version}</em></strong><small>{item.description}</small><i>插件工具</i></span><b>使用</b></button>}
+        </For>
+      </div>
+    </aside>
+  )
   return (
     <div class={"chat-layout side-mode-" + sideMode()}>
       <aside class={"history-panel " + (showHistory() ? "visible" : "")}>
@@ -688,7 +727,7 @@ export default function Chat() {
             onInput={(event) => setSearch(event.currentTarget.value)}
           />
         </label>
-        <div class="history-list">
+        <div class="history-list" ref={historyList} onScroll={(event) => { historyScroll = event.currentTarget.scrollTop }}>
           <Show
             when={!loading()}
             fallback={
@@ -704,7 +743,7 @@ export default function Chat() {
               {(item) => (
                 <div class={"history-item " + (selected() === item.id ? "selected" : "")}>
                   <button onClick={() => void choose(item.id)}>
-                    <Icon name="chat" size={16} />
+                    <img class="chat-history-icon" src={chatAssets.conversationIcon} alt="" />
                     <span>{displayName(item.title) || "未命名对话"}</span>
                   </button>
                   <Show when={!item.id.startsWith("mock-")}><div class="history-actions">
@@ -727,10 +766,6 @@ export default function Chat() {
             </For>
           </Show>
         </div>
-        <div class="history-foot">
-          <Icon name="lock" size={13} />
-          仅你可见
-        </div>
       </aside>
       <section class="conversation">
         <button class="mobile-history-open" aria-label="显示研判记录" aria-expanded={showHistory()} onClick={() => setShowHistory(!showHistory())}>研判记录</button>
@@ -738,7 +773,7 @@ export default function Chat() {
           <div class="runtime-banner">
             <Icon name="clock" size={17} />
             <span>
-              个人工作空间
+              研判服务
               {["updating", "applying"].includes(app.user().runtime?.status ?? "")
                 ? "正在更新配置，当前对话可继续查看或停止，完成后即可发送新消息。"
                 : ["paused", "stopped"].includes(app.user().runtime?.status ?? "")
@@ -753,7 +788,7 @@ export default function Chat() {
         <div class="messages-scroll" ref={scroll} onPointerDown={() => { selectingText = true }} onPointerUp={() => { selectingText = false }} onPointerCancel={() => { selectingText = false }} onScroll={() => { followOutput = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 96 }}>
           <Show
             when={messages().length || pendingPrompt() || awaitingReply()}
-            fallback={<Show when={!selected()} fallback={<div class="conversation-blank" aria-label="空白研判对话区" />}><div class="chat-welcome"><span class="welcome-icon"><Icon name="skill" size={25} /></span><h2>你好，我是盗窃资料助手</h2><p>直接说出要核对的问题。我会根据已有资料继续分析；缺少必要条件时，会在对话中请你补充。</p><div class="welcome-questions"><For each={["你能帮我做什么？", "帮我核对一处位置周边的警情", "解释刚才的资料依据", "继续核对我选定的来源记录"]}>{(question) => <button onClick={() => { setDraft(question); textarea?.focus() }}>{question}<Icon name="send" size={14} /></button>}</For></div></div></Show>}
+            fallback={<div class="chat-welcome"><span class="welcome-icon"><img src={chatAssets.policeAvatar} alt="" /></span><h2>智能研判助手</h2><strong>你好，我是你的智能研判助手</strong><p>可以从一个问题开始；重要结论请结合原始资料核验。</p></div>}
           >
             <div class="messages">
               <Index each={shownMessages()}>
@@ -762,13 +797,16 @@ export default function Chat() {
                   const attachments = () => message().attachments ?? sentAttachments()[message().info.id] ?? []
                   const textParts = () => entry().textParts
                   const toolParts = () => entry().toolParts
-                  const renderText = (item: { part: Message["parts"][number]; id: string }) => message().info.role === "assistant" ? <div><Show when={item.part.origin === "verified_result"}><small class="verified-result-label">已核对结果摘要</small></Show><SmoothMarkdown id={`${selected()}:${item.id}`} text={item.part.text ?? ""} live={busy() || Date.now() < animateUntil} cache={displayedText} onProgress={() => { if (scroll && followOutput && !selectingText && !selectionInConversation()) scroll.scrollTop = scroll.scrollHeight }} /></div> : <Markdown text={item.part.text ?? ""} />
+                  const renderText = (item: { part: Message["parts"][number]; id: string }) => message().info.role === "assistant" ? <div><SmoothMarkdown id={`${selected()}:${item.id}`} text={item.part.text ?? ""} live={busy() || Date.now() < animateUntil} cache={displayedText} onProgress={() => { if (scroll && followOutput && !selectingText && !selectionInConversation()) scroll.scrollTop = scroll.scrollHeight }} /></div> : <Markdown text={item.part.text ?? ""} />
+                  const traceComplete = () => {
+                    const key = `${selected()}:${message().info.id}`
+                    if (toolParts().length && toolParts().every((part, index) => ["completed", "succeeded"].includes(toolStatus(part, index, message().info.id)))) completedToolTraces.add(key)
+                    return completedToolTraces.has(key)
+                  }
                   return (
                   <article data-message-id={message().info.id} tabindex={-1} class={"message " + (message().info.role === "user" ? "user" : "assistant")}>
                     <div class="message-avatar">
-                      <Show when={message().info.role === "user"} fallback={<Icon name="skill" size={17} />}>
-                        {app.user().username.slice(0, 1).toUpperCase()}
-                      </Show>
+                      <img src={message().info.role === "user" ? app.user().avatar ?? chatAssets.userFallbackAvatar : chatAssets.policeAvatar} alt="" />
                     </div>
                     <div class="message-content">
                       <div class="message-author">{message().info.role === "user" ? "你" : "智能助手"}</div>
@@ -781,22 +819,20 @@ export default function Chat() {
                         <details class="tool-trace">
                           <summary>
                             <Icon
-                              name={toolParts().every((part) => (part.execution?.status ?? part.state?.status) === "completed") ? "check" : "clock"}
+                              name={traceComplete() ? "check" : "clock"}
                               size={14}
                             />
-                            <span>查看资料处理过程（{toolParts().length} 项）</span>
-                            <Status
-                              value={toolTraceStatus(toolParts())}
-                            />
+                            <span>查看执行过程（{toolParts().length} 项）</span>
+                            <span class="chat-trace-state">{traceComplete() ? "✓" : "处理中"}</span>
                           </summary>
                           <div class="tool-trace-list">
                             <For each={toolParts()}>
-                              {(part) => (
+                              {(part, index) => (
                                 <details class="tool-trace-item">
                                   <summary>
-                                    <Icon name={(part.execution?.status ?? part.state?.status) === "completed" ? "check" : "clock"} size={14} />
+                                    <Icon name={["completed", "succeeded"].includes(toolStatus(part, index(), message().info.id)) ? "check" : "clock"} size={14} />
                                     <span>{safeMessage(part.execution?.capability_name || part.execution?.name || part.state?.title || part.tool, "处理业务资料")}</span>
-                                    <Status value={part.execution?.status ?? part.state?.status} />
+                                    <Status value={toolStatus(part, index(), message().info.id)} />
                                   </summary>
                                   <div class="tool-trace-detail">
                                   <For
@@ -859,16 +895,25 @@ export default function Chat() {
                 }}
               </Index>
               <Show when={pendingPrompt()?.messageID && messages().some((message) => message.info.id === pendingPrompt()?.messageID) ? undefined : pendingPrompt()}>
-                {(prompt) => <article class="message user pending-prompt" aria-live="polite"><div class="message-avatar">{app.user().username.slice(0, 1).toUpperCase()}</div><div class="message-content"><div class="message-author">你</div><Show when={prompt().attachments.length}><div class="message-attachments"><For each={prompt().attachments}>{(file) => <span title={file.name}><Icon name="file" size={14} /><span>{file.name}</span></span>}</For></div></Show><Markdown text={prompt().text} /><small>{prompt().accepted ? "已发送" : "正在提交…"}</small></div></article>}
+                {(prompt) => <article class="message user pending-prompt" aria-live="polite"><div class="message-avatar"><img src={app.user().avatar ?? chatAssets.userFallbackAvatar} alt="" /></div><div class="message-content"><div class="message-author">你</div><Show when={prompt().attachments.length}><div class="message-attachments"><For each={prompt().attachments}>{(file) => <span title={file.name}><Icon name="file" size={14} /><span>{file.name}</span></span>}</For></div></Show><Markdown text={prompt().text} /><small>{prompt().accepted ? "已发送" : "正在提交…"}</small></div></article>}
               </Show>
-              <Show when={awaitingReply()}><div class="assistant-thinking" role="status"><span class="message-avatar"><Icon name="skill" size={17} /></span><span>智能助手正在思考…</span></div></Show>
-              <Show when={busy() && runEventRun() === currentRun()?.id && runEvents().length && !messages().some((message) => message.info.run_id === currentRun()?.id && message.parts.some((part) => part.type === "tool"))}>
-                <div class="active-run-trace" role="status"><strong>执行过程</strong><For each={runEvents()}>{(step) => <span>{step.capability_name || step.name}<Status value={step.status} /></span>}</For></div>
-              </Show>
+              <Show when={awaitingReply()}><div class="assistant-thinking" role="status"><span class="message-avatar"><img src={chatAssets.policeAvatar} alt="" /></span><span>智能助手正在思考…</span></div></Show>
             </div>
           </Show>
         </div>
         <div class="composer-area">
+          <Show when={!messages().length && !pendingPrompt() && !awaitingReply()}>
+            <div class="chat-suggestions"><span>为你推荐</span>
+              <div class="chat-suggestions-track"
+                onPointerDown={(event) => { if (event.pointerType !== "mouse" || event.button !== 0) return; suggestionWasDragged = false; suggestionDrag = { x: event.clientX, scroll: event.currentTarget.scrollLeft, moved: false } }}
+                onPointerMove={(event) => { if (!suggestionDrag) return; const delta = event.clientX - suggestionDrag.x; if (Math.abs(delta) > 4) { suggestionDrag.moved = true; if (!event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.setPointerCapture(event.pointerId) } event.currentTarget.scrollLeft = suggestionDrag.scroll - delta }}
+                onPointerUp={(event) => { suggestionWasDragged = Boolean(suggestionDrag?.moved); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); suggestionDrag = undefined }}
+                onPointerCancel={() => { suggestionDrag = undefined }}
+                onWheel={(event) => { if (!event.shiftKey) return; event.preventDefault(); event.currentTarget.scrollLeft += event.deltaY }}>
+                <For each={suggestedQuestions}>{(question) => <button onClick={() => { if (suggestionWasDragged) return; setDraft(question); textarea?.focus() }}>{question}<Icon name="send" size={13} /></button>}</For>
+              </div>
+            </div>
+          </Show>
           <RuntimeStatus compact />
           <BusinessConfirmations sessionID={selected()} available={available()} onAnswered={() => void refresh()} />
           <Show when={selected() && currentRun()?.clarification?.version === "theft-clarification-v1"}>
@@ -888,7 +933,6 @@ export default function Chat() {
             </div>
           </Show>
           <Show when={scene()?.scenario_id}><div class="selection-chips" role="status"><span>当前场景：{scene()?.name} · 追问将沿用</span><button disabled={busy() || sending() || clearingScene()} onClick={() => void clearScene()} aria-label="清除当前场景">清除场景 <Icon name="close" size={12}/></button></div></Show>
-          <Show when={selectedFiles().length}><div class="pending-attachments" aria-label="待发送附件"><For each={selectedFiles()}>{(id) => <button type="button" title={files().find((file) => file.id === id)?.name ?? "已上传文件"} aria-label={`移除附件 ${files().find((file) => file.id === id)?.name ?? "已上传文件"}`} onClick={() => toggle(id, "files")}><Icon name="file" size={14} /><span>{files().find((file) => file.id === id)?.name ?? "已上传文件"}</span><Icon name="close" size={12} /></button>}</For></div></Show>
           <div class="composer">
             <textarea
               ref={textarea}
@@ -896,7 +940,7 @@ export default function Chat() {
               maxlength={32000}
               placeholder="直接描述要核对的问题，或继续追问已有结果…"
               value={draft()}
-              rows={3}
+              rows={2}
               onInput={(event) => setDraft(event.currentTarget.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
@@ -916,14 +960,14 @@ export default function Chat() {
                 when={busy()}
                 fallback={
                   <Button
-                    variant="primary"
+                    class="chat-send-button"
                     icon="send"
+                    aria-label="发送消息"
+                    title="发送消息"
                     busy={sending()}
                     disabled={!draft().trim() || uncertain() || !ready() || !shownModels().length}
                     onClick={() => void send()}
-                  >
-                    发送
-                  </Button>
+                  />
                 }
               >
                 <Button icon="stop" onClick={abort}>
@@ -939,6 +983,7 @@ export default function Chat() {
       </section>
       <Show when={sideMode() !== "empty"}>
         <aside class={"insight-sidebar rail-" + sideMode()} aria-label="研判侧栏">
+          <Show when={sideMode() === "plugins"}><RelatedCapabilities /></Show>
           <Show when={sideMode() === "collapsed"}><button class="insight-reopen" onClick={() => setShowClues(true)} aria-label="展开研判侧栏" title="展开研判侧栏"><Icon name="star" size={17} /></button></Show>
           <Show when={sideMode() === "insight"}>
             <div class="insight-single-head"><strong>{insightTab() === "clues" ? "智能发现线索" : "实体关系图谱"}</strong><div><button class="insight-icon-button" aria-label="切换侧栏内容" title="切换侧栏内容" onClick={() => setInsightTab(insightTab() === "clues" ? "graph" : "clues")}><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h15l-4-4M20 16H5l4 4" /></svg></button><button class="insight-icon-button" aria-label="收起侧栏" title="收起侧栏" onClick={() => setShowClues(false)}><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 15 7-7 7 7" /></svg></button></div></div>

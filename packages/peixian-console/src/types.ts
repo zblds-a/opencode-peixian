@@ -14,6 +14,7 @@ export type Capability =
 export type User = {
   id: string
   username: string
+  avatar?: string
   role: Role
   must_change_password: boolean
   active?: boolean

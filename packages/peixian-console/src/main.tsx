@@ -6,4 +6,5 @@ import "./chat-polish.css"
 import "./visual-polish.css"
 import "./typography.css"
 import "./right-rail.css"
+import "./chat-dialogue-v2.css"
 render(() => <App />, document.getElementById("root")!)

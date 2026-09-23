@@ -124,11 +124,19 @@
 }
 
 /* Culture is a fixed, centered Header region separate from account information. */
+.business-shell .topbar > div:first-child,
+.admin-shell .topbar > div:first-child { flex: 1 1 0; min-width: 0; }
 .business-shell .topbar-status,
-.admin-shell .topbar-status { margin-left: auto; gap: 24px; min-width: 0; }
+.admin-shell .topbar-status {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  margin-left: auto;
+  gap: 24px;
+  max-width: 100%;
+}
 .app-header__culture {
   display: flex;
-  flex: 0 0 330px;
+  flex: 0 1 330px;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -172,7 +180,14 @@
   box-sizing: border-box;
   border-radius: 50%;
 }
-.app-header__user { min-width: 65px; }
+.app-header__user { min-width: 0; max-width: 190px; }
+.app-header__user strong,
+.app-header__user small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .sidebar-people-first {
   margin-top: auto;
@@ -211,6 +226,12 @@
   box-shadow: 0 3px 12px #1b589308;
 }
 
+@media (max-width: 1600px) {
+  .business-shell .topbar-status,
+  .admin-shell .topbar-status { gap: 16px; }
+  .app-header__culture { flex-basis: 220px; }
+}
+
 @media (max-width: 1450px) {
   .business-shell > .sidebar .brand,
   .admin-shell > .sidebar .brand {
@@ -226,8 +247,12 @@
   }
   .business-top-motto,
   .admin-top-motto { left: 165px; }
-  .app-header__culture { flex-basis: 270px; }
+  .app-header__culture { flex-basis: 200px; }
   .app-header__account { min-width: 170px; }
+}
+
+@media (max-width: 1400px) {
+  .app-header__culture { display: none; }
 }
 
 @media (max-width: 1100px) {
