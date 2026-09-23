@@ -1,0 +1,130 @@
+{
+  "runs": [
+    {
+      "run_id": "293f25375a2f4bd5a5a736e85c7e6c3c",
+      "status": "completed",
+      "calls": [],
+      "history_runs": 1,
+      "records": 15,
+      "basic_rows": 4,
+      "suggestions": 3,
+      "selection_status": "accepted",
+      "markdown_sha256": "11e682b96f673e0a0151c7375440951cbd285afb804104f4757d5626dc53d9bb"
+    },
+    {
+      "run_id": "24e6578b530f481dbec7081eea991c43",
+      "status": "completed",
+      "calls": [],
+      "history_runs": 0,
+      "records": 0,
+      "basic_rows": 0,
+      "suggestions": 2,
+      "selection_status": "accepted",
+      "markdown_sha256": "c095b3ea441de40255ad230d1b1b7a80a0270b1be71c9cf8f114f0525f4c9b39"
+    },
+    {
+      "run_id": "b89dd9e544e441a38fe448d7e706ff17",
+      "status": "completed",
+      "calls": [
+        {
+          "kind": "tracks",
+          "status": "completed"
+        },
+        {
+          "kind": "profile",
+          "status": "completed"
+        }
+      ],
+      "history_runs": 0,
+      "records": 15,
+      "basic_rows": 4,
+      "suggestions": 0,
+      "selection_status": "fallback",
+      "markdown_sha256": "ad6a77da3e246277d0bb75fda8ecfa3e7b42e43b3ba75eaf039a52192d95f9be"
+    },
+    {
+      "run_id": "b7ac44df7ed34c1eaa27ba9d24a4740e",
+      "status": "completed",
+      "calls": [],
+      "history_runs": 2,
+      "records": null,
+      "basic_rows": 0,
+      "suggestions": 0,
+      "selection_status": null,
+      "markdown_sha256": null
+    },
+    {
+      "run_id": "2ca4256701704a73bb96966417983b3d",
+      "status": "completed",
+      "calls": [],
+      "history_runs": 2,
+      "records": 15,
+      "basic_rows": 4,
+      "suggestions": 2,
+      "selection_status": "accepted",
+      "markdown_sha256": null
+    },
+    {
+      "run_id": "08cf899af01b4610a5824c9080a9288a",
+      "status": "completed",
+      "calls": [
+        {
+          "kind": "profile",
+          "status": "completed"
+        }
+      ],
+      "history_runs": 1,
+      "records": 15,
+      "basic_rows": 4,
+      "suggestions": 2,
+      "selection_status": "accepted",
+      "markdown_sha256": null
+    },
+    {
+      "run_id": "b88fd31a693c44daab0e7b6c89505ed8",
+      "status": "completed",
+      "calls": [
+        {
+          "kind": "tracks",
+          "status": "completed"
+        }
+      ],
+      "history_runs": 0,
+      "records": 14,
+      "basic_rows": 0,
+      "suggestions": 0,
+      "selection_status": "fallback",
+      "markdown_sha256": null
+    },
+    {
+      "run_id": "148ce82d573c40f09ae2fa829d6dc63a",
+      "status": "completed",
+      "calls": [
+        {
+          "kind": "tracks",
+          "status": "rejected"
+        }
+      ],
+      "history_runs": 0,
+      "records": 0,
+      "basic_rows": 0,
+      "suggestions": 1,
+      "selection_status": "accepted",
+      "markdown_sha256": null
+    }
+  ],
+  "runtimes": [
+    {
+      "status": "ready",
+      "revision": 72,
+      "recovery_required": 0,
+      "gate_policy": "open"
+    },
+    {
+      "status": "ready",
+      "revision": 44,
+      "recovery_required": 0,
+      "gate_policy": "open"
+    }
+  ]
+}

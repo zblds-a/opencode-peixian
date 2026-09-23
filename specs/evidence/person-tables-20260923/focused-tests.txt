@@ -1,0 +1,3 @@
+Final JSON-prefix parser regression run: tests/test_table_answer.py tests/test_native_tool_execution.py
+35 passed, 2 warnings in 17.03s
+Executed in isolated no-network Python 3.12 container, read-only candidate source mount.
