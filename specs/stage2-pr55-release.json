@@ -1,7 +1,7 @@
 {
   "closeout_status": "completed",
   "baseline": "d78451a26feff089f0ce1b7fea40f0ab482dd1d0",
-  "implementation_revision": "28f74fafecac6929e3daac8095ff2e054dd4ff7a",
+  "implementation_revision": "0b923d32bf120c8fea21af782b4f038e55ae0bdd",
   "schema_version": 6,
   "router_version": "peixian-router-v2",
   "task_spec_version": "task-spec-v2",
