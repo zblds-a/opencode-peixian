@@ -50,7 +50,7 @@ def slots(text,explicit=None):
     if not isinstance(text,str) or not 1<=len(text)<=4000:error('planner_text_invalid','请将任务目标控制在4000字以内。',422)
     values={}
     patterns={'lon':r'(?:经度|lon)\s*[:：=]?\s*(-?\d+(?:\.\d+)?)','lat':r'(?:纬度|lat)\s*[:：=]?\s*(-?\d+(?:\.\d+)?)',
-              'radius_m':r'半径\s*[:：=]?\s*(\d+(?:\.\d+)?)\s*(公里|千米|米)',
+              'radius_m':r'(?:半径|周边|周围)\s*(?:为|是|[:：=])?\s*(\d+(?:\.\d+)?)\s*(公里|千米|米)',
               'page':r'第\s*(\d+)\s*页','page_size':r'每页\s*(\d+)\s*条',
               'person_identity':r'(?<!\d)(\d{17}[\dXx])(?!\d)'}
     for field,pattern in patterns.items():

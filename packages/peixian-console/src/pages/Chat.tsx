@@ -1,3 +1,4 @@
+import { toolTraceStatus } from "../tool-trace-status"
 import { createEffect, createMemo, createSignal, For, Index, onCleanup, Show } from "solid-js"
 import { api, ApiError, list, patch, post, remove, safeMessage } from "../api"
 import { Button, Empty, ErrorLine, Field, Icon, Markdown, Modal, Spinner, Status } from "../components"
@@ -785,7 +786,7 @@ export default function Chat() {
                             />
                             <span>查看资料处理过程（{toolParts().length} 项）</span>
                             <Status
-                              value={toolParts().every((part) => (part.execution?.status ?? part.state?.status) === "completed") ? "completed" : "running"}
+                              value={toolTraceStatus(toolParts())}
                             />
                           </summary>
                           <div class="tool-trace-list">

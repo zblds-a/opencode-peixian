@@ -71,7 +71,29 @@ def register(app):
         async def rpc(action,**fields):
             response=await app.state.client.post(config.control_url+'/internal/runtime/facts',headers={'X-Runtime-Key':config.runtime_key},
                 json={'action':action,'runtime_id':config.runtime_id,'revision':config.revision,'gateway_boot_id':gate.boot_id,**fields},timeout=5)
-            if response.status_code>=400:raise HTTPException(409,'当前资料能力不可用或执行已停止')
+            if response.status_code>=400:
+                # Only native admission runs before any data dispatch. Never pass
+                # upstream messages/stack traces through this public boundary.
+                if action == 'native_prepare':
+                    try:
+                        detail=response.json()
+                        detail=detail.get('detail',detail)
+                        code=detail.get('code') if isinstance(detail,dict) else None
+                    except ValueError:code=None
+                    messages={
+                        'scope_unconfirmed':'工具参数与已确认条件不一致，请补充或确认查询范围。',
+                        'scope_missing':'请补充查询所需对象、时间或范围。',
+                        'unsupported_scope':'此接口不支持所要求的筛选条件，请先确认受支持范围。',
+                        'real_provider_disabled':'资料连接尚未配置，请联系管理员恢复当前资料连接。',
+                        'real_provider_configuration_invalid':'资料连接配置尚未通过校验，请联系管理员。',
+                        'provider_connection_mismatch':'资料插件与连接绑定不一致，请联系管理员。',
+                        'outside_acceptance_scope':'当前对象或位置不在已授权测试范围。',
+                    }
+                    # A duplicate/in-progress call can already have dispatched.
+                    if code in messages:
+                        raise HTTPException(409,{'code':code,'dispatch_status':'not_dispatched',
+                            'message':messages[code]+' 本次未访问资料接口。'})
+                raise HTTPException(409,'当前资料能力不可用或执行已停止')
             return response.json()
         if value['tool'] in PROVIDER_TOOLS:
             from .theft_provider_execution import execute,execute_native

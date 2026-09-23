@@ -94,3 +94,21 @@ def test_preview_ticket_and_admission_do_not_expose_identity_to_model(provider,m
     assert business_runs.replay(store,uid,'ses_multi',request)==receipt
     with pytest.raises(HTTPException):
         prepare(provider,'theft-assistant',sid='other-session',provider_query={k:signed[k] for k in ('plan','confirmation')})
+
+
+def test_file_config_and_independent_binding(provider,monkeypatch,tmp_path):
+    store=provider[0];uid=provider[4]['uid'];candidate(provider,monkeypatch,'tracks')
+    config=json.loads(__import__('os').environ['PX_THEFT_REAL_CONFIG'])
+    config['connections']={'tracks':'police-test'}
+    path=tmp_path/'provider.json';path.write_text(json.dumps(config))
+    monkeypatch.delenv('PX_THEFT_REAL_CONFIG')
+    monkeypatch.setenv('PX_THEFT_REAL_CONFIG_FILE',str(path))
+    assert provider_contracts.freeze(store,uid,'tracks',query('tracks'),{REF:ID},provider[-1])['connection_id']=='police-test'
+    config['connections']['tracks']='warning-test'
+    path.write_text(json.dumps(config))
+    with pytest.raises(HTTPException) as exc:
+        provider_contracts.freeze(store,uid,'tracks',query('tracks'),{REF:ID},provider[-1])
+    assert exc.value.detail['code']=='provider_connection_mismatch'
+    path.unlink()
+    with pytest.raises(HTTPException) as exc:provider_contracts.settings(uid)
+    assert exc.value.detail['code']=='real_provider_configuration_invalid'

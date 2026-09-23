@@ -28,3 +28,14 @@ def test_existing_and_native_theft_scopes_render(tmp_path):
     assert env['PX_THEFT_NATIVE_UIDS']=='a'*32
     assert env['PX_THEFT_PLANNER_UIDS']==''
     assert env['PX_THEFT_PROVIDER_UIDS']==''
+
+
+def test_provider_config_survives_render(tmp_path):
+    path=tmp_path/'platform.json'
+    path.write_text(json.dumps({'version':1,'public_url':'https://agent.internal:14443','control_port':14093,'tls':{'certificate':'./certificate.pem','private_key':'./private.pem'}}))
+    cfg=platform.config.load_config(path)
+    cfg.secrets.mkdir(parents=True,exist_ok=True)
+    (cfg.secrets/'console-provider.json').write_text('{}')
+    service=platform.compose_config(cfg)['services']['console']
+    assert service['environment']['PX_THEFT_REAL_CONFIG_FILE']=='/run/secrets/provider-config'
+    assert any(v.get('target')=='/run/secrets/provider-config' and v.get('read_only') for v in service['volumes'])

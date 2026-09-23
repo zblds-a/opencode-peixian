@@ -120,6 +120,12 @@ def compose_config(cfg, pinned=None):
         console["environment"]["PX_RUNTIME_POOL_CONFIG"] = json.dumps(cfg.runtime_pool, separators=(',', ':'))
     for name, env in {"task_spec_v1":"PX_TASKSPEC_V1_UIDS", "multi_agent_v1":"PX_MULTI_AGENT_V1_UIDS", "trusted_result_v2":"PX_TRUSTED_RESULT_V2_UIDS", "theft_provider_v1":"PX_THEFT_PROVIDER_UIDS", "theft_planner_v1":"PX_THEFT_PLANNER_UIDS", "theft_native":"PX_THEFT_NATIVE_UIDS"}.items():
         console["environment"][env] = ",".join(cfg.feature_scopes.get(name, []))
+    provider_file = cfg.secrets / 'console-provider.json'
+    if provider_file.is_file():
+        if provider_file.is_symlink():
+            raise PlatformError('provider_config_is_link')
+        console['volumes'].append(bind(provider_file, '/run/secrets/provider-config'))
+        console['environment']['PX_THEFT_REAL_CONFIG_FILE'] = '/run/secrets/provider-config'
     # This applies to v1 upgrades too: browser users must not share the proxy IP
     # in source-based login limits. No account management network is trusted.
     console["environment"]["FORWARDED_ALLOW_IPS"] = str(next(ipaddress.ip_network(cfg.network_pool).subnets(new_prefix=28)))

@@ -7,7 +7,14 @@ export function remoteTool(token, name, definition) {
    body:JSON.stringify({session_id:ctx.sessionID,message_id:ctx.messageID,call_id:ctx.callID,tool:name,args}),
    signal:ctx.abort ?? AbortSignal.timeout(300000),redirect:'error'
   });
-  if(!response.ok)throw new Error('资料操作未完成，请查看本轮执行状态；结果未知时不会自动重新取数。');
+  if(!response.ok) {
+   const body=await response.json().catch(()=>null);
+   const detail=body?.detail;
+   const codes=new Set(['scope_unconfirmed','scope_missing','unsupported_scope','real_provider_disabled','real_provider_configuration_invalid','provider_connection_mismatch','outside_acceptance_scope']);
+   if(detail?.dispatch_status==='not_dispatched' && codes.has(detail.code))
+    throw new Error(`${detail.message} [${detail.code}; not_dispatched]`);
+   throw new Error('资料操作未完成，请查看本轮执行状态；结果未知时不会自动重新取数。');
+  }
   return JSON.stringify(await response.json());
  }};
 }

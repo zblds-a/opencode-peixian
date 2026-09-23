@@ -4,6 +4,7 @@ import os
 import hashlib
 import hmac
 import math
+from pathlib import Path
 from .backend_contract import error
 from .capabilities import check_selection
 from shared import theft_provider_v2 as adapter
@@ -14,21 +15,22 @@ RELEASES = {'1.0.0': 'theft-provider-contract-v1', '2.0.0': adapter.VERSION, '3.
 
 def settings(uid):
     try:
-        config=json.loads(os.getenv('PX_THEFT_REAL_CONFIG','{}'))
+        path=os.getenv('PX_THEFT_REAL_CONFIG_FILE')
+        config=json.loads(Path(path).read_text(encoding='utf-8') if path else os.getenv('PX_THEFT_REAL_CONFIG','{}'))
         if not isinstance(config,dict):raise ValueError()
         if config.get('enabled') is not True or uid not in config.get('users',[]):
             error('real_provider_disabled','真实资料连接尚未开放。',409)
         if config.get('environment')!='acceptance_real':raise ValueError()
         limits=config['limits']
         adapter.normalize('incidents',{'lon':'0','lat':'0','radius_m':1},limits)
-        if not isinstance(config['connections'],dict) or not config['connections'] or set(config['connections'])-{'police','warning'}:raise ValueError()
+        if not isinstance(config['connections'],dict) or not config['connections'] or set(config['connections'])-({'police','warning'}|set(ACTIVE_KINDS)):raise ValueError()
         if config.get('acceptance_scope_confirmed') is not True:raise ValueError()
         box=config.get('approved_bbox')
         if box is not None and (not isinstance(box,list) or len(box)!=4 or any(type(v) not in (int,float) or not math.isfinite(v) for v in box) or not (-180<=box[0]<=box[2]<=180 and -90<=box[1]<=box[3]<=90)):raise ValueError()
         hashes=config.get('approved_identity_hashes',[])
         if not isinstance(hashes,list) or any(not isinstance(v,str) or len(v)!=64 for v in hashes):raise ValueError()
         return config
-    except (ValueError,KeyError,TypeError):
+    except (OSError,ValueError,KeyError,TypeError):
         error('real_provider_configuration_invalid','真实连接配置或验收范围尚未确认。',409)
 
 
@@ -41,7 +43,7 @@ def binding(store,uid,kind,applied):
     if not plugin or RELEASES.get(plugin['version'])!=adapter.VERSION or plugin['manifest'].get('tools')!=['peixian_query_'+kind]:
         error('provider_not_applied','真实资料插件版本尚未生效。',409)
     group=adapter.CATALOG[kind][3]
-    cid=config['connections'].get(group)
+    cid=config['connections'].get(kind,config['connections'].get(group))
     if not cid:error('provider_connection_unconfigured','此类资料连接尚未配置，其他已配置能力可继续使用。',409)
     row=store.one('SELECT c.* FROM connections c JOIN plugin_connections b ON b.connection_id=c.id WHERE b.plugin=? AND b.version=? AND b.alias=? AND c.id=?',(plugin_id,plugin['version'],'provider',cid))
     if not row:error('provider_connection_mismatch','资料连接与发布绑定不一致。',409)
