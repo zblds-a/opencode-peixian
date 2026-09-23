@@ -36,6 +36,9 @@ def test_native_tool_one_confirmed_call(provider,monkeypatch):
     store=provider[0];uid=provider[4]['uid'];row=native_candidate(provider,monkeypatch)
     decision=native_tool_gate.prepare(store,uid,'ses_multi',row['message_id'],'call-one',tool('tracks'),ARGS,1)
     assert decision['cached'] is False
+    assert decision['review_input']['capability_name']
+    assert decision['review_input']['person_identity_confirmed'] is True
+    assert ID not in json.dumps(decision['review_input'])
     assert native_tool_gate.approve(store,uid,row['id'],'call-one',decision['digest'],{'verdict':'allow','reason_code':'aligned'},1)['allowed']
     state=ProviderState(store);op=state.begin(uid,row['id'],1)
     assert state.reserve(uid,row['id'],1,op,'tracks')

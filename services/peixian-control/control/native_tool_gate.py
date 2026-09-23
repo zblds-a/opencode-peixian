@@ -109,8 +109,12 @@ def prepare(store,uid,sid,message_id,call_id,tool,args,revision):
         return {'cached':False,'run_id':row['id'],'call_id':call_id,'review_id':review_id(row['id'],call_id,plan_digest),
             'model_id':row['model_id'],'revision':revision,'digest':plan_digest,
             'review_input':{'user_request':redact(context['current_text']),'task_id':context['task_id'],
-                'scope_version':context['scope_version'],'confirmed_fields':sorted(context['confirmed']),
+                'scope_version':context['scope_version'],'confirmed_fields':sorted(set(context['confirmed']) & set(args)),
                 'source_count':len(context['source_refs']),'tool':tool,'kind':kind,
+                'capability_name':adapter.CATALOG[kind][0],
+                'person_identity_confirmed':kind in adapter.PERSON,
+                'confirmation_basis':'selected_source' if context['source_refs'] else 'user_supplied_values',
+                'capability_limits':('档案包含最近抓拍，但不代表完整轨迹。' if kind=='profile' else '仅使用当前已确认参数；不支持额外筛选。'),
                 'query_fields':sorted(query),'requested_values':{k:v for k,v in query.items() if k!='person_ref'}}}
 
 
