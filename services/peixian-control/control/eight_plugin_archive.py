@@ -1,8 +1,8 @@
-"""Operator-only archival of legacy business plugins; never deletes packages or Runs.
+"""Operator-only retirement of legacy business plugins and package files.
 
 Run with the matching Control image after a complete private backup. Each account
-must be idle, and all eight replacement plugins must already be granted, installed,
-and published. This script changes one account at a time.
+must be idle, and granted replacement plugins must already be installed and
+published. This script changes one account at a time; historical Runs remain.
 """
 import argparse
 import hashlib
