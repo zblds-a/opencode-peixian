@@ -797,7 +797,7 @@ export default function Chat() {
                   const attachments = () => message().attachments ?? sentAttachments()[message().info.id] ?? []
                   const textParts = () => entry().textParts
                   const toolParts = () => entry().toolParts
-                  const renderText = (item: { part: Message["parts"][number]; id: string }) => message().info.role === "assistant" ? <div><SmoothMarkdown id={`${selected()}:${item.id}`} text={item.part.text ?? ""} live={busy() || Date.now() < animateUntil} cache={displayedText} onProgress={() => { if (scroll && followOutput && !selectingText && !selectionInConversation()) scroll.scrollTop = scroll.scrollHeight }} /></div> : <Markdown text={item.part.text ?? ""} />
+                  const renderText = (item: { part: Message["parts"][number]; id: string }) => message().info.role === "assistant" && item.part.origin !== "controlled_answer" ? <div><SmoothMarkdown id={`${selected()}:${item.id}`} text={item.part.text ?? ""} live={busy() || Date.now() < animateUntil} cache={displayedText} onProgress={() => { if (scroll && followOutput && !selectingText && !selectionInConversation()) scroll.scrollTop = scroll.scrollHeight }} /></div> : <Markdown text={item.part.text ?? ""} />
                   const traceComplete = () => {
                     const key = `${selected()}:${message().info.id}`
                     if (toolParts().length && toolParts().every((part, index) => ["completed", "succeeded"].includes(toolStatus(part, index, message().info.id)))) completedToolTraces.add(key)
