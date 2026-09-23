@@ -72,6 +72,8 @@ def arguments(kind,args,context):
     if set(args)-supported:
         error('native_tool_invalid','查询参数包含未开放的条件。',422)
     confirmed=context['confirmed']
+    if isinstance(args.get('person_identity'),str) and args['person_identity'].startswith('person-'):
+        error('identity_parameter_invalid','person_identity 必须使用已确认的原始身份号码，不能使用展示引用。',409)
     for key,value in args.items():
         if key not in confirmed or str(confirmed[key])!=str(value):
             error('scope_unconfirmed','工具参数未在当前任务范围内确认，请先向用户提问。',409)
@@ -171,3 +173,14 @@ def named_sources(store,uid,sid,text):
     if len(unique)>20:
         error('source_selection_limit','本次选定的来源过多，请明确其中一条。',422)
     return list(unique.values())
+
+
+def model_context(context):
+    """Explain the frozen argument contract; never rewrite submitted tool input."""
+    return ('\n本轮原生工具参数约定：person_identity 只填写用户已确认的原始单人身份号码；'
+        'person-* 是来源展示引用，不是身份号码，不能填入 person_identity，不要要求用户确认内部引用。'
+        '已选定来源时，对象或坐标由平台从该来源读取，不在工具参数中重复传入。'
+        '以下已确认值不是要求查询全部能力；只取当前问题需要的字段，缺项通过 question 提问。'
+        '意图核对或参数错误不代表记录为零；不自行重试失败调用。\n'
+        +adapter.canonical({'version':'native-tool-arguments-v1','scope_version':context['scope_version'],
+            'confirmed':context['confirmed'],'selected_source_refs':context['source_refs']}))

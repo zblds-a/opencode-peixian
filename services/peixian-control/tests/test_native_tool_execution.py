@@ -39,6 +39,14 @@ def test_native_tool_one_confirmed_call(provider,monkeypatch):
     assert decision['review_input']['capability_name']
     assert decision['review_input']['person_identity_confirmed'] is True
     assert ID not in json.dumps(decision['review_input'])
+    review=decision['review_input']
+    ref=review['requested_values']['person_ref']
+    assert review['identity_binding']=={'status':'matched','person_ref':ref}
+    assert review['confirmed_values']['person_ref']==ref
+    assert ref in review['user_request']
+    assert review['requested_values']['start']==ARGS['start']
+    assert review['contract_defaults']=={'track_types':[0,1,2]}
+    assert review['version']=='native-intent-context-v2'
     assert native_tool_gate.approve(store,uid,row['id'],'call-one',decision['digest'],{'verdict':'allow','reason_code':'aligned'},1)['allowed']
     state=ProviderState(store);op=state.begin(uid,row['id'],1)
     assert state.reserve(uid,row['id'],1,op,'tracks')
@@ -170,3 +178,24 @@ def test_empty_review_closes_without_admitting_or_resending(provider,monkeypatch
     snap=store.decrypt(store.one('SELECT request_ciphertext FROM business_runs WHERE id=?',(row['id'],))['request_ciphertext'])
     assert snap['native_calls']['review-empty']['dispatch_status']=='not_dispatched'
     assert 'provider_plan' not in snap
+
+
+def test_display_identity_cannot_replace_raw_confirmed_parameter(provider,monkeypatch):
+    store=provider[0];uid=provider[4]['uid'];row=native_candidate(provider,monkeypatch)
+    wrong={**ARGS,'person_identity':'person-'+'a'*32}
+    with pytest.raises(HTTPException) as exc:
+        native_tool_gate.prepare(store,uid,'ses_multi',row['message_id'],'display-id',tool('tracks'),wrong,1)
+    assert exc.value.detail['code']=='identity_parameter_invalid'
+    snapshot=store.decrypt(store.one('SELECT request_ciphertext FROM business_runs WHERE id=?',(row['id'],))['request_ciphertext'])
+    assert snapshot['native_calls']=={}
+    assert 'provider_plan' not in snapshot
+    context=native_tool_scope.model_context(snapshot['native_tool_context'])
+    assert ID in context and 'person_identity' in context
+    assert '不要要求用户确认内部引用' in context
+
+
+def test_review_context_redacts_other_identities_without_equating_them():
+    ref='person-'+'a'*32
+    value=native_tool_gate.redact('查询 '+ID+'，不要查询 990000200001010022',{ref:ID})
+    assert ID not in value and '990000200001010022' not in value
+    assert value.count(ref)==1 and '[其他身份已脱敏]' in value

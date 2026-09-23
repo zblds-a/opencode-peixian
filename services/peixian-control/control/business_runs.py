@@ -88,11 +88,12 @@ def submit(store, user, sid, data, payload, applied, revision, parent=None, draf
         from .native_tool_gate import enabled as native_enabled, VERSION as native_version
         native=profile.id=='theft-assistant' and native_enabled(store,user['uid']) and task is None
         if native:
-            from .native_tool_scope import freeze_context
+            from .native_tool_scope import freeze_context, model_context
             from .data_plugin_policy import installable
             allowed=sorted({tool for p in applied.get('plugins',[]) if installable(p['id']) and p.get('version')=='3.0.0' for tool in p.get('manifest',{}).get('tools',[])})
             payload['tools']={**payload.get('tools',{}),'*':False,'question':True,**{tool:True for tool in allowed}}
             snapshot['native_tool_context']=freeze_context(store,user['uid'],sid,data)
+            payload['system']=payload.get('system','')+model_context(snapshot['native_tool_context'])
             snapshot['native_tool_policy']={'version':native_version,'allowed_tools':allowed,'revision':revision}
             snapshot['native_calls']={}
             snapshot['task_spec']={'schema_version':'native-tools-v1','domain':'theft','agent_id':profile.id,'query_mode':'native','methods':[],'task_id':snapshot['native_tool_context']['task_id']}

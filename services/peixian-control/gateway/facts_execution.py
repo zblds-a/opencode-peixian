@@ -81,6 +81,7 @@ def register(app):
                         code=detail.get('code') if isinstance(detail,dict) else None
                     except ValueError:code=None
                     messages={
+                        'identity_parameter_invalid':'请使用用户已确认的原始单人身份号码。person-* 是展示引用，不能填入 person_identity；不要要求用户确认内部引用。',
                         'scope_unconfirmed':'工具参数与已确认条件不一致，请补充或确认查询范围。',
                         'scope_missing':'请补充查询所需对象、时间或范围。',
                         'unsupported_scope':'此接口不支持所要求的筛选条件，请先确认受支持范围。',
