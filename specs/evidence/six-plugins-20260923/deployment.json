@@ -1,0 +1,128 @@
+{
+  "source_sha": "230f3a7aab8b245fcf2df4145ca9e220dbc332ac",
+  "images": {
+    "peixian-alignment-20260917-console": {
+      "image": "sha256:1592ce300f0e6533612add9547a14d61f332acd4cc96975658a6669112b5989c",
+      "status": "running",
+      "health": "healthy"
+    },
+    "px-b053e6369d274ba08b48ab1f78b1b13b-gateway-1": {
+      "image": "sha256:9cafdec575a0bc5ef9cde1ea642db0b326fd6241b38fcbd2e84d060c851bd5ee",
+      "status": "running",
+      "health": "healthy"
+    },
+    "px-2ab39109b18847e089c72951d26d6da5-gateway-1": {
+      "image": "sha256:9cafdec575a0bc5ef9cde1ea642db0b326fd6241b38fcbd2e84d060c851bd5ee",
+      "status": "running",
+      "health": "healthy"
+    }
+  },
+  "runtime": {
+    "maintenance": "normal",
+    "schema": 11,
+    "users": [
+      {
+        "account": "alignment-a",
+        "status": "ready",
+        "revision": 70,
+        "gate_policy": "open",
+        "recovery_required": 0,
+        "effective_plugins": [
+          {
+            "id": "peixian-theft-captures",
+            "version": "3.0.0"
+          },
+          {
+            "id": "peixian-theft-community",
+            "version": "3.0.0"
+          },
+          {
+            "id": "peixian-theft-incidents",
+            "version": "3.0.0"
+          },
+          {
+            "id": "peixian-theft-night",
+            "version": "3.0.0"
+          },
+          {
+            "id": "peixian-theft-profile",
+            "version": "3.0.0"
+          },
+          {
+            "id": "peixian-theft-tracks",
+            "version": "3.0.0"
+          },
+          {
+            "id": "peixian-theft-warning-detail",
+            "version": "3.0.0"
+          },
+          {
+            "id": "peixian-theft-warning-logs",
+            "version": "3.0.0"
+          }
+        ]
+      },
+      {
+        "account": "alignment-b",
+        "status": "ready",
+        "revision": 43,
+        "gate_policy": "open",
+        "recovery_required": 0,
+        "effective_plugins": [
+          {
+            "id": "peixian-theft-captures",
+            "version": "3.0.0"
+          },
+          {
+            "id": "peixian-theft-community",
+            "version": "3.0.0"
+          },
+          {
+            "id": "peixian-theft-incidents",
+            "version": "3.0.0"
+          },
+          {
+            "id": "peixian-theft-night",
+            "version": "3.0.0"
+          },
+          {
+            "id": "peixian-theft-profile",
+            "version": "3.0.0"
+          },
+          {
+            "id": "peixian-theft-tracks",
+            "version": "3.0.0"
+          },
+          {
+            "id": "peixian-theft-warning-detail",
+            "version": "3.0.0"
+          },
+          {
+            "id": "peixian-theft-warning-logs",
+            "version": "3.0.0"
+          }
+        ]
+      }
+    ],
+    "versioned_results": [
+      {
+        "run": "f1760e2d88674dceba60a6ee705dfac2",
+        "provider_sentence": null,
+        "records": 14,
+        "contains_old_mapping": true,
+        "has_source_description": true
+      },
+      {
+        "run": "9e618c385aec49edbdf34b0f3a386db4",
+        "provider_sentence": "provider-source-text-v2",
+        "records": 14,
+        "contains_old_mapping": false,
+        "has_source_description": true
+      }
+    ]
+  },
+  "worker": "active",
+  "frontend_files_identical": true,
+  "frontend_file_count": 553,
+  "source_hashes_match": true
+}

@@ -1,0 +1,294 @@
+[
+  {
+    "test": "六插件验收-01-抓拍",
+    "run_id": "1194e55287b14c8992ec5e0209ebdb58",
+    "status": "completed",
+    "calls": [
+      {
+        "tool": "peixian_query_captures",
+        "status": "completed",
+        "verdict": {
+          "verdict": "allow",
+          "reason_code": "parameters_match_confirmed_source_scope"
+        },
+        "identity_input_format": null,
+        "dispatch_attempts": 1,
+        "response_count": 1,
+        "returned_count": 10,
+        "total": 14,
+        "coverage": "current_page"
+      }
+    ],
+    "result_record_count": 10,
+    "revision": 68
+  },
+  {
+    "test": "六插件验收-02-轨迹",
+    "run_id": "ae2e408d0bf042edaaf98e855f855dc8",
+    "status": "completed",
+    "calls": [
+      {
+        "tool": "peixian_query_tracks",
+        "status": "rejected",
+        "verdict": {
+          "verdict": "clarify",
+          "reason_code": "missing_person_ref"
+        },
+        "identity_input_format": null,
+        "dispatch_attempts": 0,
+        "response_count": 0,
+        "returned_count": null,
+        "total": null,
+        "coverage": null
+      }
+    ],
+    "result_record_count": 0,
+    "revision": 68
+  },
+  {
+    "test": "六插件验收-03-夜间",
+    "run_id": "10d1833ec15243a2bae259e8cb71af2f",
+    "status": "completed",
+    "calls": [],
+    "result_record_count": 0,
+    "revision": 68
+  },
+  {
+    "test": "六插件验收-04-跨小区",
+    "run_id": "64d29f7f4c2f4f6fa5fc64d9839a6cd7",
+    "status": "completed",
+    "calls": [
+      {
+        "tool": "peixian_query_community",
+        "status": "completed",
+        "verdict": {
+          "verdict": "allow",
+          "reason_code": "intent_and_parameters_match"
+        },
+        "identity_input_format": null,
+        "dispatch_attempts": 1,
+        "response_count": 1,
+        "returned_count": 1,
+        "total": 1,
+        "coverage": "current_page"
+      }
+    ],
+    "result_record_count": 1,
+    "revision": 68
+  },
+  {
+    "test": "六插件验收-05-预警概况",
+    "run_id": "85bafe24a935409da4606243b199b30b",
+    "status": "completed",
+    "calls": [
+      {
+        "tool": "peixian_query_warning_detail",
+        "status": "completed",
+        "verdict": {
+          "verdict": "allow",
+          "reason_code": "request_matches_warning_overview_scope"
+        },
+        "identity_input_format": null,
+        "dispatch_attempts": 1,
+        "response_count": 1,
+        "returned_count": 1,
+        "total": null,
+        "coverage": "single_object"
+      }
+    ],
+    "result_record_count": 1,
+    "revision": 68
+  },
+  {
+    "test": "六插件验收-06-七天明细",
+    "run_id": "52fd95498a974a6eb193ba9a6d72bf94",
+    "status": "completed",
+    "calls": [
+      {
+        "tool": "peixian_query_warning_logs",
+        "status": "completed",
+        "verdict": {
+          "verdict": "allow",
+          "reason_code": "tool_matches_confirmed_intent"
+        },
+        "identity_input_format": null,
+        "dispatch_attempts": 1,
+        "response_count": 1,
+        "returned_count": 1,
+        "total": null,
+        "coverage": "source_window"
+      }
+    ],
+    "result_record_count": 1,
+    "revision": 68
+  },
+  {
+    "test": "六插件补测-02-轨迹",
+    "run_id": "a007dae67fa94556b8ebdf8446dc41b6",
+    "status": "completed",
+    "calls": [],
+    "result_record_count": 0,
+    "revision": 69
+  },
+  {
+    "test": "六插件补测-12-轨迹",
+    "run_id": "f1760e2d88674dceba60a6ee705dfac2",
+    "status": "completed",
+    "calls": [
+      {
+        "tool": "peixian_query_tracks",
+        "status": "completed",
+        "verdict": {
+          "verdict": "allow",
+          "reason_code": "intent_matches_confirmed_track_query"
+        },
+        "identity_input_format": "raw",
+        "dispatch_attempts": 1,
+        "response_count": 1,
+        "returned_count": 14,
+        "total": null,
+        "coverage": "unknown"
+      }
+    ],
+    "result_record_count": 14,
+    "revision": 70
+  },
+  {
+    "test": "六插件补测-13-夜间",
+    "run_id": "521fbebff00444e7a54c800d2067ecd3",
+    "status": "completed",
+    "calls": [
+      {
+        "tool": "peixian_query_night",
+        "status": "completed",
+        "verdict": {
+          "verdict": "allow",
+          "reason_code": "night_list_matches_confirmed_person_and_time_range"
+        },
+        "identity_input_format": "raw",
+        "dispatch_attempts": 1,
+        "response_count": 1,
+        "returned_count": 10,
+        "total": 111,
+        "coverage": "current_page"
+      }
+    ],
+    "result_record_count": 10,
+    "revision": 70
+  },
+  {
+    "test": "六插件补测-11-抓拍",
+    "run_id": "0c966fd1c56447de9f1b7fc8ebf38739",
+    "status": "completed",
+    "calls": [
+      {
+        "tool": "peixian_query_captures",
+        "status": "completed",
+        "verdict": {
+          "verdict": "allow",
+          "reason_code": "intent_matches_tool_and_confirmed_params"
+        },
+        "identity_input_format": "raw",
+        "dispatch_attempts": 1,
+        "response_count": 1,
+        "returned_count": 10,
+        "total": 14,
+        "coverage": "current_page"
+      }
+    ],
+    "result_record_count": 10,
+    "revision": 70
+  },
+  {
+    "test": "六插件补测-14-跨小区",
+    "run_id": "6079b633a8e742e6bd3047777eafc2b4",
+    "status": "completed",
+    "calls": [
+      {
+        "tool": "peixian_query_community",
+        "status": "completed",
+        "verdict": {
+          "verdict": "allow",
+          "reason_code": "intent_matches_capability"
+        },
+        "identity_input_format": "raw",
+        "dispatch_attempts": 1,
+        "response_count": 1,
+        "returned_count": 1,
+        "total": 1,
+        "coverage": "current_page"
+      }
+    ],
+    "result_record_count": 1,
+    "revision": 70
+  },
+  {
+    "test": "六插件补测-15-预警概况",
+    "run_id": "b3e0ec12abc04ed886862d40da07592a",
+    "status": "completed",
+    "calls": [
+      {
+        "tool": "peixian_query_warning_detail",
+        "status": "completed",
+        "verdict": {
+          "verdict": "allow",
+          "reason_code": "intent_matches_capability"
+        },
+        "identity_input_format": "raw",
+        "dispatch_attempts": 1,
+        "response_count": 1,
+        "returned_count": 1,
+        "total": null,
+        "coverage": "single_object"
+      }
+    ],
+    "result_record_count": 1,
+    "revision": 70
+  },
+  {
+    "test": "六插件补测-16-七天明细",
+    "run_id": "32360dd9dfc541ff98485e042706f060",
+    "status": "completed",
+    "calls": [
+      {
+        "tool": "peixian_query_warning_logs",
+        "status": "completed",
+        "verdict": {
+          "verdict": "allow",
+          "reason_code": "intent_matched_capability"
+        },
+        "identity_input_format": "raw",
+        "dispatch_attempts": 1,
+        "response_count": 1,
+        "returned_count": 1,
+        "total": null,
+        "coverage": "source_window"
+      }
+    ],
+    "result_record_count": 1,
+    "revision": 70
+  },
+  {
+    "test": "六插件补测-17-轨迹展示",
+    "run_id": "9e618c385aec49edbdf34b0f3a386db4",
+    "status": "completed",
+    "calls": [
+      {
+        "tool": "peixian_query_tracks",
+        "status": "completed",
+        "verdict": {
+          "verdict": "allow",
+          "reason_code": "single_person_track_query_within_confirmed_scope"
+        },
+        "identity_input_format": "raw",
+        "dispatch_attempts": 1,
+        "response_count": 1,
+        "returned_count": 14,
+        "total": null,
+        "coverage": "unknown"
+      }
+    ],
+    "result_record_count": 14,
+    "revision": 70
+  }
+]
