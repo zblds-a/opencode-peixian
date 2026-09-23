@@ -10,7 +10,7 @@ export function remoteTool(token, name, definition) {
   if(!response.ok) {
    const body=await response.json().catch(()=>null);
    const detail=body?.detail;
-   const codes=new Set(['scope_unconfirmed','scope_missing','unsupported_scope','real_provider_disabled','real_provider_configuration_invalid','provider_connection_mismatch','outside_acceptance_scope']);
+   const codes=new Set(['scope_unconfirmed','scope_missing','unsupported_scope','real_provider_disabled','real_provider_configuration_invalid','provider_connection_mismatch','outside_acceptance_scope','intent_review_unavailable']);
    if(detail?.dispatch_status==='not_dispatched' && codes.has(detail.code))
     throw new Error(`${detail.message} [${detail.code}; not_dispatched]`);
    throw new Error('资料操作未完成，请查看本轮执行状态；结果未知时不会自动重新取数。');

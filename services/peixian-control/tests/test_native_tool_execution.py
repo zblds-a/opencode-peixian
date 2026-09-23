@@ -157,3 +157,13 @@ def test_native_scheduler_does_not_cancel_authorized_inflight_tool(provider,monk
     values[1]['parts'][0].update(id='part-unavailable',tool='unauthorized_query')
     assert not track_messages(store,row,values,{})
     assert store.one('SELECT cancel_requested FROM business_runs WHERE id=?',(row['id'],))['cancel_requested']==1
+
+
+def test_empty_review_closes_without_admitting_or_resending(provider,monkeypatch):
+    store=provider[0];uid=provider[4]['uid'];row=native_candidate(provider,monkeypatch)
+    p=native_tool_gate.prepare(store,uid,'ses_multi',row['message_id'],'review-empty',tool('tracks'),ARGS,1)
+    native_tool_gate.review_failed(store,uid,row['id'],'review-empty',p['digest'],1)
+    with pytest.raises(HTTPException):native_tool_gate.approve(store,uid,row['id'],'review-empty',p['digest'],{'verdict':'allow','reason_code':'late'},1)
+    snap=store.decrypt(store.one('SELECT request_ciphertext FROM business_runs WHERE id=?',(row['id'],))['request_ciphertext'])
+    assert snap['native_calls']['review-empty']['dispatch_status']=='not_dispatched'
+    assert 'provider_plan' not in snap

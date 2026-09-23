@@ -32,14 +32,17 @@ def register(app):
             with os.fdopen(descriptor,'w',encoding='utf-8') as target:
                 json.dump({'digest':digest,'status':'sending'},target);target.flush();os.fsync(target.fileno())
             gate.require_egress()
-            body={'model':data['model_id'],'messages':[{'role':'system','content':data['system']},{'role':'user','content':json.dumps(data['input'],ensure_ascii=False)}],'stream':False,'max_tokens':700,'temperature':0}
+            limit=int(os.getenv('PX_PLANNING_MAX_TOKENS','4096'))
+            if not 256<=limit<=16384:raise HTTPException(503,'Invalid planning resource limit')
+            body={'model':data['model_id'],'messages':[{'role':'system','content':data['system']},{'role':'user','content':json.dumps(data['input'],ensure_ascii=False)}],'stream':False,'max_tokens':limit,'temperature':0}
             async with asyncio.timeout(50):
                 async with app.state.client.stream('POST',fixed_base(app.state.settings.relay_url)+'/v1/chat/completions',json=body,timeout=45) as response:
                     response.raise_for_status();raw=bytearray()
                     async for chunk in response.aiter_bytes():
                         raw.extend(chunk)
                         if len(raw)>65536:raise HTTPException(502,'Planning response limit')
-            result={'content':json.loads(raw)['choices'][0]['message']['content']}
+            choice=json.loads(raw)['choices'][0]
+            result={'content':choice['message']['content'],'finish_reason':choice.get('finish_reason')}
             if not isinstance(result['content'],str) or len(result['content'])>16000:raise HTTPException(502,'Invalid planning response')
             stage=path.with_suffix('.tmp')
             with stage.open('w',encoding='utf-8') as target:

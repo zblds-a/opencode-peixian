@@ -85,7 +85,10 @@ async def execute_native(request, app, value, rpc, parent, process):
         response.raise_for_status()
         decision = json.loads(response.json()['content'])
     except (ValueError, KeyError, httpx.HTTPError, TimeoutError):
-        raise HTTPException(409, '独立意图核对结果未知，本次资料调用未投递且不会自动重试。') from None
+        with contextlib.suppress(httpx.HTTPError,HTTPException):
+            await rpc('native_review_failed',run_id=prepared['run_id'],call_id=value['call_id'],digest=prepared['digest'])
+        raise HTTPException(409, {'code':'intent_review_unavailable','dispatch_status':'not_dispatched',
+            'message':'本次未取得有效的意图核对结论，未访问资料接口；不会自动重试。'}) from None
     approved = await rpc('native_approve', run_id=prepared['run_id'],
         call_id=value['call_id'], digest=prepared['digest'], decision=decision)
     if not approved['allowed']:

@@ -14,6 +14,7 @@ async def test_durable_planning_receipt_and_no_tools(tmp_path):
         body=json.loads(request.content);calls.append(body)
         assert str(request.url)=='http://model-relay:8081/v1/chat/completions'
         assert 'tools' not in body and body['stream'] is False
+        assert body['max_tokens']==4096
         return httpx.Response(200,json={'choices':[{'message':{'content':'{"action":"stop"}'}}]})
     app.state.settings=SimpleNamespace(revision=1,activity_root=tmp_path,relay_url='http://model-relay:8081')
     app.state.admission=SimpleNamespace(admit=admit,finish=active.remove,require_egress=lambda:None)

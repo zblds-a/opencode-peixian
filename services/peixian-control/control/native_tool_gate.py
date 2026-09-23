@@ -140,3 +140,16 @@ def approve(store,uid,rid,call_id,plan_digest,decision,revision):
             snapshot['native_current_call']=call_id
         db.execute("UPDATE business_runs SET request_ciphertext=?,updated=? WHERE id=?",(store.encrypt(snapshot),now(),rid))
         return {'allowed':item['status']=='approved','reason_code':result['reason_code']}
+
+
+def review_failed(store,uid,rid,call_id,plan_digest,revision):
+    """Close only an unapproved review; this cannot grant or resend a call."""
+    with store.tx() as db:
+        row=db.execute('SELECT * FROM business_runs WHERE id=? AND uid=?',(rid,uid)).fetchone()
+        if not row or row['revision']!=revision:error('run_not_found','执行记录无法核对。',409)
+        snapshot=store.decrypt(row['request_ciphertext']);item=snapshot.get('native_calls',{}).get(call_id)
+        if not item or item['plan_digest']!=plan_digest:error('intent_binding_changed','核对身份不一致。',409)
+        if item['status']=='review_pending':
+            item.update(status='rejected',error_code='intent_review_unavailable',dispatch_status='not_dispatched')
+            db.execute('UPDATE business_runs SET request_ciphertext=?,updated=? WHERE id=?',(store.encrypt(snapshot),now(),rid))
+        return {'ok':True}
