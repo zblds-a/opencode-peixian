@@ -27,6 +27,9 @@ def extend(s):
  s['Health']['properties']['schema_version']['enum'].append(11)
  s['AnalysisTaskBody']=obj({'goal':{'type':'string','minLength':1,'maxLength':4000},'client_request_id':{'type':'string','format':'uuid'},'data_environment':{'enum':['synthetic','acceptance_real']}},('goal','client_request_id','data_environment'))
  s['AnalysisTask']=obj({'analysis_task_id':ID,'scenario_id':ID,'session_id':ID,'goal':STRING,'context_version':{'type':'integer'},'scope_version':{'type':'integer'},'steps':array({'type':'object'}),'planning':array({'type':'object'}),'selected_refs':array(source_ref),'budget':{'type':'object'},'data_environment':{'enum':['synthetic','acceptance_real']},'updated_at':STRING},('analysis_task_id','scenario_id','session_id','goal','context_version','scope_version','steps','selected_refs','budget','data_environment','updated_at'))
+ s['PlannerClarification']=obj({'version':{'const':'theft-clarification-v1'},'id':ID,'missing':array({'enum':['lon','lat','radius_m','start','end','page','page_size','person_identity','source','supported_scope']})},('version','id','missing'))
+ s['Run']['properties']['clarification']=nullable(ref('PlannerClarification'))
+ s['ClarificationDismissed']=obj({'dismissed':{'const':True}},('dismissed',))
  s['TaskSpec']['oneOf'].append(obj({'schema_version':{'const':'task-spec-v4'},'domain':{'const':'theft'},'agent_id':{'const':'theft-assistant'},'query_mode':{'enum':['new_query','explain_existing','clarify']},'methods':array(kinds,minItems=0,maxItems=1)},('schema_version','domain','agent_id','query_mode','methods'),extra=True))
  s['TaskSpec']['oneOf'][-1]['properties']['methods']['items']={'enum':list(V2_CATALOG)}
  status={'enum':['consistent','needs_information','inconsistent']}
@@ -43,4 +46,5 @@ def contracts():
  ('get','/theft-provider/capabilities'):(None,ref('ProviderCapabilities'),'可用资料查询','会话','只列当前账号授权且已生效能力；合成接口，不访问供应方。'),
  ('post','/sessions/{sid}/provider-query/preview'):('ProviderPreviewBody',ref('ProviderPreview'),'确认资料范围','会话','只检查范围，签名有效期600秒，绑定账号、会话、配置、清除边界；不调用模型和资料服务。'),
  ('get','/sessions/{sid}/runs/{rid}/reviews'):(None,ref('ReviewList'),'本人来源复核','会话','分页读取；跨账号404，不授予管理员读取正文权限。'),
+ ('post','/sessions/{sid}/runs/{rid}/clarification/reject'):(None,ref('ClarificationDismissed'),'暂不回答规划问题','会话','仅本人可操作；幂等关闭当前待补充问题，不查询资料或调用模型。'),
  ('post','/sessions/{sid}/runs/{rid}/reviews'):('ReviewBody',ref('Review'),'追加来源复核','会话','Idempotency-Key必填。终态且结果摘要匹配；追加更正保留原记录，不修改可信事实。')}

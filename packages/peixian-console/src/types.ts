@@ -226,6 +226,7 @@ export type RunEvent = {
 }
 export type Run = {
   outcome?: { version: string; status: string; label: string; message: string; next_steps: string[]; execution_status: string; data_status: string; queried: boolean | null }
+  clarification?: { version: "theft-clarification-v1"; id: string; missing: string[] } | null
   id: string
   session_id: string
   status: "queued" | "running" | "cancelling" | "reconciling" | "completed" | "failed" | "cancelled"

@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, Index, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, Index, onCleanup, Show } from "solid-js"
 import { list, post, safeMessage } from "./api"
 import { Button, ErrorLine, Icon } from "./components"
 import { useConsole } from "./context"
@@ -11,17 +11,24 @@ type Question = {
   multiple?: boolean
   custom?: boolean
 }
-type Pending = { id: string; sessionID: string; description?: string; questions?: Question[] }
+export type Pending = { id: string; sessionID: string; description?: string; questions?: Question[] }
 
-function QuestionForm(props: { request: () => Pending; busy: boolean; answer: (answers?: string[][]) => void }) {
+export function QuestionForm(props: { request: () => Pending; busy: boolean; answer: (answers?: string[][]) => void }) {
   const [selected, setSelected] = createSignal<string[][]>([])
   const [custom, setCustom] = createSignal<string[]>([])
   const [customEnabled, setCustomEnabled] = createSignal<boolean[]>([])
+  const questionID = createMemo(() => props.request().id)
+  createEffect(() => {
+    questionID()
+    setSelected([])
+    setCustom([])
+    setCustomEnabled([])
+  })
   const questions = () => props.request().questions ?? []
   const answers = () =>
     questions().map((question, index) => [
       ...(selected()[index] ?? []),
-      ...(question.custom !== false && customEnabled()[index] && custom()[index]?.trim()
+      ...(question.custom !== false && (customEnabled()[index] || !(question.options?.length)) && custom()[index]?.trim()
         ? [custom()[index].trim()]
         : []),
     ])
@@ -80,7 +87,19 @@ function QuestionForm(props: { request: () => Pending; busy: boolean; answer: (a
                   </label>
                 )}
               </For>
-              <Show when={question().custom !== false}>
+              <Show when={question().custom !== false && !(question().options?.length)}>
+                <textarea
+                  aria-label={safeMessage(question().header || "补充信息")}
+                  value={custom()[index] ?? ""}
+                  maxlength={1600}
+                  rows={2}
+                  required
+                  disabled={props.busy}
+                  placeholder="请输入你的补充说明"
+                  onInput={(event) => setCustom((current) => { const next = [...current]; next[index] = event.currentTarget.value; return next })}
+                />
+              </Show>
+              <Show when={question().custom !== false && !!question().options?.length}>
                 <label class="question-option">
                   <input
                     type={question().multiple ? "checkbox" : "radio"}

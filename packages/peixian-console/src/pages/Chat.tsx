@@ -1,9 +1,9 @@
-import { ProviderQuery, OwnerReviews } from "../TheftProvider"
 import { createEffect, createMemo, createSignal, For, Index, onCleanup, Show } from "solid-js"
 import { api, ApiError, list, patch, post, remove, safeMessage } from "../api"
 import { Button, Empty, ErrorLine, Field, Icon, Markdown, Modal, Spinner, Status } from "../components"
 import { useConsole } from "../context"
-import BusinessConfirmations from "../BusinessConfirmations"
+import BusinessConfirmations, { QuestionForm } from "../BusinessConfirmations"
+import { clarificationRequest, clarificationAnswer } from "../planner-question"
 import { ClueDrawer, CluePanel } from "../TrustedAnalysis"
 import RealEntityGraph from "../RealEntityGraph"
 import SmoothMarkdown from "../SmoothMarkdown"
@@ -14,6 +14,7 @@ import { displayName } from "../analysis-display"
 import { canObserve, canSend } from "../runtime-view"
 import { useResourceRefresh } from "../resource-refresh"
 import type { AnalysisClue, AnalysisResult, CapabilityItem, FileItem, Message, Model, Plugin, Run, RunEvent, RunEvidence, Session, Skill, SkillDraft } from "../types"
+
 export default function Chat() {
   const app = useConsole()
   const [sessions, setSessions] = createSignal<Session[]>([])
@@ -62,6 +63,7 @@ export default function Chat() {
   const [skillRequirement, setSkillRequirement] = createSignal("")
   const [draftTestText, setDraftTestText] = createSignal("")
   const [draftBusy, setDraftBusy] = createSignal(false)
+  const [questionBusy, setQuestionBusy] = createSignal(false)
   let scroll!: HTMLDivElement
   let textarea!: HTMLTextAreaElement
   let fileInput!: HTMLInputElement
@@ -88,9 +90,9 @@ export default function Chat() {
     const gaps = result.run_id && runEvidence()?.run_id === result.run_id ? runEvidence()?.missing : undefined
     return { ...result, missing: [...new Set([...(result.missing ?? []), ...(gaps ?? [])])] }
   })
-  const graphRunID = createMemo(() => currentRun()?.id ?? latestAnalysis()?.run_id)
+  const graphRunID = createMemo(() => latestAnalysis()?.run_id ?? currentRun()?.id)
   const hasInsights = createMemo(() => Boolean(latestAnalysis()?.clues.length || latestAnalysis()?.diagram || latestAnalysis()?.run_id))
-  const sideMode = createMemo(() => !selected() && !messages().length ? "plugins" : hasInsights() ? (showClues() ? "insight" : "collapsed") : "empty")
+  const sideMode = createMemo(() => hasInsights() ? (showClues() ? "insight" : "collapsed") : "empty")
   type ChatEntry = { message: Message; textParts: { part: Message["parts"][number]; id: string; afterTools: boolean }[]; toolParts: Message["parts"]; error?: Message["info"]["error"]; missingBody: boolean }
   const shownMessages = createMemo<ChatEntry[]>(() => messages().flatMap((message, index, all): ChatEntry[] => {
     if (message.info.role === "user") return [{ message, textParts: message.parts.filter((part) => part.type === "text" && part.text).map((part, partIndex) => ({ part, id: `${message.info.id}:${part.id ?? partIndex}`, afterTools: false })), toolParts: [], missingBody: false }]
@@ -356,17 +358,17 @@ export default function Chat() {
     } catch (cause) { if (selected() === id) app.notify((cause as Error).message, "error") }
     finally { if (app.user().id === owner) setClearingScene(false) }
   }
-  async function send() {
-    if (!draft().trim() || sending() || uncertain() || busy() || !ready() || !shownModels().length) return
-    const text = draft()
-    const attachments = selectedFiles().map((id) => ({ id, name: files().find((file) => file.id === id)?.name ?? "已上传文件" }))
+  async function send(textOverride?: string) {
+    const text = textOverride ?? draft()
+    if (!text.trim() || sending() || uncertain() || busy() || !ready() || !shownModels().length) return
+    const attachments: {id:string;name:string}[] = []
     const payload = {
       text: text.trim(),
       agent_id: "theft-assistant",
       model_id: model() || undefined,
-      skill_ids: [...selectedSkills()],
-      plugin_ids: [...selectedPlugins()],
-      file_ids: [...selectedFiles()],
+      skill_ids: [],
+      plugin_ids: [],
+      file_ids: [],
       mode: "standard",
       client_request_id: crypto.randomUUID(),
     }
@@ -403,7 +405,7 @@ export default function Chat() {
       setCurrentRun({ id: result.run_id, session_id: id, status: "queued", phase: "accepted", user_message_id: result.message_id, created_at: new Date().toISOString() })
       setRunEvents([])
       setRunEventRun(result.run_id)
-      if (draft() === text) setDraft("")
+      if (textOverride === undefined && draft() === text) setDraft("")
       if (JSON.stringify(selectedFiles()) === JSON.stringify(payload.file_ids)) setSelectedFiles([])
       if (JSON.stringify(selectedSkills()) === JSON.stringify(payload.skill_ids)) setSelectedSkills([])
       if (JSON.stringify(selectedPlugins()) === JSON.stringify(payload.plugin_ids)) setSelectedPlugins([])
@@ -421,6 +423,23 @@ export default function Chat() {
     } finally {
       if (app.user().id === uid) setSending(false)
     }
+  }
+  async function answerClarification(answers?: string[][]) {
+    const sid=selected(),run=currentRun(),question=run?.clarification
+    if (!sid || !run || !question || questionBusy() || sending()) return
+    setQuestionBusy(true)
+    setError("")
+    try {
+      if (answers === undefined) {
+        await post(`/sessions/${sid}/runs/${run.id}/clarification/reject`,{})
+        await refresh()
+        return
+      }
+      const reply=clarificationAnswer(question.missing,answers)
+      if (selected()!==sid || currentRun()?.id!==run.id || currentRun()?.clarification?.id!==question.id) return
+      await send(reply)
+    } catch (cause) { if (selected()===sid) setError(safeMessage((cause as Error).message)) }
+    finally { setQuestionBusy(false) }
   }
   async function abort() {
     if (!selected()) return
@@ -647,16 +666,6 @@ export default function Chat() {
       app.notify((cause as Error).message, "error")
     }
   }
-  const RelatedCapabilities = () => (
-    <aside class="related-capabilities">
-      <div class="related-capabilities-head"><div><strong>相关插件技能</strong><small>当前账号全部可用能力</small></div><span>{shownCapabilities().length}</span></div>
-      <div class="related-capabilities-list">
-        <For each={shownCapabilities()}>
-          {(item, index) => <button class={(item.kind === "skill" ? selectedSkills() : selectedPlugins()).includes(item.id) ? "selected" : ""} onClick={() => toggleCapability(item)}><span class={"capability-icon tone-" + (index() % 5)}><Icon name={item.kind === "skill" ? "skill" : "plugin"} size={18} /></span><span><strong>{item.name}<em>v{item.version}</em></strong><small>{item.description}</small><i>{item.kind === "skill" ? (item.owned ? "个人 Skill" : "官方 Skill") : "插件工具"}</i></span><b>{(item.kind === "skill" ? selectedSkills() : selectedPlugins()).includes(item.id) ? "已选" : "使用"}</b></button>}
-        </For>
-      </div>
-    </aside>
-  )
   return (
     <div class={"chat-layout side-mode-" + sideMode()}>
       <aside class={"history-panel " + (showHistory() ? "visible" : "")}>
@@ -743,7 +752,7 @@ export default function Chat() {
         <div class="messages-scroll" ref={scroll} onPointerDown={() => { selectingText = true }} onPointerUp={() => { selectingText = false }} onPointerCancel={() => { selectingText = false }} onScroll={() => { followOutput = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 96 }}>
           <Show
             when={messages().length || pendingPrompt() || awaitingReply()}
-            fallback={<Show when={!selected()} fallback={<div class="conversation-blank" aria-label="空白研判对话区" />}><div class="chat-welcome"><span class="welcome-icon"><Icon name="skill" size={25} /></span><h2>你好，我是盗窃资料助手</h2><p>可以咨询盗窃资料核对方法，或点击“盗窃资料查询”确认范围后查询。</p><div class="welcome-questions"><For each={["你能帮我做什么？", "如何整理并核对已有资料？", "研判结论如何追溯依据？", "如何使用技能或插件？"]}>{(question) => <button onClick={() => { setDraft(question); textarea?.focus() }}>{question}<Icon name="send" size={14} /></button>}</For></div></div></Show>}
+            fallback={<Show when={!selected()} fallback={<div class="conversation-blank" aria-label="空白研判对话区" />}><div class="chat-welcome"><span class="welcome-icon"><Icon name="skill" size={25} /></span><h2>你好，我是盗窃资料助手</h2><p>直接说出要核对的问题。我会根据已有资料继续分析；缺少必要条件时，会在对话中请你补充。</p><div class="welcome-questions"><For each={["你能帮我做什么？", "帮我核对一处位置周边的警情", "解释刚才的资料依据", "继续核对我选定的来源记录"]}>{(question) => <button onClick={() => { setDraft(question); textarea?.focus() }}>{question}<Icon name="send" size={14} /></button>}</For></div></div></Show>}
           >
             <div class="messages">
               <Index each={shownMessages()}>
@@ -774,7 +783,7 @@ export default function Chat() {
                               name={toolParts().every((part) => (part.execution?.status ?? part.state?.status) === "completed") ? "check" : "clock"}
                               size={14}
                             />
-                            <span>查看执行过程（{toolParts().length} 项）</span>
+                            <span>查看资料处理过程（{toolParts().length} 项）</span>
                             <Status
                               value={toolParts().every((part) => (part.execution?.status ?? part.state?.status) === "completed") ? "completed" : "running"}
                             />
@@ -860,12 +869,10 @@ export default function Chat() {
         </div>
         <div class="composer-area">
           <RuntimeStatus compact />
-          <ProviderQuery model={model() || shownModels()[0]?.id || ""} disabled={busy() || sending() || uncertain() || !ready() || !shownModels().length} sessionID={selected()} runID={currentRun()?.id} onAccepted={id=>{void choose(id)}} />
-          <Show when={selected() && currentRun() && terminalRun(currentRun()!.status)}><OwnerReviews sessionID={selected()!} runID={currentRun()!.id} /></Show>
-          <Show when={currentRun()?.outcome?.version === "run-outcome-v1" && currentRun()?.outcome}>
-            {(outcome) => <div class="runtime-banner" role="status" aria-label="本轮资料结果"><div><strong>{outcome().label}</strong><p>{outcome().message}</p><For each={outcome().next_steps}>{(step) => <small>{step}</small>}</For></div></div>}
-          </Show>
           <BusinessConfirmations sessionID={selected()} available={available()} onAnswered={() => void refresh()} />
+          <Show when={selected() && currentRun()?.clarification?.version === "theft-clarification-v1"}>
+            <QuestionForm request={() => clarificationRequest(currentRun()!, selected()!)} busy={questionBusy() || sending() || !ready()} answer={(answers) => void answerClarification(answers)} />
+          </Show>
           <ErrorLine message={error()} />
           <Show when={uncertain()}>
             <div class="runtime-banner" role="status">
@@ -881,43 +888,12 @@ export default function Chat() {
           </Show>
           <Show when={scene()?.scenario_id}><div class="selection-chips" role="status"><span>当前场景：{scene()?.name} · 追问将沿用</span><button disabled={busy() || sending() || clearingScene()} onClick={() => void clearScene()} aria-label="清除当前场景">清除场景 <Icon name="close" size={12}/></button></div></Show>
           <Show when={selectedFiles().length}><div class="pending-attachments" aria-label="待发送附件"><For each={selectedFiles()}>{(id) => <button type="button" title={files().find((file) => file.id === id)?.name ?? "已上传文件"} aria-label={`移除附件 ${files().find((file) => file.id === id)?.name ?? "已上传文件"}`} onClick={() => toggle(id, "files")}><Icon name="file" size={14} /><span>{files().find((file) => file.id === id)?.name ?? "已上传文件"}</span><Icon name="close" size={12} /></button>}</For></div></Show>
-          <Show when={selectedSkills().length || selectedPlugins().length}>
-            <div class="selection-chips">
-              <For each={selectedSkills()}>
-                {(id) => (
-                  <button onClick={() => toggle(id, "skills")}>
-                    <Icon name="skill" size={13} />
-                    {shownCapabilities().find((x) => x.id === id)?.name ?? skills().find((x) => x.id === id)?.name ?? "已选技能"}
-                    <Icon name="close" size={12} />
-                  </button>
-                )}
-              </For>
-              <For each={selectedPlugins()}>
-                {(id) => (
-                  <button onClick={() => setSelectedPlugins((current) => current.filter((value) => value !== id))}>
-                    <Icon name="plugin" size={13} />
-                    {shownCapabilities().find((x) => x.id === id)?.name ?? "已选插件"}
-                    <Icon name="close" size={12} />
-                  </button>
-                )}
-              </For>
-            </div>
-          </Show>
-          <Show when={slashQuery() !== undefined}>
-            <div class="slash-command-menu">
-              <div class="slash-command-head"><strong>/ 选择技能或插件</strong><input aria-label="筛选技能或插件" placeholder="输入名称可筛选" value={slashFilter()} onInput={(event) => setSlashFilter(event.currentTarget.value)} /></div>
-              <For each={slashCapabilities()} fallback={<p>没有匹配的可用能力</p>}>
-                {(item) => <button onClick={() => chooseSlashCapability(item)}><span class={"slash-kind " + item.kind}><Icon name={item.kind === "skill" ? "skill" : "plugin"} size={16} /></span><span><strong>{item.name}</strong><small>{item.description}</small></span><em>{item.kind === "skill" ? "Skill" : "插件"}</em></button>}
-              </For>
-            </div>
-          </Show>
           <div class="composer">
-            <input ref={fileInput} type="file" multiple accept=".xlsx,.pdf,.docx,.txt,.md,.csv" class="chat-file-input" aria-label="从本地选择文件" onChange={(event) => void uploadLocal(event.currentTarget.files)} />
             <textarea
               ref={textarea}
               aria-label="输入消息"
               maxlength={32000}
-              placeholder="向盗窃助手提问，使用 / 选择技能或插件…"
+              placeholder="直接描述要核对的问题，或继续追问已有结果…"
               value={draft()}
               rows={3}
               onInput={(event) => setDraft(event.currentTarget.value)}
@@ -929,16 +905,6 @@ export default function Chat() {
               }}
             />
             <div class="composer-tools">
-              <div class="composer-shortcuts">
-                <button onClick={() => setPicker("capabilities")}>
-                  <Icon name="skill" size={17} />
-                  能力
-                </button>
-                <button aria-label="从本地上传文件" title="从本地上传文件" disabled={uploading()} onClick={() => fileInput?.click()}>
-                  <Icon name="paperclip" size={19} />
-                  {uploading() ? "解析中…" : "文件"}
-                </button>
-              </div>
               <div class="model-choice">
                 <span class="model-dot" />
                 <select aria-label="选择授权模型" value={model() || shownModels()[0]?.id} disabled={busy()} onChange={(event) => setModel(event.currentTarget.value)}>
@@ -953,7 +919,7 @@ export default function Chat() {
                     icon="send"
                     busy={sending()}
                     disabled={!draft().trim() || uncertain() || !ready() || !shownModels().length}
-                    onClick={send}
+                    onClick={() => void send()}
                   >
                     发送
                   </Button>
@@ -972,11 +938,10 @@ export default function Chat() {
       </section>
       <Show when={sideMode() !== "empty"}>
         <aside class={"insight-sidebar rail-" + sideMode()} aria-label="研判侧栏">
-          <Show when={sideMode() === "plugins"}><RelatedCapabilities /></Show>
           <Show when={sideMode() === "collapsed"}><button class="insight-reopen" onClick={() => setShowClues(true)} aria-label="展开研判侧栏" title="展开研判侧栏"><Icon name="star" size={17} /></button></Show>
           <Show when={sideMode() === "insight"}>
             <div class="insight-single-head"><strong>{insightTab() === "clues" ? "智能发现线索" : "实体关系图谱"}</strong><div><button class="insight-icon-button" aria-label="切换侧栏内容" title="切换侧栏内容" onClick={() => setInsightTab(insightTab() === "clues" ? "graph" : "clues")}><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h15l-4-4M20 16H5l4 4" /></svg></button><button class="insight-icon-button" aria-label="收起侧栏" title="收起侧栏" onClick={() => setShowClues(false)}><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 15 7-7 7 7" /></svg></button></div></div>
-            <Show when={insightTab() === "clues"} fallback={<RealEntityGraph sessionID={selected()} runID={graphRunID()} />}>
+            <Show when={insightTab() === "clues"} fallback={<RealEntityGraph sessionID={selected()} runID={graphRunID()} runStatus={currentRun()?.id === graphRunID() ? currentRun()?.status : undefined} />}>
               <CluePanel clues={latestAnalysis()?.clues ?? []} expanded={showClues()} onExpandedChange={setShowClues} onSelect={setSelectedClue} hideHeader />
             </Show>
           </Show>

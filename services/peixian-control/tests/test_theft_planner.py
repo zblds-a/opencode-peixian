@@ -22,6 +22,7 @@ def test_literal_slots_do_not_route_or_invent():
     assert fields=={'lon':'116.1','lat':'34.2','radius_m':500,'page':2,'start':'2026-09-01 00:00:00','end':'2026-09-02 00:00:00'}
     with pytest.raises(HTTPException):planner.slots('半径100米 半径200米')
     with pytest.raises(HTTPException):planner.slots('半径100米',{'radius_m':200})
+    assert {v['field']:v['value'] for v in planner.slots('开始时间：2026-09-01 00:00:00').values()}=={'start':'2026-09-01 00:00:00'}
 
 
 def test_model_decision_cannot_enlarge_scope_or_filter():
@@ -51,7 +52,13 @@ def test_reservation_replay_budget_and_clarification(task_provider,monkeypatch):
     run=business_runs.owned(store,user['uid'],'ses_multi',receipt['run_id'])
     assert run['status']=='completed'
     assert not store.one('SELECT 1 FROM run_deliveries WHERE run_id=?',(run['id'],))
-    assert '请补充' in store.decrypt(run['request_ciphertext'])['task_response']['message']
+    assert '请在下方回答' in store.decrypt(run['request_ciphertext'])['task_response']['message']
+    question=planner.public_question(store,run)
+    assert question=={'version':'theft-clarification-v1','id':call['id'],'missing':['lon','lat','radius_m']}
+    with pytest.raises(HTTPException):planner.dismiss_question(store,'another-user','ses_multi',run['id'])
+    assert planner.dismiss_question(store,user['uid'],'ses_multi',run['id'])=={'dismissed':True}
+    assert planner.public_question(store,run) is None
+    assert planner.dismiss_question(store,user['uid'],'ses_multi',run['id'])=={'dismissed':True}
 
 
 @pytest.mark.anyio
@@ -72,6 +79,13 @@ async def test_model_continues_after_result_without_second_user_request(task_pro
     state.reserve(user['uid'],rid,1,op,'incidents');state.dispatch(user['uid'],rid,1,op,'incidents')
     state.complete(user['uid'],rid,1,op,'incidents','completed',response('incidents'));state.finish(user['uid'],rid,1,op)
     business_runs.set_state(store,rid,'completed','completed')
+    from control.trusted_results import read
+    record=read(store,user['uid'],'ses_multi',rid)['records'][0]
+    named=planner.mentioned_sources(store,user['uid'],'ses_multi',tid,'继续核对 '+record['record_id'])
+    assert len(named)==1 and named[0]['record_id']==record['record_id'] and named[0]['run_id']==rid
+    with pytest.raises(HTTPException) as missing_source:
+        planner.reserve(store,user,'ses_multi',tid,{'text':'来源记录编号：不存在的记录','model_id':env[-1]['models'][0]['id'],'client_request_id':str(uuid.uuid4())},env[-1],1)
+    assert missing_source.value.detail['code']=='source_record_unavailable'
     calls=[]
     async def run(fn,*args):return fn(*args)
     def transport(request):

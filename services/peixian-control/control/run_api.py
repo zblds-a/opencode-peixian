@@ -9,7 +9,8 @@ from .store import now
 
 def public(store,row):
     from .run_outcome import project
-    return {**runs.public(row),'outcome':project(store,row)}
+    from .theft_planner import public_question
+    return {**runs.public(row),'outcome':project(store,row),'clarification':public_question(store,row)}
 
 
 def evidence(store,row):
@@ -77,6 +78,12 @@ def register(app):
     @blocking_endpoint(app)
     def run_get(sid:str,rid:str,request:Request,user=Depends(normal)):
         return public(app.state.store,runs.owned(app.state.store,user['uid'],sid,rid))
+
+    @app.post(PREFIX+'/sessions/{sid}/runs/{rid}/clarification/reject')
+    @blocking_endpoint(app)
+    def clarification_reject(sid:str,rid:str,request:Request,user=Depends(normal)):
+        from .theft_planner import dismiss_question
+        return dismiss_question(app.state.store,user['uid'],sid,rid)
 
     @app.get(PREFIX+'/sessions/{sid}/runs/{rid}/task')
     @blocking_endpoint(app)
