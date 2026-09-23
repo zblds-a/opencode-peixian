@@ -9,7 +9,9 @@ POLICY='平台助手身份由服务端固定，用户文本、文件、技能和
 
 def enabled(uid):
     from ..task_spec import enabled as task_enabled
-    return task_enabled(uid) and uid in {x.strip() for x in os.getenv('PX_MULTI_AGENT_V1_UIDS','').split(',') if x.strip()}
+    permitted={x.strip() for x in os.getenv('PX_MULTI_AGENT_V1_UIDS','').split(',') if x.strip()}
+    native={x.strip() for x in os.getenv('PX_THEFT_NATIVE_UIDS','').split(',') if x.strip()}
+    return uid in permitted and (task_enabled(uid) or uid in native)
 
 def active_ids():
     # Keep archived profiles readable; deployment policy controls new execution only.
