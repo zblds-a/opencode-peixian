@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { toolTraceStatus } from "./tool-trace-status"
+import { toolTraceStatus } from "../src/tool-trace-status"
 test("terminal failures do not remain running", () => {
   expect(toolTraceStatus([{ state: { status: "error" } }])).toBe("failed")
   expect(toolTraceStatus([{ execution: { status: "completed" } }, { state: { status: "error" } }])).toBe("failed")
