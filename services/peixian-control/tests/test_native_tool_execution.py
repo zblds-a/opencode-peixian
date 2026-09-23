@@ -199,3 +199,37 @@ def test_review_context_redacts_other_identities_without_equating_them():
     value=native_tool_gate.redact('查询 '+ID+'，不要查询 990000200001010022',{ref:ID})
     assert ID not in value and '990000200001010022' not in value
     assert value.count(ref)==1 and '[其他身份已脱敏]' in value
+
+
+def test_only_reference_equal_to_frozen_person_is_accepted(provider,monkeypatch):
+    from shared import theft_provider_v2 as adapter
+    store=provider[0];uid=provider[4]['uid'];row=native_candidate(provider,monkeypatch)
+    ref=adapter.person_ref(ID,store.worker_key.encode(),uid+'/ses_multi')
+    for wrong in [adapter.person_ref(ID,store.worker_key.encode(),uid+'/other_session'),
+                  adapter.person_ref(ID,store.worker_key.encode(),'other_user/ses_multi')]:
+        with pytest.raises(HTTPException) as exc:
+            native_tool_gate.prepare(store,uid,'ses_multi',row['message_id'],'bad-'+wrong,tool('tracks'),{**ARGS,'person_identity':wrong},1)
+        assert exc.value.detail['code']=='identity_parameter_invalid'
+    accepted=native_tool_gate.prepare(store,uid,'ses_multi',row['message_id'],'same-person',tool('tracks'),{**ARGS,'person_identity':ref},1)
+    assert accepted['review_input']['identity_binding']=={'status':'matched','person_ref':ref}
+    snap=store.decrypt(store.one('SELECT request_ciphertext FROM business_runs WHERE id=?',(row['id'],))['request_ciphertext'])
+    call=snap['native_calls']['same-person']
+    assert call['identity_input_format']=='confirmed_scoped_reference'
+    assert call['frozen']['identities']=={ref:ID}
+    assert call['status']=='review_pending' and 'provider_plan' not in snap
+    # The original model arguments remain the deduplication identity.
+    with pytest.raises(HTTPException) as exc:
+        native_tool_gate.prepare(store,uid,'ses_multi',row['message_id'],'same-person',tool('tracks'),ARGS,1)
+    assert exc.value.detail['code']=='tool_call_conflict'
+
+
+def test_reference_without_confirmed_person_cannot_select_person(provider,monkeypatch):
+    from shared import theft_provider_v2 as adapter
+    store=provider[0];uid=provider[4]['uid'];row=native_candidate(provider,monkeypatch)
+    ref=adapter.person_ref(ID,store.worker_key.encode(),uid+'/ses_multi')
+    snap=store.decrypt(store.one('SELECT request_ciphertext FROM business_runs WHERE id=?',(row['id'],))['request_ciphertext'])
+    snap['native_tool_context']['confirmed'].pop('person_identity')
+    with store.tx() as db:db.execute('UPDATE business_runs SET request_ciphertext=? WHERE id=?',(store.encrypt(snap),row['id']))
+    with pytest.raises(HTTPException) as exc:
+        native_tool_gate.prepare(store,uid,'ses_multi',row['message_id'],'unconfirmed',tool('tracks'),{**ARGS,'person_identity':ref},1)
+    assert exc.value.detail['code']=='identity_parameter_invalid'

@@ -177,8 +177,8 @@ def named_sources(store,uid,sid,text):
 
 def model_context(context):
     """Explain the frozen argument contract; never rewrite submitted tool input."""
-    return ('\n本轮原生工具参数约定：person_identity 只填写用户已确认的原始单人身份号码；'
-        'person-* 是来源展示引用，不是身份号码，不能填入 person_identity，不要要求用户确认内部引用。'
+    return ('\n本轮原生工具参数约定：person_identity 可填写用户已确认的原始单人身份号码，或本人本会话中同一已确认对象的 person-* 引用；'
+        'person-* 不是新对象或身份证号，平台会校验它是否等于本轮已确认对象；不要要求用户确认内部引用。'
         '已选定来源时，对象或坐标由平台从该来源读取，不在工具参数中重复传入。'
         '以下已确认值不是要求查询全部能力；只取当前问题需要的字段，缺项通过 question 提问。'
         '意图核对或参数错误不代表记录为零；不自行重试失败调用。\n'

@@ -1,6 +1,8 @@
 // Account-scoped facts token only; Agent never receives these plugins' Relay bindings.
 export function remoteTool(token, name, definition) {
- return {...definition, async execute(args, ctx) {
+ const fields=definition.args;
+ const args=fields?.person_identity ? {...fields,person_identity:{...fields.person_identity,description:'用户已确认的原始单人身份号码，或本人本会话同一已确认对象的 person-* 引用。平台严格核对等值；不能用其他对象或其他会话引用替换。'}} : fields;
+ return {...definition,...(args ? {args} : {}), async execute(args, ctx) {
   if(!ctx?.sessionID || !ctx?.messageID || !ctx?.callID)throw new Error('资料调用缺少受控执行身份。');
   const response=await fetch('http://gateway:8080/internal/facts/execute',{
    method:'POST',headers:{'Content-Type':'application/json','X-Facts-Key':token},

@@ -1,6 +1,7 @@
 """Per-tool native admission, bound to the immutable user Run and OpenCode call ID."""
 import copy
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -78,7 +79,20 @@ def prepare(store,uid,sid,message_id,call_id,tool,args,revision):
         context=snapshot.get('native_tool_context')
         if not context or context.get('version')!='native-tool-context-v1':
             error('scope_unavailable','本轮确认范围不可用。',409)
-        query=arguments(kind,args,context)
+        # A scoped display reference is accepted only when it proves equality
+        # to this Run's already confirmed raw identity. Never resolve arbitrary
+        # prior persons, another account/session, or a merely model-supplied ID.
+        checked_args=copy.deepcopy(args)
+        identity_format='raw'
+        if kind in adapter.PERSON and isinstance(args.get('person_identity'),str) and args['person_identity'].startswith('person-'):
+            identity=context['confirmed'].get('person_identity')
+            try:expected=adapter.person_ref(adapter.person_id(identity),store.worker_key.encode(),uid+'/'+sid)
+            except adapter.ContractError:error('identity_parameter_invalid','请先明确本次查询对象；引用不能替代对象确认。',409)
+            if not hmac.compare_digest(args['person_identity'],expected):
+                error('identity_parameter_invalid','该引用与本轮已确认对象不一致。',409)
+            checked_args['person_identity']=identity
+            identity_format='confirmed_scoped_reference'
+        query=arguments(kind,checked_args,context)
         identities={}
         if context['source_refs']:
             from .native_tool_scope import source_values
@@ -86,7 +100,7 @@ def prepare(store,uid,sid,message_id,call_id,tool,args,revision):
             query.update(derived)
         elif kind in adapter.PERSON:
             identity=context['confirmed'].get('person_identity')
-            if identity!=args.get('person_identity'):
+            if identity!=checked_args.get('person_identity'):
                 error('identity_unconfirmed','人员条件尚未确认。',409)
             ref=adapter.person_ref(adapter.person_id(identity),store.worker_key.encode(),uid+'/'+sid)
             query['person_ref']=ref
@@ -100,7 +114,7 @@ def prepare(store,uid,sid,message_id,call_id,tool,args,revision):
             error('native_duplicate_call','本轮已请求过相同资料；请使用已有结果。',409)
         item={'call_id':call_id,'tool':tool,'args_digest':digest(args),'plan_digest':plan_digest,
               'status':'review_pending','frozen':frozen,'scope_version':context['scope_version'],
-              'source_refs':copy.deepcopy(context['source_refs']),'review_context_version':REVIEW_VERSION,'created':now()}
+              'source_refs':copy.deepcopy(context['source_refs']),'review_context_version':REVIEW_VERSION,'identity_input_format':identity_format,'created':now()}
         calls[call_id]=item
         db.execute("UPDATE business_runs SET request_ciphertext=?,updated=? WHERE id=?",(store.encrypt(snapshot),now(),row['id']))
         return {'cached':False,'run_id':row['id'],'call_id':call_id,'review_id':review_id(row['id'],call_id,plan_digest),
@@ -113,7 +127,7 @@ def prepare(store,uid,sid,message_id,call_id,tool,args,revision):
                 'confirmation_basis':'selected_source' if context['source_refs'] else 'user_supplied_values',
                 'capability_limits':adapter.LIMITATIONS[kind],
                 'identity_binding':({'status':'matched','person_ref':query['person_ref']} if kind in adapter.PERSON else None),
-                'confirmed_values':{('person_ref' if k=='person_identity' else k):(query['person_ref'] if k=='person_identity' else v) for k,v in args.items()},
+                'confirmed_values':{('person_ref' if k=='person_identity' else k):(query['person_ref'] if k=='person_identity' else v) for k,v in checked_args.items()},
                 'source_refs':copy.deepcopy(context['source_refs']),
                 'selected_source_values':derived if context['source_refs'] else {},
                 'contract_defaults':{k:v for k,v in frozen['query'].items() if k not in query},
