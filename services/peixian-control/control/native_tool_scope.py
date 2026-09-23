@@ -7,6 +7,8 @@ question; only the independent execution gate may call a supplier.
 import copy
 import re
 import uuid
+from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 from .backend_contract import error
 from .data_plugin_policy import ACTIVE_KINDS
@@ -77,6 +79,43 @@ def freeze_context(store,uid,sid,data):
         'scoring_requested':scoring_requested(text, prior)}
 
 
+FIELD_NAMES = {'person_identity':'人员','start':'开始时间','end':'结束时间','lon':'经度','lat':'纬度','radius_m':'半径','page':'页码','page_size':'每页条数'}
+
+
+def canonical_field(key, value):
+    """Only representation equivalence; never infer dates, timezone or units."""
+    try:
+        if key in ('page','page_size'):
+            if type(value) is int: return value
+            if isinstance(value,str) and re.fullmatch(r'[0-9]{1,9}',value): return int(value)
+            raise ValueError()
+        if key in ('start','end'):
+            if not isinstance(value,str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}',value): raise ValueError()
+            return datetime.strptime(value.replace('T',' '),'%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
+        if key in ('lon','lat','radius_m'):
+            if isinstance(value,bool) or not isinstance(value,(str,int,float)): raise ValueError()
+            n=Decimal(str(value))
+            if not n.is_finite(): raise ValueError()
+            return format(n.normalize(),'f')
+        return value
+    except (ValueError,InvalidOperation,OverflowError):
+        error('scope_parameter_invalid','参数格式无效，尚未查询；请仅补充提示字段。',422,{key:FIELD_NAMES.get(key,key)+'格式不符合接口合同'})
+
+
+def resolve_arguments(kind, args, context):
+    if not isinstance(args,dict): error('native_tool_invalid','资料工具参数必须是对象。',422)
+    resolved=copy.deepcopy(args)
+    confirmed=context['confirmed']
+    # Only fill existing task-bound conditions, never new objects or inferred times.
+    reusable=set()
+    if kind in adapter.PERSON and not context['source_refs']: reusable.add('person_identity')
+    if kind in adapter.TIMED and kind!='captures': reusable.update(('start','end'))
+    if kind=='captures': reusable.update({'start','end','radius_m'} & context.get('user_conditions',{}).keys())
+    for key in reusable:
+        if key not in resolved and key in confirmed: resolved[key]=copy.deepcopy(confirmed[key])
+    return {key:canonical_field(key,value) for key,value in resolved.items()}
+
+
 def arguments(kind,args,context):
     """Return only values the user explicitly confirmed; never trust tool input."""
     if kind not in ACTIVE_KINDS or not isinstance(args,dict):
@@ -85,12 +124,21 @@ def arguments(kind,args,context):
     if kind=='captures':supported-={'lon','lat'}
     if set(args)-supported:
         error('native_tool_invalid','查询参数包含未开放的条件。',422)
+    args=resolve_arguments(kind,args,context)
     confirmed=context['confirmed']
     if isinstance(args.get('person_identity'),str) and args['person_identity'].startswith('person-'):
         error('identity_parameter_invalid','person_identity 必须使用已确认的原始身份号码，不能使用展示引用。',409)
+    mismatches={}
     for key,value in args.items():
-        if key not in confirmed or str(confirmed[key])!=str(value):
-            error('scope_unconfirmed','工具参数未在当前任务范围内确认，请先向用户提问。',409)
+        # Only explicit contract defaults are exempt; never override a user choice.
+        if kind in adapter.PAGED and key in ('page','page_size') and key not in confirmed and value=={'page':1,'page_size':20}[key]:
+            continue
+        if key not in confirmed:
+            mismatches[key]=FIELD_NAMES[key]+'尚未确认'
+        elif canonical_field(key,confirmed[key])!=value:
+            mismatches[key]=FIELD_NAMES[key]+'与当前任务已确认值不一致'
+    if mismatches:
+        error('scope_unconfirmed','查询条件尚未确认或不一致，未访问资料接口；这不是授权错误。只询问列出的字段，用户补充前不要改换参数重试。',409,mismatches)
     # A supplied user condition cannot be silently discarded for the selected
     # interface. In particular /jq/search has no time/category filter.
     if kind=='incidents' and FILTERS.search(context.get('constraints_text',context['current_text'])):
@@ -105,7 +153,7 @@ def arguments(kind,args,context):
     required=({'radius_m'} if context['source_refs'] else {'lon','lat','radius_m'}) if kind=='incidents' else {'radius_m'} if kind=='captures' else set() if context['source_refs'] else {'person_identity'}
     if kind in adapter.TIMED:required|={'start','end'}
     if not required<=set(args):
-        error('scope_missing','查询所需对象、时间或范围尚未明确，请先提问。',409)
+        error('scope_missing','查询条件不完整，未访问资料接口；只补充列出的字段，不重试或猜测权限。',409,{k:FIELD_NAMES[k]+'尚未明确' for k in sorted(required-set(args))})
     if kind=='captures':
         if len(context['source_refs'])!=1:
             error('source_selection_required','周边抓拍必须先选择一个明确的位置来源。',409)
@@ -195,6 +243,8 @@ def model_context(context):
         'person-* 不是新对象或身份证号，平台会校验它是否等于本轮已确认对象；不要要求用户确认内部引用。'
         '已选定来源时，对象或坐标由平台从该来源读取，不在工具参数中重复传入。'
         '以下已确认值不是要求查询全部能力；只取当前问题需要的字段，缺项通过 question 提问。'
+        '服务端会补齐本任务已确认且用途适用的人员和时间；抓拍条件仍需独立确认。'
+        'scope_unconfirmed/scope_missing 是条件问题，不是缺少授权；只按 field_errors 追问对应缺项，禁止擅自换参数重试。'
         '意图核对或参数错误不代表记录为零；不自行重试失败调用。\n'
         +adapter.canonical({'version':'native-tool-arguments-v1','scope_version':context['scope_version'],
             'confirmed':context['confirmed'],'selected_source_refs':context['source_refs']}))

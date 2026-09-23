@@ -93,6 +93,8 @@ def prepare(store,uid,sid,message_id,call_id,tool,args,revision):
                 error('identity_parameter_invalid','该引用与本轮已确认对象不一致。',409)
             checked_args['person_identity']=identity
             identity_format='confirmed_scoped_reference'
+        from .native_tool_scope import resolve_arguments
+        checked_args=resolve_arguments(kind,checked_args,context)
         query=arguments(kind,checked_args,context)
         identities={}
         if context['source_refs']:
@@ -121,7 +123,7 @@ def prepare(store,uid,sid,message_id,call_id,tool,args,revision):
         return {'cached':False,'run_id':row['id'],'call_id':call_id,'review_id':review_id(row['id'],call_id,plan_digest),
             'model_id':row['model_id'],'revision':revision,'digest':plan_digest,
             'review_input':{'version':REVIEW_VERSION,'user_request':redact(context['current_text'],identities),'task_id':context['task_id'],
-                'scope_version':context['scope_version'],'confirmed_fields':sorted(set(context['confirmed']) & set(args)),
+                'scope_version':context['scope_version'],'confirmed_fields':sorted(set(context['confirmed']) & set(checked_args)),
                 'source_count':len(context['source_refs']),'tool':tool,'kind':kind,
                 'capability_name':adapter.CATALOG[kind][0],
                 'person_identity_confirmed':kind in adapter.PERSON,

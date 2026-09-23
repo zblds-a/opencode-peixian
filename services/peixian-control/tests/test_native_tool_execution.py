@@ -277,3 +277,13 @@ def test_native_table_result_is_persisted_and_messages_use_same_view(provider,mo
     table_answer.freeze(store,uid,'ses_multi',future,p)
     assert len(future['table_answer_policy']['history'])==1
     assert future['table_answer_policy']['history'][0]['run_id']==row['id']
+
+
+def test_native_omitted_confirmed_parameters_are_frozen(provider,monkeypatch):
+    store=provider[0];uid=provider[4]['uid'];row=native_candidate(provider,monkeypatch)
+    decision=native_tool_gate.prepare(store,uid,'ses_multi',row['message_id'],'reuse-confirmed',tool('tracks'),{},1)
+    review=decision['review_input']
+    assert review['requested_values']['start']==ARGS['start']
+    assert review['requested_values']['end']==ARGS['end']
+    assert set(review['confirmed_fields'])==set(ARGS)
+    assert ID not in json.dumps(review)
