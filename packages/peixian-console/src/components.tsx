@@ -235,7 +235,22 @@ export function Markdown(props: { text: string }) {
     })
   })
   onCleanup(() => generation++)
-  return <div ref={host} class="markdown" innerHTML={html()} />
+  return <div ref={host} class="markdown" innerHTML={html()} onClick={(event) => {
+    const link = (event.target as Element).closest<HTMLAnchorElement>("a[href]")
+    const href = link?.getAttribute("href") ?? ""
+    if (!/^#source-[a-zA-Z0-9-]+$/.test(href)) return
+    const target = host.querySelector<HTMLElement>(href)
+    if (!target) return
+    event.preventDefault()
+    let node: HTMLElement | null = target
+    while (node && node !== host) {
+      if (node instanceof HTMLDetailsElement) node.open = true
+      node = node.parentElement
+    }
+    target.scrollIntoView({ block: "nearest" })
+    const summary = target.querySelector<HTMLElement>("summary")
+    summary?.focus({ preventScroll: true })
+  }} />
 }
 export function Modal(props: {
   title: string
