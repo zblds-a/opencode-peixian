@@ -134,3 +134,13 @@ def test_native_two_distinct_tools_same_run(provider,monkeypatch):
     assert {m['module'] for m in result['data_usage']['modules']}=={'tracks','incidents'}
     assert result['data_usage']['new_call_count']==2
     assert len(result['records'])==2
+
+
+def test_newly_confirmed_filter_cannot_be_dropped():
+    context={'confirmed':{'lon':'116.1','lat':'34.1','radius_m':500,'person_identity':ID},
+             'source_refs':[],'current_text':'仅查询这名人员关联的警情',
+             'constraints_text':'仅查询这名人员关联的警情',
+             'user_conditions':{'person_identity':ID}}
+    with pytest.raises(HTTPException) as exc:
+        native_tool_scope.arguments('incidents',{'lon':'116.1','lat':'34.1','radius_m':500},context)
+    assert exc.value.detail['code']=='unsupported_scope'

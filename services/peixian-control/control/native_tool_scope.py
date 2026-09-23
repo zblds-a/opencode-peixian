@@ -79,6 +79,11 @@ def arguments(kind,args,context):
     # interface. In particular /jq/search has no time/category filter.
     if kind=='incidents' and FILTERS.search(context.get('constraints_text',context['current_text'])):
         error('unsupported_scope','当前警情接口只支持空间及分页；请说明上游默认覆盖范围并征求确认。',409)
+    # A person may be present in a multi-tool task without filtering the
+    # spatial incident query. Explicit person-only restrictions cannot be enforced.
+    if (kind=='incidents' and 'person_identity' in context.get('user_conditions',{})
+            and re.search(r'(仅|只)(查询|查|看)?.{0,12}(此人|该人员|这名人员|身份证|该人)',context['current_text'])):
+        error('unsupported_scope','当前警情接口不能按人员筛选；请说明限制并澄清查询范围。',409)
     if context['source_refs'] and {'lon','lat','person_identity'} & args.keys():
         error('source_value_override','已选择来源时不能再替换对象或坐标。',409)
     required=({'radius_m'} if context['source_refs'] else {'lon','lat','radius_m'}) if kind=='incidents' else {'radius_m'} if kind=='captures' else set() if context['source_refs'] else {'person_identity'}
