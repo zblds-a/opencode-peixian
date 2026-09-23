@@ -10,6 +10,6 @@ LABEL org.opencontainers.image.revision="${SOURCE_REVISION}" \
       org.peixian.control.schema.max="11" \
       org.peixian.dialogue="theft-clarification-v1"
 ENV PX_BACKEND_V6=1
-COPY services/peixian-control/control /app/control
-COPY services/peixian-control/shared /app/shared
-COPY packages/peixian-console/dist /app/static
+COPY services/peixian-control/control /candidate/control
+COPY services/peixian-control/shared /candidate/shared
+COPY packages/peixian-console/dist /candidate/static
