@@ -169,6 +169,9 @@ def build(row,snapshot,events):
 
 
 def project(store,row,snapshot):
+    if snapshot.get('native_tool_policy'):
+        from .native_tool_result import project as native_project
+        return native_project(row,snapshot)
     if snapshot.get('provider_plan'):
         from .theft_provider_result import project as provider_project
         return provider_project(row,snapshot)
@@ -199,8 +202,8 @@ def checked_result(store,stored):
     snapshot=store.decrypt(row['request_ciphertext']) if row else {}
     plan=snapshot.get('provider_plan',{})
     from shared.theft_provider_v2 import VERSION as PROVIDER_V2
-    environment=plan.get('data_environment','synthetic')
-    if (environment not in ('synthetic','acceptance_real') or (environment=='acceptance_real' and plan.get('version')!=PROVIDER_V2)
+    environment=snapshot.get('data_environment',plan.get('data_environment','synthetic'))
+    if (environment not in ('synthetic','acceptance_real') or (environment=='acceptance_real' and plan.get('version')!=PROVIDER_V2 and not snapshot.get('native_tool_policy'))
         or digest(result)!=stored['result_digest'] or result.get('run_id')!=stored['run_id'] or result.get('version')!=VERSION or result.get('data_environment')!=environment):error('result_integrity_failed','结果完整性无法核对。',409)
     return result
 
@@ -224,10 +227,13 @@ def read(store,uid,sid,rid):
     stored=store.one('SELECT * FROM run_results WHERE run_id=?',(rid,))
     if stored:return checked_result(store,stored)
     if row['status'] in business_runs.TERMINAL:error('result_not_finalized','最终结果尚未形成，请稍后读取；不会重新查询资料。',409)
-    return {'schema':'peixian.analysis-result','version':VERSION,'run_id':rid,'status':'pending','data_environment':snapshot.get('provider_plan',{}).get('data_environment','synthetic'),'data_usage':data_usage(store,row,snapshot)}
+    return {'schema':'peixian.analysis-result','version':VERSION,'run_id':rid,'status':'pending','data_environment':snapshot.get('data_environment',snapshot.get('provider_plan',{}).get('data_environment','synthetic')),'data_usage':data_usage(store,row,snapshot)}
 
 
 def data_usage(store,row,snapshot):
+    if snapshot.get("native_tool_policy"):
+        from .native_tool_result import project as native_project
+        return native_project(row,snapshot)["data_usage"]
     if snapshot.get("provider_plan"):
         from .theft_provider_result import project
         return project(row,snapshot)["data_usage"]

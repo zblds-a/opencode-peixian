@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from test_provider_flow import provider, enabled, v6, task_env, multi, accept, pid, tool
 from test_provider_contract_v2 import ID, REF, LIMITS, query, response
 from shared import theft_provider_v2 as adapter
+from control.data_plugin_policy import ACTIVE_KINDS
 from control import provider_contracts, business_runs, trusted_results
 from control.theft_provider_state import ProviderState
 from test_multi_agent import prepare,submit
@@ -32,6 +33,7 @@ def candidate(env,monkeypatch,kind):
     monkeypatch.setenv('PX_THEFT_REAL_CONFIG',json.dumps(config))
     plan=provider_contracts.freeze(store,uid,kind,query(kind),{REF:ID},applied)
     snapshot['provider_plan']=plan
+    snapshot['data_environment']='acceptance_real'
     snapshot['task_spec'].update(methods=[kind],target_refs=[REF])
     snapshot['allowed_capabilities']=[pid(kind)];snapshot['allowed_tools']=[tool(kind)]
     snapshot['payload']['tools']={'*':False,tool(kind):True}
@@ -39,7 +41,7 @@ def candidate(env,monkeypatch,kind):
     return row,plan
 
 
-@pytest.mark.parametrize('kind',adapter.CATALOG)
+@pytest.mark.parametrize('kind',ACTIVE_KINDS)
 def test_v2_receipt_encrypted_and_public_result_redacted(provider,monkeypatch,kind):
     store=provider[0];uid=provider[4]['uid'];row,plan=candidate(provider,monkeypatch,kind)
     state=ProviderState(store);op=state.begin(uid,row['id'],1)

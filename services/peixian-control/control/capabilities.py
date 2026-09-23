@@ -16,6 +16,8 @@ def save_dependencies(db,uid,sid,data):
     values=data['dependency_ids']
     if not isinstance(values,list) or len(values)>20 or any(not isinstance(v,str) for v in values) or len(set(values))!=len(values):error('invalid_dependencies','依赖列表无效')
     for pid in values:
+        from .data_plugin_policy import installable
+        if not installable(pid):error("dependency_archived","依赖的资料插件已归档",409)
         if not db.execute("SELECT 1 FROM grants WHERE uid=? AND kind='plugin' AND resource=?",(uid,pid)).fetchone():error('dependency_forbidden','依赖插件未授权',403)
     db.execute('INSERT INTO skill_profiles(sid,dependencies,updated) VALUES(?,?,?) ON CONFLICT(sid) DO UPDATE SET dependencies=excluded.dependencies,updated=excluded.updated',(sid,encode(values),now()))
 
@@ -28,6 +30,8 @@ def catalog(store,uid):
         ready=runtime and runtime['status']=='ready' and runtime['gate_policy']=='open' and not runtime['security_blocked'] and not runtime['recovery_required']
         plugins={p['id']:p for p in applied.get('plugins',[])};skills={p['id']:p for p in applied.get('skills',[])};items=[]
         for g in db.execute("SELECT resource FROM grants WHERE uid=? AND kind='plugin'",(uid,)):
+            from .data_plugin_policy import installable
+            if not installable(g[0]):continue
             installed=db.execute('SELECT * FROM installs WHERE uid=? AND plugin=?',(uid,g[0])).fetchone()
             p=db.execute('SELECT * FROM plugins WHERE id=? AND version=?',(g[0],installed['version'])).fetchone() if installed else db.execute('SELECT * FROM plugins WHERE id=? AND enabled=1 ORDER BY rowid DESC LIMIT 1',(g[0],)).fetchone()
             if not p:continue

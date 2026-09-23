@@ -131,7 +131,8 @@ def reserve(store,user,sid,tid,request,applied,revision,continuation=None):
         if official and current and current['content']==skill['content'] and current['version']==skill.get('version'):
             skills.append({'method_id':official['id'],'skill_id':skill['id'],'version':skill['version'],'method_version':official['version'],'sha256':official['sha256'],'content':skill['content'],'capabilities':official['capabilities']})
     capabilities=[]
-    for kind in adapter.CATALOG:
+    from .data_plugin_policy import ACTIVE_KINDS
+    for kind in ACTIVE_KINDS:
         try:binding(store,user['uid'],kind,applied);capabilities.append(kind)
         except HTTPException:pass
     key=business_runs.normalized(request)['client_request_id'];fingerprint=business_runs.fingerprint(store,request)

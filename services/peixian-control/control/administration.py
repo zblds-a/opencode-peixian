@@ -365,6 +365,9 @@ def register_admin(app):
                         fail("插件包包含不安全路径")
                     names.add(member.filename)
                 manifest = json.loads(archive.read("manifest.json"))
+                from .data_plugin_policy import valid_bundle
+                if not valid_bundle(manifest):
+                    fail("仅允许发布八项固定资料插件，且每项只能注册对应的查询工具", 409)
                 if not SLUG.fullmatch(manifest.get("id", "")) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", manifest.get("version", "")):
                     fail("插件 ID 或版本格式不正确")
                 entry = manifest.get("entry", "entry.mjs")
@@ -402,7 +405,10 @@ def register_admin(app):
     @blocking_endpoint(app, json_body=True)
     def plugin_state(pid: str, version: str, request: Request, user=Depends(require_capability("plugins.manage"))):
         from .runtime_security import block_runtime
+        from .data_plugin_policy import installable
         data = body_fields(request.state.json_body, ("enabled",))
+        if data.get("enabled") and not installable(pid):
+            fail("该资料插件已归档，不可重新启用", 409)
         s = app.state.store
         with s.tx() as db:
             old = db.execute("SELECT enabled FROM plugins WHERE id=? AND version=?", (own_id(pid), version)).fetchone()

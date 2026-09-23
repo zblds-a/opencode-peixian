@@ -23,13 +23,23 @@ def register(app):
                 provider_state=ProviderState(store)
         if not isinstance(data,dict) or len(json.dumps(data).encode()) > 2*1024*1024: raise HTTPException(422,"事实协议无效")
         if any(not isinstance(data.get(k),str) or not 1<=len(data[k])<=160 for k in ('runtime_id','action','gateway_boot_id')) or type(data.get('revision')) is not int: raise HTTPException(422,'事实协议无效')
-        for k in ('run_id','operation','session_id','message_id','module'):
+        for k in ('run_id','operation','session_id','message_id','module','call_id','tool','digest'):
             if k in data and (not isinstance(data[k],str) or not 1<=len(data[k])<=160):raise HTTPException(422,'事实协议无效')
         runtime = store.one("SELECT * FROM runtimes WHERE id=?",(data.get('runtime_id'),))
         if not runtime or len(credential)<32 or not hmac.compare_digest(credential,store.decrypt(runtime['spec']).get('runtime_key','')): raise HTTPException(403,"运行环境身份无效")
         if runtime['revision'] != data.get('revision'): reject('facts_revision_changed')
         if runtime['gateway_boot_id'] != data['gateway_boot_id']: reject('facts_gateway_changed')
         uid = runtime['uid']; action = data.get('action')
+        if action=='native_prepare':
+            if set(data)!={'action','runtime_id','revision','gateway_boot_id','session_id','message_id','call_id','tool','args'}:
+                raise HTTPException(422,'原生资料调用协议无效')
+            from .native_tool_gate import prepare
+            return prepare(store,uid,data['session_id'],data['message_id'],data['call_id'],data['tool'],data['args'],data['revision'])
+        if action=='native_approve':
+            if set(data)!={'action','runtime_id','revision','gateway_boot_id','run_id','call_id','digest','decision'}:
+                raise HTTPException(422,'原生意图核对协议无效')
+            from .native_tool_gate import approve
+            return approve(store,uid,data['run_id'],data['call_id'],data['digest'],data['decision'],data['revision'])
         engine=provider_state if action.startswith('provider_') else state
         if action.startswith('provider_'):
             action=action[len('provider_'):]

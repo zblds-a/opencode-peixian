@@ -7,8 +7,9 @@ import math
 from .backend_contract import error
 from .capabilities import check_selection
 from shared import theft_provider_v2 as adapter
+from .data_plugin_policy import ACTIVE_KINDS
 
-RELEASES = {'1.0.0': 'theft-provider-contract-v1', '2.0.0': adapter.VERSION}
+RELEASES = {'1.0.0': 'theft-provider-contract-v1', '2.0.0': adapter.VERSION, '3.0.0': adapter.VERSION}
 
 
 def settings(uid):
@@ -32,7 +33,7 @@ def settings(uid):
 
 
 def binding(store,uid,kind,applied):
-    if kind not in adapter.CATALOG:error('provider_contract_unconfirmed','此资料合同尚未开放。',409)
+    if kind not in ACTIVE_KINDS:error('provider_contract_unconfirmed','此资料合同尚未开放。',409)
     config=settings(uid)
     plugin_id='peixian-theft-'+kind.replace('_','-')
     check_selection(store,uid,{'skill_ids':[],'plugin_ids':[plugin_id]})

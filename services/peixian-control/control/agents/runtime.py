@@ -40,7 +40,8 @@ def session(store,uid,sid,profile):
         for row in rows:
             prior=store.decrypt(row['request_ciphertext']).get('agent_profile')
             if prior and prior['id']==profile.id and prior.get('profile_sha256')!=profile.profile_sha256:
-                error('session_profile_changed','此会话使用旧助手版本，请新建会话。',409)
+                if not (profile.id=='theft-assistant' and profile.data['version']=='2.0.0' and prior.get('version')=='1.0.0'):
+                    error('session_profile_changed','此会话使用旧助手版本，请新建会话。',409)
     if any(frozen_identity(store.decrypt(row['request_ciphertext']))!=profile.id for row in rows):
         error('session_agent_mismatch','此会话属于其他助手，历史记录仍可查看；请新建盗窃助手会话继续。' if active_ids()==('theft-assistant',) else '此会话已绑定其他助手，请新建会话使用所选助手。',409)
 
@@ -65,6 +66,22 @@ def register(app):
 
 def validate_execution(snapshot):
     task=snapshot.get('task_spec') or {}
+    if task.get('schema_version')=='native-tools-v1':
+        policy=snapshot.get('native_tool_policy') or {}
+        context=snapshot.get('native_tool_context') or {}
+        profile=snapshot.get('agent_profile') or {}
+        payload=snapshot.get('payload') or {}
+        from ..native_tool_gate import VERSION as native_version
+        from ..native_tool_scope import TOOL_TO_KIND
+        valid=(policy.get('version')==native_version and profile.get('id')=='theft-assistant'
+            and task.get('agent_id')==profile.get('id') and task.get('task_id')==context.get('task_id')
+            and context.get('version')=='native-tool-context-v1'
+            and set(policy.get('allowed_tools',[]))<=set(TOOL_TO_KIND)
+            and payload.get('tools',{}).get('*') is False
+            and all(payload['tools'].get(tool) is True for tool in policy['allowed_tools'])
+            and snapshot.get('effective_system_prompt_sha256')==hashlib.sha256(payload.get('system','').encode()).hexdigest())
+        if not valid:error('native_plan_mismatch','模型工具执行身份无法核对。',409)
+        return
     if task.get('schema_version')=='task-spec-v4':
         from ..theft_provider_flow import pid,tool
         from shared.theft_provider import request_spec,ContractError

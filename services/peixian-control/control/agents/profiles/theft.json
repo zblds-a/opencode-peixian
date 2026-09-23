@@ -1,9 +1,9 @@
 {
   "schema_version": "agent-profile-v1",
   "id": "theft-assistant",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "name": "盗窃研判助手",
-  "description": "核对固定盗窃场景已有的夜间、同行共现与车辆资料。",
+  "description": "通过自然语言选择已授权只读资料能力，核对来源并引导补充必要条件。",
   "domain": "theft",
   "scenario_ids": [
     "DEMO-CASE-THEFT"

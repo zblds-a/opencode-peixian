@@ -1,12 +1,14 @@
 import importlib.util
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import zipfile
 
 import pytest
 from shared import theft_provider_v2 as adapter
+from control.data_plugin_policy import ACTIVE_KINDS
 from test_provider_contract_v2 import ID, REF, LIMITS, query, response
 
 
@@ -20,7 +22,7 @@ def bundles(tmp_path):
     return tmp_path
 
 
-@pytest.mark.parametrize('kind',adapter.CATALOG)
+@pytest.mark.parametrize('kind',ACTIVE_KINDS)
 def test_fixed_plugin_executes_only_own_read_contract(bundles,kind):
     pid='peixian-theft-'+kind.replace('_','-');tool='peixian_query_'+kind
     with zipfile.ZipFile(bundles/(pid+'-2.0.0.zip')) as z:
@@ -43,7 +45,10 @@ const health=await test();
 console.log(JSON.stringify({result,seen,failed,health}));'''
     for key,value in {'ENTRY':entry.as_uri(),'TOOL':tool,'REQUEST':frozen,'RESPONSE':response(kind)}.items():
         script=script.replace(key,json.dumps(value))
-    output=subprocess.run([os.environ.get('BUN_EXECUTABLE','bun'),'-e',script],text=True,capture_output=True,check=True,timeout=15)
+    runtime=os.environ.get('BUN_EXECUTABLE') or shutil.which('bun') or shutil.which('node')
+    assert runtime, 'Bun or Node.js is required to execute the bundled entry'
+    flags=['--input-type=module'] if Path(runtime).stem.lower()=='node' else []
+    output=subprocess.run([runtime,*flags,'-e',script],text=True,encoding='utf-8',capture_output=True,check=True,timeout=15)
     result=json.loads(output.stdout)
     assert result['failed'] and result['health']['ok'] is False and len(result['seen'])==2
     assert 'connection_group' not in result['seen'][0]['input']

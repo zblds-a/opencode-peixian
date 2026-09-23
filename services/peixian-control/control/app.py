@@ -719,7 +719,9 @@ def create_app(store=None):
             data=business_runs.normalized(data)
             from .theft_planner import enabled as planner_enabled
             planned=await app.state.db_work.run(planner_enabled,app.state.store,user['uid'])
-            previous=None if planned and not data.get('provider_query') else await app.state.db_work.run(business_runs.replay,app.state.store,user['uid'],sid,data)
+            from .native_tool_gate import enabled as native_enabled
+            native=await app.state.db_work.run(native_enabled,app.state.store,user['uid'])
+            previous=None if planned and not native and not data.get('provider_query') else await app.state.db_work.run(business_runs.replay,app.state.store,user['uid'],sid,data)
             if previous:return previous
         elif any(k in data for k in ('plugin_ids','mode','client_request_id','agent_id')):
             from .backend_contract import error
@@ -739,7 +741,7 @@ def create_app(store=None):
             from .backend_contract import error
             error('invalid_text','请输入问题，且单次文字不超过32000个字符',422,{'text':'1至32000个字符且不能全为空白'})
         from .theft_planner import enabled as planning_enabled,plan_message
-        if modern and planning_enabled(s,user['uid']) and not data.get('provider_query') and not getattr(request.state,'draft_no_tools',False):
+        if modern and planning_enabled(s,user['uid']) and not native and not data.get('provider_query') and not getattr(request.state,'draft_no_tools',False):
             from .agents.runtime import select,session
             profile=select(user['uid'],data)
             if profile.id!='theft-assistant':fail('请使用盗窃助手。',409)
@@ -753,7 +755,9 @@ def create_app(store=None):
         multi=bool(modern and agents.enabled(user['uid']))
         if modern:await app.state.db_work.run(agents.session,s,user['uid'],sid,profile)
         task = None
-        if modern and not getattr(request.state,'draft_no_tools',False) and task_spec.enabled(user['uid']):
+        if modern and native and not getattr(request.state,'draft_no_tools',False):
+            context = None
+        elif modern and not getattr(request.state,'draft_no_tools',False) and task_spec.enabled(user['uid']):
             task = await app.state.db_work.run(task_spec.resolve,s,user['uid'],sid,data,applied)
             context = dict(task['context'])  # Agent metadata must not mutate the approved task.
         else:

@@ -789,7 +789,7 @@ class RuntimeManager:
         config["plugin"] = []
         config["skills"] = {"paths": ["/managed/skills"]}
         seven_ids = {"peixian-records-" + m for m in ("funds","calls","portrait","composite","night","vehicle","lookup")}
-        provider_ids={'peixian-theft-'+m for m in ('incidents','captures','tracks','warnings','warning-detail','warning-logs')}
+        provider_ids={'peixian-theft-'+m for m in ('incidents','captures','tracks','night','community','warning-detail','warning-logs','profile')}
         has_provider=any(p['id'] in provider_ids for p in spec['plugins'])
         has_seven = any(p["id"] in seven_ids for p in spec["plugins"])
         if has_seven and any(p["id"] == "peixian-synthetic-records" for p in spec["plugins"]):
@@ -840,6 +840,20 @@ class RuntimeManager:
                     "import { remoteTool } from '../facts-client.mjs';\n"
                     "export default async (context) => { const loaded = await plugin(context, {}, undefined); return {...loaded, tool:Object.fromEntries(Object.entries(loaded.tool).map(([name,def])=>[name,remoteTool("
                     + json.dumps(facts_token) + ",name,def)]))}; };\n", encoding="utf-8")
+            if plugin["id"] in provider_ids:
+                declared=plugin.get("manifest",{}).get("tools",[])
+                if len(declared)!=1:
+                    raise RuntimeFailure("provider_tool_manifest_mismatch")
+                only=declared[0]
+                loader.write_text(
+                    "import plugin from " + json.dumps("../" + relative.as_posix() + "/entry.mjs") + ";\n"
+                    "import { remoteTool } from '../facts-client.mjs';\n"
+                    "const expected = " + json.dumps(only) + ";\n"
+                    "export default async (context) => { const loaded = await plugin(context, {}, undefined);"
+                    "const names = Object.keys(loaded.tool ?? {});"
+                    "if (names.length !== 1 || names[0] !== expected) throw new Error('provider_tool_manifest_mismatch');"
+                    "return {...loaded,tool:{[expected]:remoteTool(" + json.dumps(facts_token)
+                    + ",expected,loaded.tool[expected])}}; };\n", encoding="utf-8")
             config["plugin"].append("file:///managed/loaders/" + plugin["id"] + ".mjs")
         for skill in spec["skills"]:
             # Existing migration snapshots used 28-hex deterministic Skill IDs.

@@ -54,7 +54,7 @@ def register(app):
     @app.post('/internal/facts/execute')
     async def execute(request:Request):
         value=await json_body(request,16384)
-        if not isinstance(value,dict) or set(value)!={'session_id','message_id','tool','args'} or not isinstance(value['tool'],str) or value['tool'] not in HELPERS|set(TOOLS)|set(PROVIDER_TOOLS):raise HTTPException(422,'资料调用无效')
+        if not isinstance(value,dict) or set(value) not in ({'session_id','message_id','tool','args'},{'session_id','message_id','tool','args','call_id'}) or not isinstance(value['tool'],str) or value['tool'] not in HELPERS|set(TOOLS)|set(PROVIDER_TOOLS):raise HTTPException(422,'资料调用无效')
         for name in ('session_id','message_id'):
             if not isinstance(value[name],str) or not value[name] or len(value[name])>150 or any(not(c.isalnum() or c in '_-') for c in value[name]):raise HTTPException(422,'执行身份无效')
         config=app.state.settings;manager=getattr(app.state,'runtime_management',None)
@@ -74,7 +74,13 @@ def register(app):
             if response.status_code>=400:raise HTTPException(409,'当前资料能力不可用或执行已停止')
             return response.json()
         if value['tool'] in PROVIDER_TOOLS:
-            from .theft_provider_execution import execute
+            from .theft_provider_execution import execute,execute_native
+            if 'call_id' in value and value['args']!={}:
+                parts=result.json().get('parts',[])
+                matches=[part for part in parts if part.get('type')=='tool' and part.get('callID')==value['call_id'] and part.get('tool')==value['tool']]
+                if len(matches)!=1 or matches[0].get('state',{}).get('input')!=value['args']:
+                    raise HTTPException(409,'模型工具调用身份或参数无法核对')
+                return await execute_native(request,app,value,rpc,info['parentID'],process)
             return await execute(request,app,value,rpc,info['parentID'],process)
         admitted=await rpc('begin',session_id=value['session_id'],message_id=info['parentID'])
         identity={'run_id':admitted['run_id'],'operation':admitted['operation']}

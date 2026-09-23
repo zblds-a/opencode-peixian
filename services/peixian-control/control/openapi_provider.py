@@ -2,14 +2,16 @@
 def extend(s):
  from .openapi import obj,ref,array,STRING,BOOL,ID,nullable
  from shared.theft_provider import CATALOG
- kinds={'enum':list(CATALOG)}
+ from .data_plugin_policy import ACTIVE_KINDS
+ kinds={'enum':list(ACTIVE_KINDS)}
  s['ProviderQuery']=obj({'start':STRING,'end':STRING,'subject':{'enum':['DEMO-PERSON-001','DEMO-PERSON-002']},'address':STRING,'center':{'enum':['DEMO-LOCATION-A','DEMO-LOCATION-B']},'radius_m':{'type':'integer','minimum':1,'maximum':5000},'page':{'type':'integer','minimum':1,'maximum':10000},'page_size':{'type':'integer','minimum':1,'maximum':100}})
  s['ProviderPreviewBody']=obj({'kind':kinds,'query':ref('ProviderQuery')},('kind','query'))
  s['ProviderPlan']=obj({'version':{'const':'theft-provider-contract-v1'},'kind':kinds,'query':ref('ProviderQuery'),'revision':{'type':'integer'},'generation':{},'expires':{'type':'integer'}},('version','kind','query','revision','generation','expires'))
  from shared.theft_provider_v2 import CATALOG as V2_CATALOG,VERSION as V2
+ from .data_plugin_policy import ACTIVE_KINDS
  v2_query=obj({'lon':STRING,'lat':STRING,'radius_m':{'type':['number','string']},'start':STRING,'end':STRING,'start_date':STRING,'end_date':STRING,'track_types':array({'enum':[0,1,2]},minItems=1,maxItems=3,uniqueItems=True),'page':{'type':'integer','minimum':1},'page_size':{'type':'integer','minimum':1,'maximum':100}})
- s['ProviderPreviewBody']={'oneOf':[s['ProviderPreviewBody'],obj({'contract_version':{'const':V2},'kind':{'enum':list(V2_CATALOG)},'query':v2_query,'person_identity':{'type':'string','pattern':'^[0-9]{17}[0-9X]$'}},('contract_version','kind','query'))]}
- s['ProviderPreviewBody'].update(type='object',properties={'kind':{'enum':list(V2_CATALOG)},'query':{'type':'object'},'contract_version':{'const':V2},'person_identity':{'type':'string','writeOnly':True}})
+ s['ProviderPreviewBody']={'oneOf':[s['ProviderPreviewBody'],obj({'contract_version':{'const':V2},'kind':{'enum':list(ACTIVE_KINDS)},'query':v2_query,'person_identity':{'type':'string','pattern':'^[0-9]{17}[0-9X]$'}},('contract_version','kind','query'))]}
+ s['ProviderPreviewBody'].update(type='object',properties={'kind':{'enum':list(ACTIVE_KINDS)},'query':{'type':'object'},'contract_version':{'const':V2},'person_identity':{'type':'string','writeOnly':True}})
  source_ref=obj({'run_id':ID,'result_digest':STRING,'record_id':STRING,'snapshot_id':STRING},('run_id','result_digest','record_id','snapshot_id'))
  task_fields={'analysis_task_id':ID,'context_version':{'type':'integer','minimum':1},'step_request_id':{'type':'string','format':'uuid'},'source_refs':array(source_ref),'analysis_direction':{'enum':['single_query','case_to_person','person_to_case']},'direct_parent_run_id':nullable(ID)}
  s['ProviderPreviewBody']['properties'].update(task_fields)
@@ -20,7 +22,7 @@ def extend(s):
  s['ProviderPreview']['properties'].update(data_environment={'enum':['synthetic','acceptance_real']},contract_version=STRING)
  s['ProviderCapabilities']=obj({'items':array(obj({'kind':kinds,'name':STRING,'plugin_id':ID,'available':BOOL},('kind','name','plugin_id','available'))),'data_environment':{'const':'synthetic'},'contract_version':STRING},('items','data_environment','contract_version'))
  s['ProviderCapabilities']['properties']['contract_versions']=array(STRING)
- s['ProviderCapabilities']['properties']['items']['items']['properties'].update(kind={'enum':list(V2_CATALOG)},reason=nullable(STRING),data_environment={'enum':['synthetic','acceptance_real']},contract_version=STRING)
+ s['ProviderCapabilities']['properties']['items']['items']['properties'].update(kind={'enum':list(ACTIVE_KINDS)},reason=nullable(STRING),data_environment={'enum':['synthetic','acceptance_real']},contract_version=STRING)
  s['MessageBody']['properties']['provider_query']=ref('ProviderConfirmation')
  s['MessageBody']['properties'].update(analysis_task_id=ID,source_refs=array(source_ref),scope=obj({'lon':STRING,'lat':STRING,'radius_m':{'type':'integer','minimum':1},'start':STRING,'end':STRING,'page':{'type':'integer','minimum':1},'page_size':{'type':'integer','minimum':1,'maximum':100},'person_identity':{'type':'string','writeOnly':True}}))
  s['Health']['properties']['schema_version']['enum'].append(10)
@@ -31,7 +33,8 @@ def extend(s):
  s['Run']['properties']['clarification']=nullable(ref('PlannerClarification'))
  s['ClarificationDismissed']=obj({'dismissed':{'const':True}},('dismissed',))
  s['TaskSpec']['oneOf'].append(obj({'schema_version':{'const':'task-spec-v4'},'domain':{'const':'theft'},'agent_id':{'const':'theft-assistant'},'query_mode':{'enum':['new_query','explain_existing','clarify']},'methods':array(kinds,minItems=0,maxItems=1)},('schema_version','domain','agent_id','query_mode','methods'),extra=True))
- s['TaskSpec']['oneOf'][-1]['properties']['methods']['items']={'enum':list(V2_CATALOG)}
+ s['TaskSpec']['oneOf'][-1]['properties']['methods']['items']={'enum':list(ACTIVE_KINDS)}
+ s['TaskSpec']['oneOf'].append(obj({'schema_version':{'const':'native-tools-v1'},'domain':{'const':'theft'},'agent_id':{'const':'theft-assistant'},'query_mode':{'const':'native'},'methods':array({'enum':list(ACTIVE_KINDS)}),'task_id':ID},('schema_version','domain','agent_id','query_mode','methods','task_id'),extra=True))
  status={'enum':['consistent','needs_information','inconsistent']}
  s['ReviewBody']=obj({'result_digest':STRING,'status':status,'note':{'type':'string','minLength':1,'maxLength':2000},'claim_ids':array(STRING,maxItems=100,uniqueItems=True),'record_refs':array(obj({'record_id':STRING,'snapshot_id':STRING},('record_id','snapshot_id')),maxItems=100),'supersedes':nullable(ID)},('result_digest','status','note'))
  s['Review']=obj({**s['ReviewBody']['properties'],'id':ID,'run_id':ID,'status_label':STRING,'reviewer':STRING,'created_at':STRING},('id','run_id','result_digest','status','note','claim_ids','reviewer','created_at','supersedes','status_label'))

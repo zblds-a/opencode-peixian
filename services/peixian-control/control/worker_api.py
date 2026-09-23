@@ -41,7 +41,10 @@ def runtime_spec(s, uid, revision, *, db=None):
         config["agent"] = {name: {"model": selected} for name in ("title", "summary", "compaction")}
     plugins = []
     connections = []
+    from .data_plugin_policy import installable
     for installed in rows("SELECT i.*,p.manifest,p.digest FROM installs i JOIN plugins p ON p.id=i.plugin AND p.version=i.version JOIN grants g ON g.uid=i.uid AND g.kind='plugin' AND g.resource=i.plugin WHERE i.uid=? AND i.enabled=1 AND p.enabled=1", (uid,)):
+        if not installable(installed["plugin"]):
+            continue
         manifest = json.loads(installed["manifest"])
         bindings, missing = resolved_bindings(db, installed["plugin"], installed["version"], manifest)
         if missing:

@@ -1,10 +1,10 @@
 // Account-scoped facts token only; Agent never receives these plugins' Relay bindings.
 export function remoteTool(token, name, definition) {
  return {...definition, async execute(args, ctx) {
-  if(!ctx?.sessionID || !ctx?.messageID)throw new Error('资料调用缺少受控执行身份。');
+  if(!ctx?.sessionID || !ctx?.messageID || !ctx?.callID)throw new Error('资料调用缺少受控执行身份。');
   const response=await fetch('http://gateway:8080/internal/facts/execute',{
    method:'POST',headers:{'Content-Type':'application/json','X-Facts-Key':token},
-   body:JSON.stringify({session_id:ctx.sessionID,message_id:ctx.messageID,tool:name,args}),
+   body:JSON.stringify({session_id:ctx.sessionID,message_id:ctx.messageID,call_id:ctx.callID,tool:name,args}),
    signal:ctx.abort ?? AbortSignal.timeout(300000),redirect:'error'
   });
   if(!response.ok)throw new Error('资料操作未完成，请查看本轮执行状态；结果未知时不会自动重新取数。');

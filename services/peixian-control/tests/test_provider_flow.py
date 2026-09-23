@@ -8,6 +8,7 @@ from control.theft_provider_flow import preview,pid,tool
 from control.theft_provider_state import ProviderState
 from control import business_runs as runs, trusted_results
 from shared.theft_provider import CATALOG,fixture_response
+from control.data_plugin_policy import ACTIVE_KINDS
 
 @pytest.fixture
 def provider(enabled,monkeypatch):
@@ -36,7 +37,7 @@ def accept(env,kind='incidents',sid='ses_multi'):
     receipt,row,snap=submit(env,req,task,sid=sid)
     return req,receipt,row,snap
 
-@pytest.mark.parametrize('kind',CATALOG)
+@pytest.mark.parametrize('kind',[kind for kind in ACTIVE_KINDS if kind in CATALOG])
 def test_provider_frozen_receipt_result(provider,kind):
     s=provider[0];uid=provider[4]['uid'];req,receipt,row,snap=accept(provider,kind)
     assert snap['answer_policy_version']=='controlled-zh-v1'

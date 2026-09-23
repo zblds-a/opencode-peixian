@@ -291,6 +291,10 @@ class Store:
             raise ValueError("授权列表格式不正确")
         if any(not isinstance(value, str) or not value or len(value) > 100 for value in values):
             raise ValueError("授权列表格式不正确")
+        if kind == "plugin":
+            from .data_plugin_policy import installable
+            if any(not installable(value) for value in values):
+                raise ValueError("资料插件已归档，不可新增授权")
         table = "models" if kind == "model" else "plugins"
         for value in set(values):
             if not db.execute(f"SELECT 1 FROM {table} WHERE id=? AND enabled=1", (value,)).fetchone():

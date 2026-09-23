@@ -11,7 +11,8 @@ def enabled(uid):return uid in {x for x in os.getenv('PX_THEFT_PROVIDER_UIDS',''
 def availability(store,uid,kind,applied):
     from .capabilities import check_selection
     if not enabled(uid):error('provider_not_enabled','当前账号尚未开通新资料查询。',403)
-    if not isinstance(kind,str) or kind not in CATALOG:error('provider_method_unknown','资料查询类型无效。',422)
+    from .data_plugin_policy import ACTIVE_KINDS
+    if not isinstance(kind,str) or kind not in ACTIVE_KINDS or kind not in CATALOG:error('provider_method_unknown','资料查询类型无效。',422)
     check_selection(store,uid,{'skill_ids':[],'plugin_ids':[pid(kind)]})
     matches=[p for p in applied.get('plugins',[]) if p['id']==pid(kind)]
     if len(matches)!=1 or matches[0].get('version')!='1.0.0' or matches[0].get('manifest',{}).get('tools')!=[tool(kind)]:error('provider_not_applied','此资料插件尚未生效。',409)
@@ -94,7 +95,9 @@ def register(app):
             from shared import theft_provider_v2 as v2
             from .provider_contracts import binding
             items=[]
-            for kind,definition in v2.CATALOG.items():
+            from .data_plugin_policy import ACTIVE_KINDS
+            for kind in ACTIVE_KINDS:
+                definition=v2.CATALOG[kind]
                 real=any(p['id']==pid(kind) and p.get('version')=='2.0.0' for p in applied.get('plugins',[]))
                 reason=None
                 try:

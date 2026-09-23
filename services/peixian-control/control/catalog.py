@@ -146,6 +146,9 @@ def register_catalog(app):
         return {"id": sid, "job": changed(user["uid"])}
 
     def published(uid, pid, version=None, db=None):
+        from .data_plugin_policy import installable
+        if not installable(pid):
+            fail("该资料插件已归档，不可安装或调用", 404)
         s = app.state.store
         def one(query, params):
             if db is None:
@@ -168,7 +171,10 @@ def register_catalog(app):
         s = app.state.store
         grants = s.rows("SELECT resource FROM grants WHERE uid=? AND kind='plugin'", (user["uid"],))
         items = []
+        from .data_plugin_policy import installable
         for grant in grants:
+            if not installable(grant["resource"]):
+                continue
             versions = s.rows("SELECT * FROM plugins WHERE id=? AND enabled=1 ORDER BY rowid DESC", (grant["resource"],))
             if not versions:
                 continue
