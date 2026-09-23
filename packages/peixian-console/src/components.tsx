@@ -177,6 +177,18 @@ export function Markdown(props: { text: string }) {
     const current = ++generation
     queueMicrotask(() => {
       if (current !== generation || !host?.isConnected) return
+      host.querySelectorAll<HTMLTableElement>("table").forEach((table) => {
+        if (table.parentElement?.classList.contains("markdown-table-scroll")) return
+        const wrapper = document.createElement("div")
+        wrapper.className = "markdown-table-scroll"
+        wrapper.style.maxWidth = "100%"
+        wrapper.style.overflowX = "auto"
+        wrapper.tabIndex = 0
+        wrapper.setAttribute("role", "region")
+        wrapper.setAttribute("aria-label", "资料表格，可横向滚动")
+        table.replaceWith(wrapper)
+        wrapper.append(table)
+      })
       host.querySelectorAll<HTMLElement>("pre > code.language-mermaid, pre > code.language-flowchart").forEach((code) => {
         const source = code.textContent?.trim() ?? ""
         const pre = code.parentElement

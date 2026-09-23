@@ -46,7 +46,7 @@ def test_native_tool_one_confirmed_call(provider,monkeypatch):
     assert ref in review['user_request']
     assert review['requested_values']['start']==ARGS['start']
     assert review['contract_defaults']=={'track_types':[0,1,2]}
-    assert review['version']=='native-intent-context-v2'
+    assert review['version']=='native-intent-context-v3'
     assert native_tool_gate.approve(store,uid,row['id'],'call-one',decision['digest'],{'verdict':'allow','reason_code':'aligned'},1)['allowed']
     state=ProviderState(store);op=state.begin(uid,row['id'],1)
     assert state.reserve(uid,row['id'],1,op,'tracks')
@@ -240,3 +240,39 @@ def test_invalid_native_argument_shape_is_rejected(args):
     with pytest.raises(HTTPException) as exc:
         native_tool_gate.prepare(None,'uid','sid','message','call',tool('tracks'),args,1)
     assert exc.value.status_code==422 and exc.value.detail['code']=='native_tool_invalid'
+
+
+def test_native_table_result_is_persisted_and_messages_use_same_view(provider,monkeypatch):
+    from control import table_answer, controlled_answer
+    store=provider[0];uid=provider[4]['uid'];row=native_candidate(provider,monkeypatch)
+    snap=store.decrypt(store.one('SELECT request_ciphertext FROM business_runs WHERE id=?',(row['id'],))['request_ciphertext'])
+    payload=snap['payload']
+    table_answer.freeze(store,uid,'ses_multi',snap,payload)
+    from control.agents import runtime, registry
+    runtime.freeze(snap,payload,registry.require('theft-assistant'))
+    with store.tx() as db:
+        db.execute('UPDATE business_runs SET request_ciphertext=? WHERE id=?',(store.encrypt(snap),row['id']))
+    decision=native_tool_gate.prepare(store,uid,'ses_multi',row['message_id'],'table-call',tool('tracks'),ARGS,1)
+    native_tool_gate.approve(store,uid,row['id'],'table-call',decision['digest'],{'verdict':'allow','reason_code':'aligned'},1)
+    state=ProviderState(store);op=state.begin(uid,row['id'],1)
+    state.reserve(uid,row['id'],1,op,'tracks');state.dispatch(uid,row['id'],1,op,'tracks')
+    state.complete(uid,row['id'],1,op,'tracks','completed',response('tracks'));state.finish(uid,row['id'],1,op)
+    with store.tx() as db:
+        snap=store.decrypt(db.execute('SELECT request_ciphertext FROM business_runs WHERE id=?',(row['id'],)).fetchone()['request_ciphertext'])
+        snap['model_final_text']=json.dumps({'format':table_answer.VERSION,'mode':'data','source_refs':[],'suggestions':[{'action':'inspect_sources'}]})
+        db.execute('UPDATE business_runs SET request_ciphertext=?,assistant_id=? WHERE id=?',(store.encrypt(snap),'assistant-table',row['id']))
+    business_runs.set_state(store,row['id'],'completed','completed')
+    result=trusted_results.read(store,uid,'ses_multi',row['id'])
+    assert result['answer_view']['total']==len(result['records'])>0
+    assert result['answer_view']['suggestions'][0]['origin']=='model_selection'
+    values=[{'info':{'id':'assistant-table','parentID':row['message_id'],'role':'assistant'},'parts':[{'type':'text','text':'UNVERIFIED_JSON'}]}]
+    projected=controlled_answer.messages(store,uid,'ses_multi',values)
+    text=projected[0]['parts'][0]['text']
+    assert 'UNVERIFIED_JSON' not in text and '### 判断依据' in text
+    assert text==result['answer_view']['markdown']
+    assert trusted_results.read(store,uid,'ses_multi',row['id'])==result
+    # Future runs freeze existing same-person sources; no supplier call is made.
+    future={'native_tool_context':snap['native_tool_context']};p={}
+    table_answer.freeze(store,uid,'ses_multi',future,p)
+    assert len(future['table_answer_policy']['history'])==1
+    assert future['table_answer_policy']['history'][0]['run_id']==row['id']

@@ -762,7 +762,7 @@ export default function Chat() {
                   const attachments = () => message().attachments ?? sentAttachments()[message().info.id] ?? []
                   const textParts = () => entry().textParts
                   const toolParts = () => entry().toolParts
-                  const renderText = (item: { part: Message["parts"][number]; id: string }) => message().info.role === "assistant" ? <div><Show when={item.part.origin === "verified_result"}><small class="verified-result-label">已核对结果摘要</small></Show><SmoothMarkdown id={`${selected()}:${item.id}`} text={item.part.text ?? ""} live={busy() || Date.now() < animateUntil} cache={displayedText} onProgress={() => { if (scroll && followOutput && !selectingText && !selectionInConversation()) scroll.scrollTop = scroll.scrollHeight }} /></div> : <Markdown text={item.part.text ?? ""} />
+                  const renderText = (item: { part: Message["parts"][number]; id: string }) => message().info.role === "assistant" && item.part.origin !== "controlled_answer" ? <div><Show when={item.part.origin === "verified_result"}><small class="verified-result-label">已核对结果摘要</small></Show><SmoothMarkdown id={`${selected()}:${item.id}`} text={item.part.text ?? ""} live={busy() || Date.now() < animateUntil} cache={displayedText} onProgress={() => { if (scroll && followOutput && !selectingText && !selectionInConversation()) scroll.scrollTop = scroll.scrollHeight }} /></div> : <Markdown text={item.part.text ?? ""} />
                   return (
                   <article data-message-id={message().info.id} tabindex={-1} class={"message " + (message().info.role === "user" ? "user" : "assistant")}>
                     <div class="message-avatar">

@@ -23,6 +23,22 @@ export type Usage = {
   source_data_run_id: string | null
   modules: { module: string; status: string; response_confirmed: boolean }[]
 }
+export type PersonTableAnswer = {
+  version: "person-tables-v1"
+  markdown?: string
+  run_id: string
+  person_ref: string | null
+  status: "ready" | "partial"
+  basic: { label: string; value: string; source_ids: string[]; source_run_id: string; obtained_at: string | null }[]
+  conclusions: { text: string; source_ids: string[]; source_run_id: string; claim_id: string; limitation: string }[]
+  evidence: { module: string; label: string; time: string; text: string; source_ids: string[]; source_run_id: string; snapshot_id: string }[]
+  suggestions: { text: string; reason: string; conditions: string; source_ids: string[]; origin: "model_selection"; action: "query" | "inspect_sources" | "clarify_scope"; kind: string | null }[]
+  missing: string[]
+  preview_count: number
+  total: number
+  source_runs: string[]
+  selection_status: "accepted" | "fallback"
+}
 export type TrustedResult = {
   schema: "peixian.analysis-result"
   version: "2.0" | "legacy"
@@ -38,6 +54,7 @@ export type TrustedResult = {
   versions?: Record<string, unknown>
   generated_at?: string
   answer?: { version: string; status: string; summary: string; items: { text: string; claim_id: string; source_run_id: string; source_ids: string[] }[]; missing: string[]; next_steps: string[] }
+  answer_view?: PersonTableAnswer
   narrative?: { status: string; text: string | null; conflicts: { message: string }[]; coverage: string }
 }
 export const usageLabels: Record<string, string> = {
