@@ -17,8 +17,10 @@ from shared import theft_provider_v2 as adapter
 
 TOOL_TO_KIND={'peixian_query_'+kind:kind for kind in ACTIVE_KINDS}
 FILTERS=re.compile(r'近期|最近|近\s*\d+\s*[天月年]|仅.*盗窃|只.*盗窃|限定时间|限定日期')
-SCORING_REQUEST=re.compile(r'评分|打分|可疑度|嫌疑评估|研判优先级|嫌疑程度')
+SCORING_REQUEST=re.compile(r'评分|打分|可疑度|嫌疑评估|研判优先级|嫌疑程度|排序|筛选嫌疑人|可能性|嫌疑人列表|核验前')
 SCORING_NEGATE=re.compile(r'不要\s*评分|无需\s*评分|不用\s*评分|不\s*要\s*打分|禁止\s*评分|取消\s*评分')
+CASE_HINT=re.compile(r'案件|警情|案发|盗窃案|由案到人|周边人员|可疑人员')
+PERSON_HINT=re.compile(r'由人到案|此人|该人|这名人员|已确认人员')
 
 
 def scoring_requested(text, prior=None):
@@ -30,6 +32,21 @@ def scoring_requested(text, prior=None):
     if SCORING_REQUEST.search(text):
         return True
     return bool(prior.get('scoring_requested')) if prior else False
+
+
+def infer_direction(confirmed, refs, text, prior=None):
+    """Implicit case_to_person / person_to_case; user never picks a mode."""
+    if 'person_identity' in (confirmed or {}) or PERSON_HINT.search(text or ''):
+        return 'person_to_case'
+    if refs:
+        # Selected sources may already bind a person; prefer person_to_case when prior said so.
+        if prior and prior.get('direction') == 'person_to_case' and 'person_identity' in (prior.get('confirmed') or {}):
+            return 'person_to_case'
+    if {'lon', 'lat'} <= set((confirmed or {}).keys()) or CASE_HINT.search(text or ''):
+        return 'case_to_person'
+    if prior and prior.get('direction') in ('case_to_person', 'person_to_case'):
+        return prior['direction']
+    return 'unknown'
 
 
 def freeze_context(store,uid,sid,data):
@@ -72,11 +89,23 @@ def freeze_context(store,uid,sid,data):
     if re.search(r'同意使用上游默认覆盖范围',text):
         prior_constraints=''
     constraints=(prior_constraints+' '+text)[-12000:]
+    want_score=scoring_requested(text, prior)
+    direction=infer_direction(confirmed, refs, text, prior)
+    from .theft_candidates import candidate_request_n, stage1_from_task, authorize
+    request_n=candidate_request_n(text)
+    candidate_set=[] if changed_object else copy.deepcopy((prior or {}).get('candidate_set') or [])
+    if request_n and want_score and direction == 'case_to_person':
+        ranked=stage1_from_task(store, uid, sid, task_id)
+        if ranked.get('items'):
+            candidate_set=authorize(ranked['items'], request_n)
     return {'version':'native-tool-context-v1','task_id':task_id,
         'scope_version':prior['scope_version']+1 if prior else 1,
         'confirmed':confirmed,'source_refs':refs,
         'current_text':text,'constraints_text':constraints,'user_conditions':current,
-        'scoring_requested':scoring_requested(text, prior)}
+        'scoring_requested':want_score,
+        'direction':direction,
+        'candidate_request_n':request_n,
+        'candidate_set':candidate_set}
 
 
 FIELD_NAMES = {'person_identity':'人员','start':'开始时间','end':'结束时间','lon':'经度','lat':'纬度','radius_m':'半径','page':'页码','page_size':'每页条数'}

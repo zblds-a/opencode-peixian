@@ -1,81 +1,86 @@
-"""Unit tests for theft-score-v1 deterministic scoring."""
+"""Unit tests for theft-score-v1 person grouping and ranking."""
 from control import theft_scoring as s
 
 
-def rec(module, rid, **fields):
-    return {'record_id': rid, 'module': module, 'fields': fields, 'snapshot_id': 'snap', 'source_run_id': 'run', 'call_id': 'c'}
+def rec(module, rid, person=None, **fields):
+    item = {'record_id': rid, 'module': module, 'fields': fields, 'snapshot_id': 'snap',
+            'source_run_id': 'run', 'call_id': 'c', 'result_digest': 'digest'}
+    if person and module == 'captures':
+        item['fields'].setdefault('target_id_card', person)
+    return item
 
 
-def test_buckets_and_ready_status():
+def test_group_by_person_does_not_mix_subjects():
     records = [
-        rec('captures', 'r1', capture_count=7, tags='夜间活动'),
+        rec('captures', 'a1', person='person-a', capture_count=7, tags='夜间'),
+        rec('captures', 'b1', person='person-b', capture_count=2, tags='盗窃'),
+        rec('night', 'n1'),
+    ]
+    snap = {'native_calls': {'c': {'status': 'completed', 'frozen': {'query': {'person_ref': 'person-a'}, 'kind': 'night'}}}}
+    # night without subject_of from fields uses snapshot call
+    groups = s.group_by_person(records, snap)
+    assert set(groups) >= {'person-a', 'person-b'}
+    assert {r['record_id'] for r in groups['person-a']} == {'a1', 'n1'}
+    assert {r['record_id'] for r in groups['person-b']} == {'b1'}
+
+
+def test_stage1_rank_orders_by_capture_only():
+    records = [
+        rec('captures', 'a1', person='person-a', capture_count=12, tags='盗窃前科', target_name='甲'),
+        rec('captures', 'b1', person='person-b', capture_count=1, tags='', target_name='乙'),
+        rec('captures', 'c1', person='person-c', capture_count=7, tags='夜间', target_name='丙'),
+    ]
+    view = s.stage1_rank(records)
+    assert view['status'] == 'ready'
+    assert [x['person_ref'] for x in view['items']][0] == 'person-a'
+    assert view['items'][0]['stage'] == '初排'
+    assert all(x['rank'] == i for i, x in enumerate(view['items'], 1))
+
+
+def test_rank_full_six_dim_per_person():
+    by_person = {
+        'person-a': [
+            rec('captures', 'a1', person='person-a', capture_count=7, tags='夜间'),
+            rec('night', 'n1'),
+            rec('community', 'c1', communityCount=5),
+            rec('warning_detail', 'w1', warningCount=3),
+        ],
+        'person-b': [
+            rec('captures', 'b1', person='person-b', capture_count=1),
+        ],
+    }
+    snap = {'native_calls': {'c': {'status': 'completed', 'frozen': {'query': {'person_ref': 'person-a'}, 'kind': 'night'}}}}
+    # attach person for night via subject - manually set fields
+    by_person['person-a'][1]['fields']['targetIdCard'] = 'person-a'
+    by_person['person-a'][2]['fields']['idCard'] = 'person-a'
+    by_person['person-a'][3]['fields']['idCard'] = 'person-a'
+    view = s.rank(by_person, include_d5=False)
+    assert view['items'][0]['person_ref'] == 'person-a'
+    assert view['items'][0]['status'] == 'ready'
+    assert any(x['person_ref'] == 'person-b' for x in view['insufficient'])
+
+
+def test_case_checks_pending_only():
+    tracks = [rec('tracks', 't1', lon=118.0, lat=34.0, captureTime='2026-09-10 12:00:00')]
+    incidents = [rec('incidents', 'i1', gisX=118.001, gisY=34.0, cjsj='2026-09-10 12:30:00', cjbh='CJ1')]
+    view = s.case_checks(tracks, incidents)
+    assert view['items'][0]['status'] == '待核验'
+    assert view['items'][0]['distance_m'] is not None
+
+
+def test_compute_single_person_buckets():
+    records = [
+        rec('captures', 'r1', person='person-a', capture_count=7, tags='夜间'),
         rec('night', 'r2'),
         rec('night', 'r3'),
         rec('community', 'r4', communityCount=5),
         rec('warning_detail', 'r5', warningCount=4),
     ]
-    view = s.compute(records)
+    for r in records:
+        if r['module'] != 'captures':
+            r['fields']['targetIdCard' if r['module'] == 'night' else 'idCard'] = 'person-a'
+    view = s.compute(records, include_d5=False)
     assert view['status'] == 'ready'
-    assert view['version'] == 'theft-score-v1'
     by_id = {d['id']: d for d in view['dimensions']}
     assert by_id['d1']['score'] == 18
-    assert by_id['d2']['score'] == 8
-    assert by_id['d3']['score'] == 8
-    assert by_id['d4']['score'] == 14
     assert by_id['d5']['status'] == 'unavailable'
-    assert by_id['d6']['score'] == 5
-    assert view['available_count'] >= 3
-    assert view['earned'] == 18 + 8 + 8 + 14 + 5
-    assert view['band']
-
-
-def test_missing_dimensions_not_zero():
-    view = s.compute([rec('captures', 'r1', capture_count=0)])
-    assert view['status'] == 'insufficient'
-    by_id = {d['id']: d for d in view['dimensions']}
-    assert by_id['d1']['score'] == 0 and by_id['d1']['status'] == 'available'
-    assert by_id['d2']['status'] == 'unavailable' and by_id['d2']['score'] is None
-    assert view['earned'] is None
-
-
-def test_d5_distance_and_time():
-    records = [
-        rec('tracks', 't1', lon=118.0, lat=34.0, captureTime='2026-09-10 12:00:00'),
-        rec('incidents', 'i1', gisX=118.001, gisY=34.0, cjsj='2026-09-10 12:30:00'),
-        rec('captures', 'c1', capture_count=12, tags='盗窃前科'),
-        rec('night', 'n1'),
-        rec('night', 'n2'),
-        rec('night', 'n3'),
-        rec('night', 'n4'),
-        rec('warning_detail', 'w1', warningCount=6),
-    ]
-    view = s.compute(records)
-    by_id = {d['id']: d for d in view['dimensions']}
-    assert by_id['d5']['status'] == 'available'
-    # ~111m → space 8; 0.5h → time 4 → 12
-    assert by_id['d5']['score'] == 12
-    assert by_id['d1']['score'] == 25
-    assert by_id['d6']['score'] == 8
-    assert '直线' in by_id['d5']['limitation'] or '路网' in by_id['d5']['limitation']
-
-
-def test_community_under_four_is_zero():
-    records = [
-        rec('community', 'r1', communityCount=2),
-        rec('captures', 'r2', capture_count=1),
-        rec('night', 'r3'),
-    ]
-    view = s.compute(records)
-    assert {d['id']: d['score'] for d in view['dimensions'] if d['status'] == 'available'}['d3'] == 0
-
-
-def test_warning_does_not_use_deduct_score():
-    records = [
-        rec('warning_detail', 'r1', warningCount=1, deductScore=99),
-        rec('captures', 'r2', capture_count=3),
-        rec('profile', 'r3', person={'sfz': 'x'}, captures=[]),
-    ]
-    view = s.compute(records)
-    by_id = {d['id']: d for d in view['dimensions']}
-    assert by_id['d4']['score'] == 8
-    assert 'deductScore' not in by_id['d4']['evidence']

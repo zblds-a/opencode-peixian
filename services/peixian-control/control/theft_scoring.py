@@ -17,6 +17,7 @@ LABELS = {
 }
 THEFT_TAG = re.compile(r'盗|窃|偷|前科|侵财|两抢|扒窃|入室|盗窃')
 PARTIAL_TAG = re.compile(r'夜间|预警|异常|重点|关注|流动|跨')
+DISCLAIMER = '本评估为辅助参考，需人工核验，不构成犯罪认定，可由民警人工修正。'
 
 
 def _bucket(value, rules, default=0):
@@ -58,7 +59,7 @@ def _module_records(records, module):
 
 
 def _dim(key, status, score=None, evidence='', source_ids=None, limitation=''):
-    item = {
+    return {
         'id': key,
         'label': LABELS[key],
         'max': MAX_POINTS[key],
@@ -68,7 +69,43 @@ def _dim(key, status, score=None, evidence='', source_ids=None, limitation=''):
         'source_ids': list(source_ids or []),
         'limitation': limitation,
     }
-    return item
+
+
+def subject_of(record, snapshot=None):
+    """Return person_ref for a verified record, or None when not person-bound."""
+    if not isinstance(record, dict):
+        return None
+    module = record.get('module')
+    fields = record.get('fields') or {}
+    if module == 'captures':
+        value = fields.get('target_id_card')
+        return value if isinstance(value, str) and value else None
+    if module == 'profile':
+        person = fields.get('person')
+        if isinstance(person, dict):
+            value = person.get('sfz')
+            return value if isinstance(value, str) and value else None
+    if module in ('night', 'community', 'warning_detail', 'warnings', 'warning_logs', 'tracks'):
+        call_id = record.get('call_id')
+        if snapshot and call_id:
+            plan = (snapshot.get('native_calls') or {}).get(call_id, {}).get('frozen') or {}
+            ref = (plan.get('query') or {}).get('person_ref')
+            if isinstance(ref, str) and ref:
+                return ref
+        for key in ('targetIdCard', 'idCard', 'target_id_card'):
+            value = fields.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return None
+
+
+def group_by_person(records, snapshot=None):
+    """Partition records by person_ref. Incidents without a person stay under None."""
+    groups = {}
+    for record in records or []:
+        key = subject_of(record, snapshot)
+        groups.setdefault(key, []).append(record)
+    return groups
 
 
 def score_d1(records):
@@ -110,7 +147,6 @@ def score_d3(records):
             best = max(best, count)
             sources.append(r['record_id'])
     if not sources:
-        # list presence without communityCount still counts as available with 0
         sources = [r['record_id'] for r in rows]
         best = 0
     score = 0 if best < 4 else _bucket(best, ((4, 6, 8), (7, 10, 12), (11, 10**9, 15)))
@@ -191,7 +227,6 @@ def score_d5(records):
         else:
             time_score = 4
         parts.append(f'最近时间差约{hours:.1f}小时→时间{time_score}分')
-    # If one sub-dimension missing, mark whole D5 unavailable per "无法计算标记不可用"
     if space_score is None or time_score is None:
         return _dim('d5', 'unavailable', evidence='；'.join(parts) or '时空子维度不完整',
                     source_ids=sorted(set(sources)), limitation='空间与时间子维度均需可计算；坐标未兼容确认')
@@ -225,7 +260,6 @@ def score_d6(records):
                 elif isinstance(value, list):
                     tags.extend(str(x) for x in value if x)
     if not tags:
-        # profile/captures present but empty tags → available 0
         return _dim('d6', 'available', 0, '无标签或标签为空', sorted(set(sources)) or [r['record_id'] for r in captures + profiles],
                     '标签是来源行为描述，非已确认前科；未使用 deductScore')
     text = '、'.join(tags)
@@ -251,22 +285,26 @@ def band(rate):
     return '关联度很高'
 
 
-def compute(records):
-    """Return a scoring view from already-filtered person records. Pure function."""
-    dimensions = [score_d1(records), score_d2(records), score_d3(records),
-                  score_d4(records), score_d5(records), score_d6(records)]
-    available = [d for d in dimensions if d['status'] == 'available']
+def compute(records, include_d5=True):
+    """Score one person's records only. Do not mix subjects."""
+    dims = [score_d1(records), score_d2(records), score_d3(records), score_d4(records)]
+    if include_d5:
+        dims.append(score_d5(records))
+    else:
+        dims.append(_dim('d5', 'unavailable', evidence='初排阶段不计时空耦合', limitation='仅由人到案深度核验时计算'))
+    dims.append(score_d6(records))
+    available = [d for d in dims if d['status'] == 'available']
     if len(available) < 3:
         return {
             'version': VERSION,
             'status': 'insufficient',
-            'dimensions': dimensions,
+            'dimensions': dims,
             'available_count': len(available),
             'earned': None,
             'available_max': None,
             'rate': None,
             'band': None,
-            'disclaimer': '数据覆盖不足，分值参考意义有限。不构成犯罪认定，可由民警人工修正。',
+            'disclaimer': '数据覆盖不足，分值参考意义有限。' + DISCLAIMER,
         }
     earned = sum(d['score'] for d in available)
     available_max = sum(d['max'] for d in available)
@@ -274,11 +312,153 @@ def compute(records):
     return {
         'version': VERSION,
         'status': 'ready',
-        'dimensions': dimensions,
+        'dimensions': dims,
         'available_count': len(available),
         'earned': earned,
         'available_max': available_max,
         'rate': rate,
         'band': band(rate),
-        'disclaimer': '本评估为辅助参考，不构成犯罪认定，可由民警人工修正。',
+        'disclaimer': DISCLAIMER,
+    }
+
+
+def stage1_rank(capture_records):
+    """First-pass ranking from capture rows only (D1+D6). Never mixes persons."""
+    groups = group_by_person([r for r in capture_records or [] if r.get('module') == 'captures'])
+    items = []
+    for person_ref, rows in groups.items():
+        if not person_ref:
+            continue
+        view = compute(rows, include_d5=False)
+        # Stage-1 uses only D1/D6 even if status is insufficient for full six-dim
+        d1 = next(d for d in view['dimensions'] if d['id'] == 'd1')
+        d6 = next(d for d in view['dimensions'] if d['id'] == 'd6')
+        earned = (d1['score'] or 0) + (d6['score'] or 0)
+        available_max = (d1['max'] if d1['status'] == 'available' else 0) + (d6['max'] if d6['status'] == 'available' else 0)
+        rate = round(earned / available_max * 100, 1) if available_max else 0.0
+        name = None
+        for r in rows:
+            value = (r.get('fields') or {}).get('target_name')
+            if isinstance(value, str) and value.strip():
+                name = value
+                break
+        primary = rows[0]
+        items.append({
+            'person_ref': person_ref,
+            'name': name,
+            'stage': '初排',
+            'rate': rate,
+            'earned': earned,
+            'available_max': available_max,
+            'band': band(rate),
+            'available_count': sum(1 for d in (d1, d6) if d['status'] == 'available'),
+            'role': '周边抓拍关联',
+            'source_ids': [r['record_id'] for r in rows],
+            'run_id': primary.get('source_run_id'),
+            'record_id': primary.get('record_id'),
+            'snapshot_id': primary.get('snapshot_id'),
+            'result_digest': primary.get('result_digest'),
+            'gaps': [],
+            'follow_up': '可确认核验前N名后补查夜间、跨小区、预警与档案',
+            'scoring': view,
+        })
+    items.sort(key=lambda x: (-(x['rate'] or 0), -(x['earned'] or 0), x['person_ref']))
+    for index, item in enumerate(items, 1):
+        item['rank'] = index
+    return {
+        'version': VERSION,
+        'stage': 'stage1',
+        'status': 'ready' if items else 'empty',
+        'items': items,
+        'disclaimer': '初排仅依据抓拍频次与标签，辅助参考，需人工核验，不构成犯罪认定。',
+    }
+
+
+def rank(records_by_person, include_d5=True):
+    """Full six-dimension ranking for an authorized candidate set."""
+    items = []
+    insufficient = []
+    for person_ref, rows in (records_by_person or {}).items():
+        if not person_ref:
+            continue
+        view = compute(rows, include_d5=include_d5)
+        name = None
+        for r in rows:
+            fields = r.get('fields') or {}
+            if r.get('module') == 'captures' and isinstance(fields.get('target_name'), str):
+                name = fields['target_name']
+            person = fields.get('person') if r.get('module') == 'profile' else None
+            if isinstance(person, dict) and isinstance(person.get('name'), str):
+                name = person['name']
+        entry = {
+            'person_ref': person_ref,
+            'name': name,
+            'stage': '六维',
+            'rate': view.get('rate'),
+            'earned': view.get('earned'),
+            'available_max': view.get('available_max'),
+            'band': view.get('band'),
+            'available_count': view.get('available_count'),
+            'role': '周边抓拍关联',
+            'source_ids': [r['record_id'] for r in rows],
+            'gaps': [d['label'] + '：' + (d.get('evidence') or '不可用') for d in view['dimensions'] if d['status'] != 'available'],
+            'follow_up': '建议人工核验来源记录与缺口维度',
+            'scoring': view,
+            'status': view['status'],
+        }
+        if view['status'] == 'ready':
+            items.append(entry)
+        else:
+            insufficient.append(entry)
+    items.sort(key=lambda x: (-(x['rate'] or 0), -(x['earned'] or 0), x['person_ref']))
+    for index, item in enumerate(items, 1):
+        item['rank'] = index
+    return {
+        'version': VERSION,
+        'stage': 'stage2',
+        'status': 'ready' if items or insufficient else 'empty',
+        'items': items,
+        'insufficient': insufficient,
+        'disclaimer': DISCLAIMER,
+    }
+
+
+def case_checks(track_records, incident_records):
+    """Person-to-case: pairwise track vs incident verification rows."""
+    rows = []
+    for inc in incident_records or []:
+        fields = inc.get('fields') or {}
+        cjbh = fields.get('cjbh') or fields.get('jjbh') or '未提供编号'
+        cjsj = fields.get('cjsj') or '未提供处警时间'
+        best_dist = None
+        best_delta = None
+        sources = [inc['record_id']]
+        for tr in track_records or []:
+            tf = tr.get('fields') or {}
+            dist = _haversine_m(tf.get('lon'), tf.get('lat'), fields.get('gisX'), fields.get('gisY'))
+            if dist is not None and (best_dist is None or dist < best_dist):
+                best_dist = dist
+                sources.append(tr['record_id'])
+            t_time = _parse_time(tf.get('captureTime'))
+            i_time = _parse_time(fields.get('cjsj'))
+            if t_time and i_time:
+                delta = abs((t_time - i_time).total_seconds())
+                if best_delta is None or delta < best_delta:
+                    best_delta = delta
+                    sources.append(tr['record_id'])
+        rows.append({
+            'cjbh': str(cjbh),
+            'cjsj': str(cjsj),
+            'distance_m': None if best_dist is None else int(best_dist),
+            'time_delta_hours': None if best_delta is None else round(best_delta / 3600.0, 1),
+            'relation': '轨迹点与警情坐标存在可计算联系' if best_dist is not None or best_delta is not None else '尚无可计算的时空联系',
+            'status': '待核验',
+            'follow_up': '核对处警记录原文与现场情况，不得直接认定为涉案',
+            'source_ids': sorted(set(sources)),
+        })
+    return {
+        'version': VERSION,
+        'status': 'ready' if rows else 'empty',
+        'items': rows,
+        'disclaimer': '候选案件仅表示时空可核验线索，状态固定为待核验，不构成涉案认定。',
     }
