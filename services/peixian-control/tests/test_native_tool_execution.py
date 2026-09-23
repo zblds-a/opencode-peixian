@@ -144,3 +144,15 @@ def test_newly_confirmed_filter_cannot_be_dropped():
     with pytest.raises(HTTPException) as exc:
         native_tool_scope.arguments('incidents',{'lon':'116.1','lat':'34.1','radius_m':500},context)
     assert exc.value.detail['code']=='unsupported_scope'
+
+
+def test_native_scheduler_does_not_cancel_authorized_inflight_tool(provider,monkeypatch):
+    from control.run_scheduler import track_messages
+    store=provider[0];row=native_candidate(provider,monkeypatch)
+    values=[{'info':{'id':row['message_id'],'role':'user'},'parts':[]},
+            {'info':{'id':'assistant-native','role':'assistant'},'parts':[{'id':'part-native','type':'tool','tool':tool('tracks'),'callID':'native-observed','state':{'status':'running','input':ARGS}}]}]
+    assert not track_messages(store,row,values,{})
+    assert store.one('SELECT cancel_requested FROM business_runs WHERE id=?',(row['id'],))['cancel_requested']==0
+    values[1]['parts'][0].update(id='part-unavailable',tool='unauthorized_query')
+    assert not track_messages(store,row,values,{})
+    assert store.one('SELECT cancel_requested FROM business_runs WHERE id=?',(row['id'],))['cancel_requested']==1

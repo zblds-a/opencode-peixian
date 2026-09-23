@@ -40,6 +40,13 @@ def track_messages(store,row,values,receipt):
         from .facts_plan import HELPERS
         permitted_tools=set(plan['allowed_tools']) | set(HELPERS) | {'question'}
     if snapshot.get('provider_plan'):permitted_tools={snapshot['provider_plan']['tool_id']}
+    native=snapshot.get('native_tool_policy',{})
+    if native.get('version')=='native-provider-gate-v1':
+        # Native runs can use earlier authorized tools after provider_plan moves
+        # to a later call. Frozen authorization still bounds every observed tool.
+        permitted_tools=set(native.get('allowed_tools',[])) & set(tools)
+        permitted_tools|={name for name in ('question','skill') if snapshot.get('payload',{}).get('tools',{}).get(name) is True}
+
     for message in selected:
         info=message.get('info',{})
         if info.get('role')!='assistant':continue
