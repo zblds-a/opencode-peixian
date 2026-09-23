@@ -81,7 +81,7 @@ def selection(text):
     if len(blocks) == 1:
         value = blocks[0].strip()
     try:
-        data = json.loads(value)
+        data, _ = json.JSONDecoder().raw_decode(value)
     except (ValueError, TypeError):
         return {}
     return data if isinstance(data, dict) and data.get('format') == VERSION and data.get('mode') == 'data' else {}

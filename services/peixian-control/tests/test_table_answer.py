@@ -135,3 +135,12 @@ def test_openapi_matches_table_projection():
     from control.openapi_v9 import extend_schemas
     result,snap=fixture()
     jsonschema.validate(t.build(result,snap), extend_schemas(schemas())['PersonTableAnswer'])
+
+
+def test_json_selection_prefix_drops_trailing_free_text():
+    result,snap=fixture()
+    choose(snap,source_refs=['snapshot:1'],suggestions=[{'action':'inspect_sources','reason_source':'snapshot:1'}])
+    snap['model_final_text']+='\n### 模型补充\n此人实施盗窃，错误数字999。'
+    view=t.build(result,snap)
+    assert view['selection_status']=='accepted' and len(view['suggestions'])==1
+    assert '实施盗窃' not in t.markdown(view) and '999' not in t.markdown(view)
