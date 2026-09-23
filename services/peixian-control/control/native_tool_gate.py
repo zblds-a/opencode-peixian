@@ -47,6 +47,7 @@ def redact(text, identities=None):
 def prepare(store,uid,sid,message_id,call_id,tool,args,revision):
     if not isinstance(call_id,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,160}',call_id):
         error('tool_call_identity_invalid','工具调用身份无法核对。',409)
+    if not isinstance(args,dict):error('native_tool_invalid','资料工具参数必须是对象。',422)
     kind=TOOL_TO_KIND.get(tool)
     if kind not in ACTIVE_KINDS:error('tool_archived','资料能力已归档或未授权。',404)
     with store.tx() as db:

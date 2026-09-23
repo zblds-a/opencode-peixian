@@ -233,3 +233,10 @@ def test_reference_without_confirmed_person_cannot_select_person(provider,monkey
     with pytest.raises(HTTPException) as exc:
         native_tool_gate.prepare(store,uid,'ses_multi',row['message_id'],'unconfirmed',tool('tracks'),{**ARGS,'person_identity':ref},1)
     assert exc.value.detail['code']=='identity_parameter_invalid'
+
+
+@pytest.mark.parametrize('args',[None,[], 'person-untrusted'])
+def test_invalid_native_argument_shape_is_rejected(args):
+    with pytest.raises(HTTPException) as exc:
+        native_tool_gate.prepare(None,'uid','sid','message','call',tool('tracks'),args,1)
+    assert exc.value.status_code==422 and exc.value.detail['code']=='native_tool_invalid'
