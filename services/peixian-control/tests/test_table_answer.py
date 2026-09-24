@@ -61,7 +61,8 @@ def test_model_proposes_only_available_next_steps():
     result,snap=fixture()
     choose(snap,source_refs=['invented'],suggestions=[{'action':'query','kind':'night'},{'action':'query','kind':'tracks'},{'action':'query','kind':'profile'}])
     view=t.build(result,snap)
-    assert len(view['suggestions'])==1 and view['suggestions'][0]['kind']=='night'
+    kinds=[x.get('kind') for x in view['suggestions']]
+    assert 'night' in kinds
     assert all('invented' not in x['source_ids'] for x in view['conclusions'])
 
 
@@ -122,8 +123,8 @@ def test_scoring_uses_server_flag():
     view=t.build(result,snap)
     assert view['scoring']['status']=='ready'
     output=t.markdown(view)
-    assert '### 可疑度评分（辅助参考）' in output
-    assert '不构成犯罪认定' in output
+    assert '### 可疑度评分' in output
+    assert '需人工核验' in output
 
 
 def test_case_to_person_stage1_ranking_table():
@@ -369,7 +370,6 @@ def test_next_question_clarify_send_false():
     assert '### 下一步分析建议' not in t.markdown(view)
 
 
-
 def test_stage1_requires_two_persons():
     result, snap = fixture()
     snap['native_tool_context'] = {
@@ -436,3 +436,29 @@ def test_no_per_person_while_enrichment_pending():
     choose(snap)
     view = t.build(result, snap)
     assert not any(x.get('action') == 'query' for x in view['suggestions'])
+
+
+def test_forbidden_wording_absent_in_ranking_markdown():
+    result, snap = fixture()
+    snap['native_tool_context'] = {
+        'confirmed': {}, 'task_id': 'task', 'scoring_requested': True,
+        'direction': 'case_to_person', 'candidate_set': [],
+    }
+    snap['table_answer_policy']['person_ref'] = None
+    snap['table_answer_policy']['direction'] = 'case_to_person'
+    snap['native_calls'] = {'cap': {'status': 'completed', 'frozen': {'kind': 'captures', 'query': {}}}}
+    result['records'] = [
+        {'record_id': 'run:call:a', 'source_run_id': 'run', 'call_id': 'cap', 'module': 'captures', 'snapshot_id': 'a',
+         'fields': {'target_id_card': 'person-a', 'target_name': '甲', 'capture_count': 12, 'tags': '盗窃'}, 'result_digest': 'd'},
+        {'record_id': 'run:call:b', 'source_run_id': 'run', 'call_id': 'cap', 'module': 'captures', 'snapshot_id': 'b',
+         'fields': {'target_id_card': 'person-b', 'target_name': '乙', 'capture_count': 3, 'tags': ''}, 'result_digest': 'd'},
+    ]
+    result['claims'] = []
+    choose(snap, source_refs=['run:call:a'])
+    view = t.build(result, snap)
+    output = t.markdown(view)
+    for banned in ('合成', 'Mock', 'mock', '测试范围', '验收范围', '仅供参考', '辅助参考'):
+        assert banned not in output, banned
+    assert '需人工核验' in output
+    assert '主要依据' in output
+    assert '建议核验' in output

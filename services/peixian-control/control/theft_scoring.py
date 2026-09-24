@@ -17,7 +17,7 @@ LABELS = {
 }
 THEFT_TAG = re.compile(r'盗|窃|偷|前科|侵财|两抢|扒窃|入室|盗窃')
 PARTIAL_TAG = re.compile(r'夜间|预警|异常|重点|关注|流动|跨')
-DISCLAIMER = '本评估为辅助参考，需人工核验，不构成犯罪认定，可由民警人工修正。'
+DISCLAIMER = '排序为辅助研判，需人工核验。'
 
 
 def _bucket(value, rules, default=0):
@@ -471,7 +471,7 @@ def stage1_rank(capture_records):
         'title': '初步关注排序（仅依据抓拍频次与标签）',
         'status': 'ready' if items else 'empty',
         'items': items,
-        'disclaimer': '初排仅依据抓拍频次与标签，辅助参考，需人工核验，不构成犯罪认定。',
+        'disclaimer': DISCLAIMER,
     }
 
 
@@ -520,7 +520,7 @@ def rank(records_by_person, include_d5=True):
     return {
         'version': VERSION,
         'stage': 'stage2',
-        'title': '六维可疑度排序（辅助参考）',
+        'title': '六维可疑度排序',
         'status': 'ready' if items or insufficient else 'empty',
         'items': items,
         'insufficient': insufficient,
@@ -565,5 +565,5 @@ def case_checks(track_records, incident_records):
         'version': VERSION,
         'status': 'ready' if rows else 'empty',
         'items': rows,
-        'disclaimer': '候选案件仅表示时空可核验线索，状态固定为待核验，不构成涉案认定。',
+        'disclaimer': '候选案件状态为待核验，需人工核对处警记录。',
     }

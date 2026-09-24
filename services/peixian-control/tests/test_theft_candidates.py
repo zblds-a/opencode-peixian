@@ -51,22 +51,27 @@ def test_candidate_request_n_phrases():
 
 def test_recommend_n_band_and_drop():
     from control.theft_candidates import recommend_n, candidate_request_n, reply_authorize_option
-    # 20-point drop between 1 and 2 cuts at 1
     ranking = {'items': [
         {'rate': 90, 'band': '关联度很高'},
         {'rate': 70, 'band': '关联度较高'},
         {'rate': 50, 'band': '关联度中等'},
         {'rate': 10, 'band': '关联度较低'},
     ]}
+    # 90→70 drops >=15, cut before second
     assert recommend_n(ranking) == 1
-    # gradual drop keeps eligible until rate < 20
-    ranking2 = {'items': [
-        {'rate': 80, 'band': '关联度很高'},
-        {'rate': 70, 'band': '关联度较高'},
-        {'rate': 60, 'band': '关联度较高'},
+    ranking_flat = {'items': [
+        {'rate': 55, 'band': '关联度中等'},
+        {'rate': 50, 'band': '关联度中等'},
+        {'rate': 48, 'band': '关联度中等'},
         {'rate': 10, 'band': '关联度较低'},
     ]}
-    assert recommend_n(ranking2) == 3
+    assert recommend_n(ranking_flat) == 3
+    ranking2 = {'items': [
+        {'rate': 95, 'band': '关联度很高'},
+        {'rate': 40, 'band': '存在一定关联'},
+        {'rate': 35, 'band': '存在一定关联'},
+    ]}
+    assert recommend_n(ranking2) == 1
     assert recommend_n({'items': []}) == 1
     assert candidate_request_n(reply_authorize_option(3, 3)) == 3
     assert candidate_request_n('核验前2名（推荐）') == 2
@@ -80,8 +85,15 @@ def test_build_enrichment_plan_progress():
     ]
     plan = build_enrichment_plan(candidates)
     assert plan['pending'] == 8 and plan['complete'] is False
-    plan2 = build_enrichment_plan(candidates, present_by_person={
-        'person-a': {'night', 'community', 'warning_detail', 'profile'},
-        'person-b': {'night', 'community', 'warning_detail', 'profile'},
-    })
+    records = [
+        {'module': 'night', 'fields': {'targetIdCard': 'person-a'}, 'record_id': 'n1'},
+        {'module': 'community', 'fields': {'targetIdCard': 'person-a'}, 'record_id': 'c1'},
+        {'module': 'warning_detail', 'fields': {'targetIdCard': 'person-a'}, 'record_id': 'w1'},
+        {'module': 'profile', 'fields': {'person': {'sfz': 'person-a'}}, 'record_id': 'p1'},
+        {'module': 'night', 'fields': {'targetIdCard': 'person-b'}, 'record_id': 'n2'},
+        {'module': 'community', 'fields': {'targetIdCard': 'person-b'}, 'record_id': 'c2'},
+        {'module': 'warning_detail', 'fields': {'targetIdCard': 'person-b'}, 'record_id': 'w2'},
+        {'module': 'profile', 'fields': {'person': {'sfz': 'person-b'}}, 'record_id': 'p2'},
+    ]
+    plan2 = build_enrichment_plan(candidates, records=records)
     assert plan2['complete'] is True and plan2['pending'] == 0

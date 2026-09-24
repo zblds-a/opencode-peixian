@@ -22,7 +22,7 @@ def report_result():
 @pytest.mark.parametrize('format',['md','html'])
 def test_report_same_claims_unknown_missing_narrative(format):
     value=report_result();original=copy.deepcopy(value);text=render(value,[],format)
-    for required in ('demo-claim','DEMO-001','DEMO-SNAPSHOT','车辆资料尚未取得','结果未确认','存在冲突','合成测试资料'):
+    for required in ('demo-claim','DEMO-001','DEMO-SNAPSHOT','车辆资料尚未取得','结果未确认','存在冲突','已取得的来源资料'):
         assert required in text
     assert value==original and text==render(value,[],format)
 

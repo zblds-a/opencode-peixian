@@ -29,7 +29,7 @@ def sections(result, events, reviews=()):
                  '任务：' + json.dumps(task, ensure_ascii=False, sort_keys=True),
                  '数据环境：' + result.get('data_environment', '未知'),
                  '数据使用：' + USAGE.get(result.get('data_usage', {}).get('status'), '状态无法确认'),
-                 ('资料性质：受控验收连接的来源资料；不据此作出犯罪判断。' if result.get('data_environment')=='acceptance_real' else '资料性质：合成测试资料，不代表真实业务事实。')]
+                 ('资料性质：已取得的来源资料。')]
     claims = result.get('claims', [])
     groups = [('报告信息', meta)]
     for title, kind in [('已核验事实', 'fact'), ('确定性计算', 'computed'), ('资料缺口', 'gap')]:

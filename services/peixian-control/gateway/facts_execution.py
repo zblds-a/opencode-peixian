@@ -97,7 +97,6 @@ def register(app):
                         'real_provider_disabled':'资料连接尚未配置，请联系管理员恢复当前资料连接。',
                         'real_provider_configuration_invalid':'资料连接配置尚未通过校验，请联系管理员。',
                         'provider_connection_mismatch':'资料插件与连接绑定不一致，请联系管理员。',
-                        'outside_acceptance_scope':'当前对象或位置不在已授权测试范围。',
                         'coordinate_contract_unconfirmed':'来源与目标接口的坐标兼容性尚未确认，请联系管理员。',
                         'source_integrity_failed':'来源展示字段与原始记录不一致，请重新选择来源。',
                         'source_coordinates_missing':'所选来源没有完整、受支持的坐标。',

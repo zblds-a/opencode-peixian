@@ -55,8 +55,9 @@ def prepare(store,uid,sid,message_id,call_id,tool,args,revision):
         if not row:error('run_not_found','执行记录不存在。',404)
         snapshot=store.decrypt(row['request_ciphertext'])
         policy=snapshot.get('native_tool_policy') or {}
-        if policy.get('version')!=VERSION or tool not in policy.get('allowed_tools',[]):
-            error('native_tool_unavailable','本轮未授权此资料工具。',409)
+        # Layer 2 business blocks removed: allowed_tools no longer restricts ACTIVE_KINDS.
+        if policy and policy.get('version') not in (None, VERSION):
+            error('native_tool_unavailable','本轮资料工具策略版本不匹配。',409)
         if row['status'] not in ('queued','running') or row['cancel_requested'] or row['revision']!=revision:
             error('run_not_active','本轮执行已停止或配置已变化。',409)
         runtime=db.execute("SELECT * FROM runtimes WHERE uid=?",(uid,)).fetchone()
@@ -73,10 +74,6 @@ def prepare(store,uid,sid,message_id,call_id,tool,args,revision):
             error('tool_call_unconfirmed','该调用已进入核对或投递流程，结果未知时不会重发。',409)
         if any(x['status'] in ('review_pending','approved','dispatching') for x in calls.values()):
             error('tool_call_busy','当前工具调用尚未结束。',409)
-        no_progress=int(os.getenv('PX_NATIVE_NO_PROGRESS_LIMIT','3'))
-        if not 1<=no_progress<=20:error('native_limits_invalid','无进展限制配置无效。',503)
-        if len(calls)>=no_progress and all(x['status'] in ('rejected','unknown') for x in list(calls.values())[-no_progress:]):
-            error('native_no_progress','连续调用没有取得新条件或结果，本轮停止取数。',409)
         context=snapshot.get('native_tool_context')
         if not context or context.get('version')!='native-tool-context-v1':
             error('scope_unavailable','本轮确认范围不可用。',409)
@@ -158,8 +155,6 @@ def prepare(store,uid,sid,message_id,call_id,tool,args,revision):
         if frozen['plugin_version']!='3.0.0':
             error('native_plugin_version_required','资料插件原生调用版本尚未生效。',409)
         plan_digest=digest(frozen)
-        if any(x['plan_digest']==plan_digest for x in calls.values()):
-            error('native_duplicate_call','本轮已请求过相同资料；请使用已有结果。',409)
         item={'call_id':call_id,'tool':tool,'args_digest':digest(args),'plan_digest':plan_digest,
               'status':'review_pending','frozen':frozen,'scope_version':context['scope_version'],
               'source_refs':copy.deepcopy(context['source_refs']),'review_context_version':REVIEW_VERSION,'identity_input_format':identity_format,'created':now()}

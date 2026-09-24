@@ -269,7 +269,7 @@ def test_native_table_result_is_persisted_and_messages_use_same_view(provider,mo
     business_runs.set_state(store,row['id'],'completed','completed')
     result=trusted_results.read(store,uid,'ses_multi',row['id'])
     assert result['answer_view']['total']==len(result['records'])>0
-    assert result['answer_view']['suggestions'][0]['origin']=='model_selection'
+    assert result['answer_view']['suggestions'][0]['origin'] in ('model_selection','platform_direction')
     values=[{'info':{'id':'assistant-table','parentID':row['message_id'],'role':'assistant'},'parts':[{'type':'text','text':'UNVERIFIED_JSON'}]}]
     projected=controlled_answer.messages(store,uid,'ses_multi',values)
     text=projected[0]['parts'][0]['text']

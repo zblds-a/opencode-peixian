@@ -27,9 +27,9 @@ def preview(store,uid,sid,body,applied,revision):
     if not isinstance(body,dict) or set(body)!={'kind','query'}:error('provider_query_invalid','查询字段无效。',422)
     kind=body['kind'];availability(store,uid,kind,applied)
     try:q=normalize_query(kind,body['query'])
-    except ContractError as exc:error(str(exc),'请补充或修正资料类型、合成对象、时间和范围。',422)
+    except ContractError as exc:error(str(exc),'请补充或修正资料类型、对象、时间和范围。',422)
     value={'version':VERSION,'kind':kind,'query':q,'revision':revision,'generation':current(store,uid,sid)['generation'],'expires':int(time.time())+600}
-    return {'plan':value,'confirmation':signature(store,uid,sid,value),'summary':CATALOG[kind][0]+'；仅执行已确认的合成范围；当前页 '+str(q['page'])+'，每页 '+str(q['page_size'])+' 条。'}
+    return {'plan':value,'confirmation':signature(store,uid,sid,value),'summary':CATALOG[kind][0]+'；仅执行已确认的范围；当前页 '+str(q['page'])+'，每页 '+str(q['page_size'])+' 条。'}
 def resolve(store,uid,sid,data,applied):
     from .agents.runtime import select,session
     value=data.get('provider_query')
