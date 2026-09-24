@@ -66,6 +66,7 @@ def track_messages(store,row,values,receipt):
                 status='waiting_input'
             from .execution_view import observed
             metadata=observed(snapshot,{**part,'messageID':info.get('id')})
+            status=metadata['status']
             runs.event(store,row['id'],str(part.get('id') or part.get('callID')),kind,metadata['name'],status,timing.get('start')//1000 if type(timing.get('start')) is int else None,timing.get('end')//1000 if type(timing.get('end')) is int else None,metadata['capability_id'],metadata['record_count'],metadata=metadata)
     with store.tx() as db:
         db.execute('UPDATE invocations SET actual_plugins=? WHERE run_id=?',(encode(sorted(actual)),row['id']))
@@ -222,6 +223,8 @@ class Coordinator:
             response=await app.state.http.get(base+'/session/'+row['session_id']+'/message',headers=headers,timeout=10);response.raise_for_status()
             if await work(track_messages,s,current,response.json(),receipt):return
             if receipt['state']=='finished':
+                from .conversation_completion import finish_dismissed
+                if await work(finish_dismissed,s,current,response.json()):return
                 await work(runs.set_state,s,row['id'],'cancelled' if current['cancel_requested'] else 'failed','finished_without_result','no_terminal_result')
             elif receipt['state']=='unknown':
                 await work(runs.set_state,s,row['id'],'reconciling','recovery_required','agent_restarted')

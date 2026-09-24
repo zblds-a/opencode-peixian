@@ -85,9 +85,11 @@ def select_records(result, snapshot, subject, spatial=False, subjects=None):
 
 
 INSTRUCTION = """
-回答展示协议：由人到案人员研判且 person_case_plan 已完成（或仅剩失败缺口）时，用简体中文直接输出四段式（人员基本信息 / 研判摘要 / 分析依据 / 下一步研判），完成 7.3 融合；不要只输出 JSON。平台会附录评分、候选案与八接口覆盖。
-由案到人等场景资料回答完成时可输出 person-tables-v3 JSON。
-有 person_case_plan 且未完成时，按计划每次一个工具调用，打满前不要写终稿。分数与排序只由平台计算。普通对话不用 JSON。
+资料回答按人员基本信息、基本结论、判断依据、下一步分析建议组织中文表格。
+优先回答当前问题，最多五条结论、三项建议；仅引用当前任务匹配人员的已取得资料。
+不要求查完全部接口再输出，不执行旧版全量补查清单。缺项、零记录、失败与未知分别说明。
+问答取消后汇总已有结果，不扩大范围，不新增取数。问候、能力说明及缺项追问用简短自然对话。
+来源存在不等于整句已核验，不输出个人犯罪倾向、嫌疑评分或排名。
 """
 
 
@@ -378,6 +380,7 @@ def build(result, snapshot):
         want_score = bool(chosen['scoring'].get('requested'))
     else:
         want_score = bool(context.get('scoring_requested'))
+    if snapshot.get('dialogue_policy')=='adaptive-dialogue-v1': want_score=False
     if direction == 'case_to_person' and want_score:
         captures = [r for r in records if r.get('module') == 'captures']
         if context.get('candidate_set'):
@@ -424,7 +427,7 @@ def build(result, snapshot):
             missing.append(scoring['disclaimer'])
 
     case_view = model_case_checks(chosen, {r['record_id'] for r in records})
-    if direction == 'person_to_case':
+    if direction == 'person_to_case' and snapshot.get('dialogue_policy') != 'adaptive-dialogue-v1':
         tracks = [r for r in records if r.get('module') == 'tracks']
         incidents = [r for r in records if r.get('module') == 'incidents']
         if tracks and incidents:

@@ -60,8 +60,14 @@ def session(store,uid,sid,profile):
     if any(frozen_identity(store.decrypt(row['request_ciphertext']))!=profile.id for row in rows):
         error('session_agent_mismatch','此会话属于其他助手，历史记录仍可查看；请新建盗窃助手会话继续。' if active_ids()==('theft-assistant',) else '此会话已绑定其他助手，请新建会话使用所选助手。',409)
 
-def bind(payload,profile,context,skills):
-    payload['system']=payload.get('system','')+'\n\n'+POLICY+'\n'+profile.prompt
+def bind(payload,profile,context,skills,native_dialogue=False):
+    prompt=profile.prompt
+    policy=POLICY
+    if native_dialogue:
+        from pathlib import Path
+        prompt=(Path(__file__).parent/'profiles'/'theft_dialogue_prompt.md').read_text(encoding='utf-8')
+        policy='平台固定助手身份及授权边界，中文表达，事实与说明分开；不得推断个人犯罪倾向、评分或排名。'
+    payload['system']=payload.get('system','')+'\n\n'+policy+'\n'+prompt
     payload['tools']={**payload.get('tools',{}),**{k:False for k in ('skill','read','glob','grep','write','edit','apply_patch','bash','pty')}}
 
 def freeze(snapshot,payload,profile):

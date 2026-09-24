@@ -56,7 +56,7 @@ def infer_direction(confirmed, refs, text, prior=None):
     return 'unknown'
 
 
-def freeze_context(store,uid,sid,data):
+def freeze_context(store,uid,sid,data,adaptive=False):
     """Freeze explicit user conditions with a stable session task identity."""
     text=data['text']
     parsed=slots(text,data.get('scope'))
@@ -97,10 +97,10 @@ def freeze_context(store,uid,sid,data):
         prior_constraints=''
     constraints=(prior_constraints+' '+text)[-12000:]
     direction=infer_direction(confirmed, refs, text, prior)
-    want_score=scoring_requested(text, prior, direction)
+    want_score=False if adaptive else scoring_requested(text, prior, direction)
     from .theft_candidates import candidate_request_n, stage1_from_task, authorize, build_enrichment_plan, task_person_modules
     request_n=candidate_request_n(text)
-    candidate_set=[] if changed_object else copy.deepcopy((prior or {}).get('candidate_set') or [])
+    candidate_set=[] if adaptive or changed_object else copy.deepcopy((prior or {}).get('candidate_set') or [])
     if request_n and want_score and direction == 'case_to_person':
         ranked=stage1_from_task(store, uid, sid, task_id)
         if ranked.get('items'):
@@ -110,14 +110,14 @@ def freeze_context(store,uid,sid,data):
         present=task_person_modules(store, uid, sid, task_id)
         enrichment=build_enrichment_plan(candidate_set, present_by_person=present)
     # Person-to-case full coverage: scoring on by default once identity+time confirmed
-    if direction == 'person_to_case' and 'person_identity' in confirmed and {'start','end'} <= set(confirmed):
+    if not adaptive and direction == 'person_to_case' and 'person_identity' in confirmed and {'start','end'} <= set(confirmed):
         if SCORING_NEGATE.search(text or ''):
             want_score = False
         else:
             want_score = True
     person_plan=None
-    center_set=[] if changed_object else copy.deepcopy((prior or {}).get('center_set') or [])
-    if direction == 'person_to_case' and 'person_identity' in confirmed and {'start','end'} <= set(confirmed):
+    center_set=[] if adaptive or changed_object else copy.deepcopy((prior or {}).get('center_set') or [])
+    if not adaptive and direction == 'person_to_case' and 'person_identity' in confirmed and {'start','end'} <= set(confirmed):
         from . import person_case_flow as pcf
         radius = confirmed.get('radius_m') or pcf.DEFAULT_RADIUS_M
         provisional = {
@@ -128,9 +128,14 @@ def freeze_context(store,uid,sid,data):
             center_set = person_plan['center_set']
     stop_phrase='不再追问，请基于已取得资料直接作答。'
     stop_followup=bool((prior or {}).get('stop_followup')) or (text.strip() == stop_phrase) or ('不再追问' in text and '直接作答' in text)
+    capture_conditions={} if changed_object else copy.deepcopy((prior or {}).get('capture_conditions',{}))
+    if adaptive and re.search(r'抓拍',text):
+        capture_conditions.update({k:current[k] for k in ('start','end','radius_m') if k in current})
     return {'version':'native-tool-context-v1','task_id':task_id,
         'scope_version':prior['scope_version']+1 if prior else 1,
         'confirmed':confirmed,'source_refs':refs,
+        'dialogue_policy':'adaptive-dialogue-v1' if adaptive else None,
+        'capture_conditions':capture_conditions,
         'capture_position_confirmed':bool((prior or {}).get('capture_position_confirmed')) and not changed_object,
         'current_text':text,'constraints_text':constraints,'user_conditions':current,
         'scoring_requested':want_score,
@@ -169,7 +174,7 @@ def canonical_field(key, value):
 def resolve_arguments(kind, args, context):
     if not isinstance(args,dict): error('native_tool_invalid','资料工具参数必须是对象。',422)
     resolved=copy.deepcopy(args)
-    confirmed=context['confirmed']
+    confirmed=context.get('capture_conditions',{}) if kind=='captures' and context.get('dialogue_policy')=='adaptive-dialogue-v1' else context['confirmed']
     # Only fill existing task-bound conditions, never new objects or inferred times.
     reusable=set()
     if kind in adapter.PERSON and not context['source_refs']: reusable.add('person_identity')
@@ -194,6 +199,10 @@ def arguments(kind,args,context):
     if set(args)-supported:
         error('native_tool_invalid','查询参数包含未开放的条件。',422)
     args=resolve_arguments(kind,args,context)
+    if kind=='captures' and context.get('dialogue_policy')=='adaptive-dialogue-v1':
+        conditions=context.get('capture_conditions',{})
+        absent={k:FIELD_NAMES[k]+'需针对抓拍查询明确' for k in ('start','end','radius_m') if k not in conditions or (k in args and canonical_field(k,args[k])!=canonical_field(k,conditions[k]))}
+        if absent:error('scope_missing','请补充抓拍查询的指定条件。',409,absent)
     if isinstance(args.get('person_identity'),str) and args['person_identity'].startswith('person-'):
         error('identity_parameter_invalid','person_identity 必须使用已确认的原始身份号码，不能使用展示引用。',409)
     if context['source_refs'] and {'lon','lat','person_identity'} & args.keys():
@@ -288,74 +297,20 @@ def named_sources(store,uid,sid,text):
 
 
 def model_context(context):
-    """Explain available confirmed values; inject person_case_plan / enrichment_plan."""
-    plan = context.get('enrichment_plan')
-    person_plan = context.get('person_case_plan')
-    enrich_note = ''
-    payload = {
-        'version': 'native-tool-arguments-v1',
-        'scope_version': context['scope_version'],
-        'confirmed': context['confirmed'],
-        'selected_source_refs': context['source_refs'],
-        'direction': context.get('direction') or 'unknown',
-        'scoring_requested': bool(context.get('scoring_requested')),
-    }
-    if isinstance(person_plan, dict) and person_plan.get('items'):
-        public_plan = {
-            'version': person_plan.get('version'),
-            'phase': person_plan.get('phase'),
-            'done': person_plan.get('done'),
-            'pending': person_plan.get('pending'),
-            'total': person_plan.get('total'),
-            'complete': person_plan.get('complete'),
-            'coverage': person_plan.get('coverage'),
-            'next': person_plan.get('next'),
-            'items': list(person_plan.get('items') or []),
-            'center_set': [
-                {
-                    'rank': c.get('rank'), 'label': c.get('label'),
-                    'visit_count': c.get('visit_count'), 'domicile_like': c.get('domicile_like'),
-                    'record_id': c.get('record_id'), 'radius_m': c.get('radius_m'),
-                    'coordinate_reusable': True,
-                }
-                for c in (person_plan.get('center_set') or context.get('center_set') or [])
-            ],
-        }
-        payload['person_case_plan'] = public_plan
-        if not person_plan.get('complete'):
-            nxt = person_plan.get('next') or {}
-            i = (person_plan.get('done') or 0) + 1
-            total = person_plan.get('total') or 0
-            kind = nxt.get('kind') or ''
-            enrich_note = (
-                '本轮由人到案全量计划未完成（{}/{}）。请严格按 person_case_plan 下一项调用 {}（每次仅一个调用）；'
-                '位置维由平台绑定停留中心来源，不要手写经纬度。'
-                '失败则记下缺口并继续；全部完成后再输出四段式终稿与 7.3 融合分析。'
-            ).format(i, total, kind)
-        else:
-            enrich_note = (
-                'person_case_plan 已完成（或仅剩失败缺口）。请输出人员研判四段式，并完成 7.3 融合分析；'
-                '分数与排序引用平台结果，不要自造分。'
-            )
-    if isinstance(plan, dict) and plan.get('items'):
-        payload['enrichment_plan'] = plan
-        if not plan.get('complete') and not enrich_note:
-            enrich_note = (
-                '本轮已有候选人补查计划。可按 enrichment_plan 逐项调用对应资料工具（每次一个调用）；'
-                '不必再向用户确认人数或是否补查；某次失败则记下缺口并继续下一项。'
-            )
-        elif plan.get('complete') and not enrich_note:
-            enrich_note = 'enrichment_plan 已完成；可基于已取得资料作答，覆盖不足者可再建议补查。'
-    stop_note = ''
-    if context.get('stop_followup'):
-        stop_note = '用户已要求停止追问，请基于已取得资料直接作答，不要再调用 question，也不要再写 next_question。'
-    prefix = (
-        '\n本轮原生工具参数约定：研判方向、是否评分、下一步建议与追问由你判断；'
-        '由人到案且存在 person_case_plan 时以计划为准打满八类接口。'
-        '条件齐全即可直接查询。缺条件时用 question 工具自己组织题干和选项。'
-        'person_identity 可填写原始身份号码，或本会话抓拍结果中的 person-* 引用。'
-        '已选定来源或平台绑定停留中心时，对象或坐标由平台从来源读取，不要在参数中手写 lon/lat。'
-        '服务端会补齐本任务已确认且用途适用的人员和时间。'
-        '真正失败不代表记录为零；不要自行重试失败调用。分数、等级与排序数值只由平台按来源计算。'
-    )
-    return prefix + stop_note + enrich_note + '\n' + adapter.canonical(payload)
+    """Expose confirmed conditions; the model decides the next useful query."""
+    payload = {'version':'native-tool-arguments-v1', 'scope_version':context['scope_version'],
+        'confirmed':context['confirmed'], 'selected_source_refs':context['source_refs'],
+        'direction':context.get('direction') or 'unknown'}
+    return """
+本轮对话规则：围绕用户当前问题选择必要工具，不要求八项全查，不按固定人员补查计划执行。
+已取得资料足够时直接回答；普通问候、解释、表格调整不取数。
+沿用同一任务已确认且用途适用的人员、时间和位置；不要反复确认同一条件。
+人员或地点不明确、多个候选时，用 question 只问缺项，不默认取第一项，不自动遍历所有位置。
+已取得位置是候选，不代表用户已选择。抓拍时间与半径需用途明确，轨迹时间不自动变成抓拍时间。
+person_identity 可使用已确认身份或该任务来源中的人员引用；已选来源的坐标由平台读取。
+没有记录不等于没有发生；不得自动扩大范围、自动翻页或重试未知调用。
+用户取消补充时停止对应查询，基于成功资料给出阶段回答，不把取消解释为全部资料失败。
+资料类回答包含人员基本信息、基本结论、判断依据、下一步分析建议；来源事实与模型说明区分。
+建议最多三项，只建议必要且可用的下一步，不自动执行。不作个人犯罪倾向、嫌疑评分或排名。
+周边警情仅支持空间及分页条件，额外时间或类别条件不能静默丢弃，处警时间不代表案发时间。
+""" + ('用户已要求停止追问，直接整理已有资料。' if context.get('stop_followup') else '') + '\n' + adapter.canonical(payload)

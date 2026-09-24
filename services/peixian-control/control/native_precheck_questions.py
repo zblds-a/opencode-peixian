@@ -101,10 +101,9 @@ def list_spatial_sources(store, uid, sid, limit=5, task_id=None):
         "SELECT id,status FROM business_runs WHERE uid=? AND session_id=? ORDER BY rowid DESC LIMIT 50",
         (uid, sid),
     ):
-        if row['status'] not in ('completed', 'failed', 'cancelled'):
-            continue
         try:
-            result = trusted_results.read(store, uid, sid, row['id'])
+            from .live_sources import projection, reference
+            result = projection(store, uid, sid, row['id'])
         except HTTPException:
             continue
         if result.get('data_environment') != 'acceptance_real':
@@ -124,12 +123,9 @@ def list_spatial_sources(store, uid, sid, limit=5, task_id=None):
                 when = fields.get('captureTime') or fields.get('time') or '时间未提供'
                 where = f"{fields.get('lon', '?')},{fields.get('lat', '?')}"
                 title = f"来源{index} · 轨迹点 {where} · {when}"
-            ref = {
-                'run_id': row['id'],
-                'result_digest': digest,
-                'record_id': record['record_id'],
-                'snapshot_id': record['snapshot_id'],
-            }
+            ref = reference(result,record) if record.get('call_id') else {
+                'run_id':row['id'],'result_digest':digest,
+                'record_id':record['record_id'],'snapshot_id':record['snapshot_id']}
             found.append({
                 'label': title,
                 'ref': ref,
@@ -453,6 +449,8 @@ def apply_reply(spec, answers, context, store=None, uid=None, sid=None):
             continue
         confirmed[key] = value
         user_conditions[key] = value
+    if spec.get('kind') == 'captures':
+        next_context.setdefault('capture_conditions',{}).update({k:v for k,v in updates.items() if k in ('start','end','radius_m')})
     if spec.get('kind') == 'captures' and {'lon','lat'} <= updates.keys():
         next_context['capture_position_confirmed'] = True
         next_context['source_refs'] = []

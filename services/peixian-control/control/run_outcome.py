@@ -18,6 +18,8 @@ def project(store, row):
         status,title,message,steps='cancelled','执行已停止','已确认本次执行停止；外部操作是否撤销需另行确认。',['可以查看已取得的记录和未完成项目。']
     elif row['status']=='failed':
         status,title,message,steps='failed','本次执行未完成','部分步骤未完成，不代表没有相关资料。',['请查看执行步骤中的具体原因；确认原执行状态后再决定是否重新查询。']
+    elif snapshot.get('dialogue_completion',{}).get('reason')=='clarification_dismissed':
+        status,title,message,steps='partial','已有资料已整理 · 补充查询已停止','已停止需要补充条件的查询；成功结果仍保留，未查询项目不表示零条。',['可查看已有资料；需要继续时再选择位置或补充该项条件。']
     elif row['phase']=='clarification' or spec.get('query_mode')=='clarify':
         status,title,message,steps='needs_input','需要补充信息 · 尚未查询','本次仅完成问题范围确认，没有发起资料查询。',['请按本条回复补充对象或范围；若沿用已有对象，请说明“整理当前对象的资金往来”或所需资料类型。']
         if spec.get('domain')=='theft':steps=['请按本条回复补充对象或范围；若沿用已有对象，可说“整理当前对象的车辆记录”。']

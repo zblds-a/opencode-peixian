@@ -27,6 +27,10 @@ def observed(snapshot, part):
         from shared.capability_labels import display as display_name
         name=display_name(plugin['id'],name)
     status = {'error': 'failed', 'completed': 'completed', 'running': 'running', 'pending': 'pending', 'cancelled': 'cancelled', 'waiting_input': 'waiting_input'}.get(state.get('status'), 'pending')
+    from .conversation_completion import dismissed
+    if tool == 'question':
+        name = '补充查询条件'
+        if dismissed(part): status = 'cancelled'
     # Only execution-time approved scalar fields are public. Skill content is never returned.
     display = (plugin or {}).get('display', {})
     inputs = display_values(state.get('input'), display.get('input_fields'), snapshot.get('display_secrets', []))
@@ -50,7 +54,7 @@ def observed(snapshot, part):
             'name': name, 'status': status, 'capability_id': capability.get('id') if capability else None,
             'capability_name': name if capability else None, 'capability_version': str(capability['version']) if capability and capability.get('version') is not None else None,
             'input_summary': '按本轮已确认范围执行' if capability else '',
-            'output_summary': f'返回 {count} 条记录' if 'returned_count' in outputs else '技能已加载' if skill and status == 'completed' else '无可公开的结果摘要' if status == 'completed' else '',
+            'output_summary': '已取消补充；已取得资料保留' if tool == 'question' and status == 'cancelled' else f'返回 {count} 条记录' if 'returned_count' in outputs else '技能已加载' if skill and status == 'completed' else '无可公开的结果摘要' if status == 'completed' else '',
             'result': outputs, 'result_truncated': bool(isinstance(output, dict) and set(output) - set(outputs)),
             'record_count': count, 'details': {'inputs': inputs, 'outputs': outputs}}
 

@@ -55,8 +55,11 @@ def project(row,snapshot):
                  'call_id':call_id,'snapshot_id':public['response_snapshot_id']},source_ids))
         missing+=public.get('missing',[])
         missing+=public.get('limitations',[])
+    questions=[q for q in snapshot.get('native_pending_questions',{}).values() if q.get('status') in ('pending','rejected')]
+    for q in questions:
+        missing.append(adapter.CATALOG[q['kind']][0]+('：已取消补充，尚未查询。' if q['status']=='rejected' else '：等待补充条件，尚未查询。'))
     confirmed=[m for m in modules if m['response_confirmed']]
-    if confirmed and len(confirmed)==len(modules):
+    if confirmed and len(confirmed)==len(modules) and not questions:
         use_status='confirmed'
     elif confirmed:
         use_status='partial'

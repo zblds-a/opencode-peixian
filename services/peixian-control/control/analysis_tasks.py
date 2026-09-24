@@ -69,6 +69,9 @@ def source(store,uid,sid,reference,environment):
     if not isinstance(reference,dict) or set(reference)!={'run_id','result_digest','record_id','snapshot_id'}:
         error('source_reference_invalid','请明确选择来源执行及条目。',422)
     if any(not isinstance(v,str) or not 1<=len(v)<=300 for v in reference.values()):error('source_reference_invalid','来源引用字段无效。',422)
+    from .live_sources import PREFIX, resolve
+    if reference['result_digest'].startswith(PREFIX):
+        return resolve(store,uid,sid,reference,environment)
     run=business_runs.owned(store,uid,sid,reference['run_id'])
     result=trusted_results.read(store,uid,sid,run['id'])
     if result.get('data_environment')!=environment or trusted_results.digest(result)!=reference['result_digest']:
