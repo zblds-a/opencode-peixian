@@ -24,6 +24,12 @@
 .business-shell .chat-layout .composer { border-radius: 16px; }
 .business-shell .chat-layout .composer textarea { min-height: 53px; max-height: 150px; padding: 12px 16px 0; line-height: 1.5; }
 .business-shell .chat-layout .composer-tools { justify-content: flex-end; gap: 9px; padding: 3px 11px 9px; }
+.business-shell .chat-layout .chat-upload-control { margin-right: auto; }
+.business-shell .chat-layout .chat-upload-control button { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 8px; border: 0; border-radius: 8px; background: transparent; color: #45658b; cursor: pointer; }
+.business-shell .chat-layout .chat-upload-control button:hover:not(:disabled) { background: #eef6ff; color: #1766bd; }
+.business-shell .chat-layout .chat-upload-control button:disabled { opacity: .55; cursor: default; }
+.business-shell .chat-layout .chat-upload-control img { width: 20px; height: 20px; object-fit: contain; }
+.app-shell .sidebar nav .sidebar-settings-icon { flex: 0 0 18px; width: 18px; height: 18px; object-fit: contain; }
 .business-shell .chat-layout .composer-shortcuts { margin-right: auto; }
 .business-shell .chat-layout .composer-shortcuts button { min-height: 31px; }
 .business-shell .chat-layout .model-choice { flex: 0 1 192px; min-width: 0; max-width: 192px; min-height: 32px; border-radius: 999px; }

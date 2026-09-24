@@ -176,7 +176,11 @@ export function Markdown(props: { text: string }) {
     }),
   )
   createEffect(() => {
-    html()
+    const next = html()
+    const opened = Array.from(host.querySelectorAll<HTMLDetailsElement>("details")).flatMap((item, index) => item.open ? [index] : [])
+    host.innerHTML = next
+    const details = host.querySelectorAll<HTMLDetailsElement>("details")
+    opened.forEach((index) => { if (details[index]) details[index].open = true })
     const current = ++generation
     queueMicrotask(() => {
       if (current !== generation || !host?.isConnected) return
@@ -238,7 +242,7 @@ export function Markdown(props: { text: string }) {
     })
   })
   onCleanup(() => generation++)
-  return <div ref={host} class="markdown" innerHTML={html()} onClick={(event) => {
+  return <div ref={host} class="markdown" onClick={(event) => {
     const link = (event.target as Element).closest<HTMLAnchorElement>("a[href]")
     const href = link?.getAttribute("href") ?? ""
     if (!/^#source-[a-zA-Z0-9-]+$/.test(href)) return

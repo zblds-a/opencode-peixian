@@ -18,6 +18,7 @@ import { canObserve, canSend } from "../runtime-view"
 import { useResourceRefresh } from "../resource-refresh"
 import { chatAssets } from "../chat-assets"
 import { pluginIcon } from "../dialogue-icons"
+import uploadIcon from "../assets/images/chat/upload-icon.png"
 import type { AnalysisClue, AnalysisResult, CapabilityItem, FileItem, Message, Model, Plugin, Run, RunEvent, RunEvidence, Session, Skill, SkillDraft } from "../types"
 
 export default function Chat() {
@@ -84,7 +85,8 @@ export default function Chat() {
   let scrollFrame = 0
   let followOutput = true
   let selectingText = false
-  let animateUntil = 0
+  const animatedRuns = new Set<string>()
+  const terminalSince = new Map<string, number>()
   let selectionRevision = 0
   let messageFlight: { id: string; revision: number; trailing: boolean; detail: boolean; promise: Promise<void> } | undefined
   const completedToolTraces = new Set<string>()
@@ -118,14 +120,18 @@ export default function Chat() {
     return shownCapabilities().filter((item) => !query || `${item.name}${item.description ?? ""}`.toLowerCase().includes(query)).slice(0, 7)
   })
   const messageAnalysis = createMemo(() => [...messages().flatMap((message) => message.parts)].reverse().find((part) => part.type === "analysis_result" && isAnalysisResult(part.data))?.data as AnalysisResult | undefined)
+  const resultV2RunID = createMemo(() => {
+    const result = [...messages().flatMap((message) => message.parts)].reverse().find((part) => part.type === "analysis_result" && part.data && typeof part.data === "object" && !Array.isArray(part.data) && part.data.schema === "peixian.analysis-result" && part.data.version === "2.0" && typeof part.data.run_id === "string")?.data
+    return result && typeof result === "object" && "run_id" in result ? String(result.run_id) : undefined
+  })
   const latestAnalysis = createMemo(() => {
     const result = messageAnalysis() ?? legacyPresentation(trusted()?.presentation)
     if (!result) return
     const gaps = result.run_id && runEvidence()?.run_id === result.run_id ? runEvidence()?.missing : undefined
     return { ...result, missing: [...new Set([...(result.missing ?? []), ...(gaps ?? [])])] }
   })
-  const graphRunID = createMemo(() => latestAnalysis()?.run_id ?? currentRun()?.id)
-  const hasInsights = createMemo(() => Boolean(latestAnalysis()?.clues.length || latestAnalysis()?.diagram || latestAnalysis()?.run_id))
+  const graphRunID = createMemo(() => latestAnalysis()?.run_id ?? resultV2RunID() ?? currentRun()?.id)
+  const hasInsights = createMemo(() => Boolean(latestAnalysis()?.clues.length || latestAnalysis()?.diagram || latestAnalysis()?.run_id || resultV2RunID()))
   const sideMode = createMemo(() => loading() ? "empty" : selectedClue() ? "clue-detail" : hasInsights() ? (showClues() ? "insight" : "collapsed") : "plugins")
   const rightMode = createMemo(() => sideMode() === "insight" ? insightTab() === "graph" ? "graph" : "clues" : sideMode())
   type ChatEntry = { message: Message; textParts: { part: Message["parts"][number]; id: string; afterTools: boolean }[]; toolParts: Message["parts"]; error?: Message["info"]["error"]; missingBody: boolean }
@@ -151,7 +157,6 @@ export default function Chat() {
   }))
   const awaitingReply = createMemo(() => {
     if (!busy() || !currentRun()) return false
-    if (runEventRun() === currentRun()?.id && runEvents().length) return false
     const userIndex = messages().findIndex((message) => message.info.id === currentRun()?.user_message_id)
     return !messages().some((message, index) => message.info.role === "assistant" &&
       (message.info.run_id === currentRun()?.id || (userIndex >= 0 && index > userIndex)) &&
@@ -193,21 +198,25 @@ export default function Chat() {
         flight.detail = false
         const data = await list<Message>("/sessions/" + id + "/messages")
         if (!current()) return
-        setMessages((current) => data.map((message, index) => {
-          const old = current[index]
+        setMessages((previous) => {
+          const incoming = new Set(data.map((message) => message.info.id))
+          const retained = busy() && currentRun() ? previous.filter((message) => message.info.role === "assistant" && message.info.run_id === currentRun()?.id && !incoming.has(message.info.id)) : []
+          return [...data, ...retained].map((message) => {
+          const old = previous.find((item) => item.info.id === message.info.id)
           if (old?.info.id !== message.info.id) return message
           if (JSON.stringify(old) === JSON.stringify(message)) return old
           return {
             ...message,
             parts: message.parts.map((part, partIndex) => {
-              const previous = old.parts[partIndex]
-              return previous && JSON.stringify(previous) === JSON.stringify(part) ? previous : part
+              const prior = old.parts.find((item) => item.id && item.id === part.id) ?? old.parts[partIndex]
+              return prior && JSON.stringify(prior) === JSON.stringify(part) ? prior : part
             }),
           }
-        }))
+          })
+        })
         if (pendingPrompt()?.messageID && data.some((message) => message.info.id === pendingPrompt()?.messageID)) setPendingPrompt(undefined)
         if (!includeDetail) continue
-        const hasAnalysis = data.some((message) => message.parts.some((part) => part.type === "analysis_result" && isAnalysisResult(part.data)))
+        const hasAnalysis = messages().some((message) => message.parts.some((part) => part.type === "analysis_result" && isAnalysisResult(part.data)))
         if (hasAnalysis) setTrusted(undefined)
         if (!hasAnalysis) {
           try {
@@ -229,8 +238,10 @@ export default function Chat() {
   async function fetchRunState(id: string, current = () => selected() === id) {
     const page = await api<{ items: Run[] }>("/sessions/" + id + "/runs?page=1&page_size=20")
     if (!current()) return
-    const run = page.items.find((item) => item.id === latestRun()) ?? page.items.find((item) => !terminalRun(item.status)) ?? page.items[0]
+    if (latestRun() && currentRun()?.id === latestRun() && !terminalRun(currentRun()!.status) && !page.items.some((item) => item.id === latestRun())) return
+    const run = page.items.find((item) => !terminalRun(item.status)) ?? page.items.find((item) => item.id === latestRun()) ?? page.items[0]
     if (!run) {
+      setBusy(false)
       setCurrentRun(undefined)
       setLatestRun(undefined)
       setRunEvents([])
@@ -240,7 +251,14 @@ export default function Chat() {
     }
     setLatestRun(run.id)
     setCurrentRun(run)
-    setBusy(!terminalRun(run.status))
+    if (terminalRun(run.status)) {
+      if (!terminalSince.has(run.id)) terminalSince.set(run.id, Date.now())
+      const answered = messages().some((message) => message.info.role === "assistant" && message.info.run_id === run.id && message.parts.some((part) => part.type === "text" && part.text?.trim()))
+      setBusy(run.status === "completed" && !answered && Date.now() - terminalSince.get(run.id)! < 8000)
+    } else {
+      terminalSince.delete(run.id)
+      setBusy(true)
+    }
     const sameRun = runEventRun() === run.id
     const after = sameRun ? Math.max(0, ...runEvents().map((item) => item.sequence)) : 0
     const [eventsResult, evidenceResult] = await Promise.allSettled([
@@ -263,7 +281,6 @@ export default function Chat() {
       const values = await list<Session>("/sessions")
       updateSessions(values)
       if (selected()) {
-        setBusy(["busy", "retry"].includes(values.find((item) => item.id === selected())?.status ?? "idle"))
         await fetchMessages(selected()!)
       }
       setError("")
@@ -338,9 +355,9 @@ export default function Chat() {
   async function choose(id: string) {
     selectionRevision++
     displayedText.clear()
+    animatedRuns.clear()
     completedToolTraces.clear()
     toolStatuses.clear()
-    animateUntil = 0
     followOutput = true
     setSelected(id)
     setPendingPrompt(undefined)
@@ -370,9 +387,9 @@ export default function Chat() {
   function fresh() {
     selectionRevision++
     displayedText.clear()
+    animatedRuns.clear()
     completedToolTraces.clear()
     toolStatuses.clear()
-    animateUntil = 0
     followOutput = true
     setSelected(undefined)
     setPendingPrompt(undefined)
@@ -455,13 +472,12 @@ export default function Chat() {
       accepted = true
       setSentAttachments((current) => ({ ...current, [result.message_id]: attachments }))
       setPendingPrompt({ text, attachments, messageID: result.message_id, accepted: true })
-      animateUntil = Date.now() + 30000
+      animatedRuns.add(result.run_id)
       setLatestRun(result.run_id)
       setCurrentRun({ id: result.run_id, session_id: id, status: "queued", phase: "accepted", user_message_id: result.message_id, created_at: new Date().toISOString() })
       setRunEvents([])
       setRunEventRun(result.run_id)
       if (textOverride === undefined && draft() === text) setDraft("")
-      if (JSON.stringify(selectedFiles()) === JSON.stringify(payload.file_ids)) setSelectedFiles([])
       if (JSON.stringify(selectedSkills()) === JSON.stringify(payload.skill_ids)) setSelectedSkills([])
       if (JSON.stringify(selectedPlugins()) === JSON.stringify(payload.plugin_ids)) setSelectedPlugins([])
       setBusy(true)
@@ -608,8 +624,8 @@ export default function Chat() {
     if (!chosen?.length || uploading() || !ready()) return
     const incoming = Array.from(chosen)
     fileInput.value = ""
-    if (incoming.length + selectedFiles().length > 5) {
-      app.notify("每次最多关联五个文件。", "error")
+    if (incoming.length > 5) {
+      app.notify("一次最多上传五个文件。", "error")
       return
     }
     const owner = app.user().id
@@ -639,10 +655,9 @@ export default function Chat() {
           await new Promise((resolve) => setTimeout(resolve, 2000))
         }
         if (readyFile?.status !== "ready" || readyFile.truncated) throw new Error(`${file.name} 已上传但仍在解析，暂不能关联；请稍后重新选择。`)
-        setSelectedFiles((current) => current.includes(uploaded.id) ? current : [...current, uploaded.id])
       }
       app.invalidate(["files"])
-      app.notify("文件已上传并解析完成，发送时将随消息关联。")
+      app.notify("文件已上传到资料库。当前研判暂不支持将文件随消息关联。")
     } catch (cause) {
       app.notify((cause as Error).message, "error")
     } finally {
@@ -882,7 +897,7 @@ export default function Chat() {
             <Status value={app.user().runtime?.status} />
           </div>
         </Show>
-        <div class="messages-scroll" ref={scroll} onPointerDown={() => { selectingText = true }} onPointerUp={() => { selectingText = false }} onPointerCancel={() => { selectingText = false }} onScroll={() => { followOutput = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 96 }}>
+        <div class="messages-scroll" ref={scroll} onPointerDown={() => { selectingText = true }} onPointerUp={() => { requestAnimationFrame(() => { selectingText = false }) }} onPointerCancel={() => { selectingText = false }} onScroll={() => { followOutput = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 96 }}>
           <Show
             when={messages().length || pendingPrompt() || awaitingReply()}
             fallback={<div class="chat-welcome"><strong>你好，我是你的智能研判助手</strong><p>可以从一个问题开始，重要结论请结合原始资料核验。</p></div>}
@@ -894,7 +909,7 @@ export default function Chat() {
                   const attachments = () => message().attachments ?? sentAttachments()[message().info.id] ?? []
                   const textParts = () => entry().textParts
                   const toolParts = () => entry().toolParts
-                  const renderText = (item: () => ChatEntry["textParts"][number]) => message().info.role === "assistant" && item().part.origin !== "controlled_answer" ? <div><SmoothMarkdown id={`${selected()}:${item().id}`} text={item().part.text ?? ""} live={busy() || Date.now() < animateUntil} cache={displayedText} pause={() => selectingText || selectionInConversation()} onProgress={() => { if (scroll && followOutput && !selectingText && !selectionInConversation()) scroll.scrollTop = scroll.scrollHeight }} /></div> : <Markdown text={item().part.text ?? ""} />
+                  const renderText = (item: () => ChatEntry["textParts"][number]) => message().info.role === "assistant" ? <div><SmoothMarkdown id={`${selected()}:${item().id}`} text={item().part.text ?? ""} live={animatedRuns.has(message().info.run_id ?? "") || busy() && currentRun()?.id === message().info.run_id} cache={displayedText} pause={() => selectingText || selectionInConversation()} onProgress={() => { if (scroll && followOutput && !selectingText && !selectionInConversation()) scroll.scrollTop = scroll.scrollHeight }} /></div> : <Markdown text={item().part.text ?? ""} />
                   const traceComplete = () => {
                     const key = `${selected()}:${message().info.id}`
                     if (toolParts().length && toolParts().every((part, index) => ["completed", "succeeded"].includes(toolStatus(part, index, message().info.id)))) completedToolTraces.add(key)
@@ -1056,6 +1071,10 @@ export default function Chat() {
               }}
             />
             <div class="composer-tools">
+              <div class="chat-upload-control">
+                <input ref={fileInput} type="file" accept=".xlsx,.pdf,.docx,.txt,.md,.csv" multiple hidden onChange={(event) => void uploadLocal(event.currentTarget.files)} />
+                <button type="button" disabled={!ready() || uploading()} title="上传到资料库；当前研判暂不支持随消息关联" aria-label={uploading() ? "正在上传文件" : "上传文件到资料库"} onClick={() => fileInput.click()}><img src={uploadIcon} alt="" /><span>{uploading() ? "上传中…" : "文件"}</span></button>
+              </div>
               <div class="model-choice">
                 <span class="model-dot" />
                 <select aria-label="选择授权模型" value={model() || shownModels()[0]?.id} disabled={busy()} onChange={(event) => setModel(event.currentTarget.value)}>

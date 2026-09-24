@@ -17,6 +17,7 @@ import RuntimeStatus from "./RuntimeStatus"
 import loginStory from "./assets/peixian-login-left.webp"
 import loginSide from "./assets/peixian-login-right.webp"
 import policeEmblem from "./assets/police-emblem.png"
+import settingsIcon from "./assets/images/chat/settings.png"
 import cultureTitle from "./assets/peixian-culture-title.png"
 import loginFeatureAnalysis from "./assets/login-feature-analysis.svg"
 import loginFeatureCapability from "./assets/login-feature-capability.svg"
@@ -238,7 +239,7 @@ export default function App() {
                           }}
                           aria-current={page() === item.id ? "page" : undefined}
                         >
-                          <Icon name={item.icon} />
+                          {item.id === "settings" ? <img class="sidebar-settings-icon" src={settingsIcon} alt="" /> : <Icon name={item.icon} />}
                           <span>{item.name}</span>
                           <Show when={page() === item.id}>
                             <span class="nav-dot" />
