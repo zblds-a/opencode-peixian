@@ -16,6 +16,7 @@ def extend(result):
     result['Message']['properties']['info']['properties'].update({'run_id':ID,'turn_id':ID,'parentID':nullable(ID)})
     result['Message']['properties']['parts']['items']['properties'].update({'run_id':ID,'step_id':ID,'call_id':nullable(ID),'callID':ID,'origin':{'const':'verified_result'},'execution':ref('ExecutionStep')})
     result['Message']['properties']['attachments']=array(obj({'id':ID,'name':STRING,'status':{'enum':['available','unavailable']}},('id','name','status')))
+    result['Message']['properties']['attachments']['items']['properties'].update({'parse_status':{'const':'ready'},'content_sha256':STRING,'text_bytes':integer,'chunk_count':integer,'usage':{'const':'user_reference'},'verified_source':{'const':False}})
     # Existing message schemas deliberately permit forward-compatible part fields.
     result['GraphNode'] = obj({'id': ID, 'type': STRING, 'label': STRING, 'properties': properties, 'evidence_refs': refs}, ('id', 'type', 'label', 'properties', 'evidence_refs'))
     result['GraphEdge'] = obj({'id': ID, 'source': ID, 'target': ID, 'type': STRING, 'label': STRING, 'directed': BOOL,

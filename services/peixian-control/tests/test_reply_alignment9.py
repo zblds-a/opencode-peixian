@@ -18,6 +18,11 @@ def test_document_material():
     text, meta = material('file-a', {'name':'../../a.md','status':'ready','chunks':[{'text':'hello | <script>', 'source':{'page':1}}]})
     assert meta['name']=='a.md' and meta['verified_source'] is False
     assert len(meta['content_sha256'])==64 and 'hello' in text
+    from control.openapi import build_openapi
+    from control.app import create_app
+    from jsonschema import validate
+    schema=build_openapi(create_app())['components']['schemas']['Message']['properties']['attachments']['items']
+    validate({**meta,'status':'available'},schema)
     for value, code in [({'status':'parsing'},'file_not_ready'),({'status':'partial'},'file_truncated'),({'status':'ready','text':''},'file_text_empty'),({'status':'ready','chunks':['bad']},'file_parse_invalid')]:
         with pytest.raises(HTTPException) as exc:material('file-a',value)
         assert exc.value.detail['code']==code
