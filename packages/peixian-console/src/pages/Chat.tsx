@@ -814,7 +814,7 @@ export default function Chat() {
       <div class="related-capabilities-head"><strong>相关插件</strong></div>
       <div class="related-capabilities-list">
         <For each={relatedPlugins()}>
-          {(item) => <article class="plugin-card"><img class="plugin-card-icon" src={pluginIcon(item.name)} alt="" /><div class="plugin-card-body"><div class="plugin-card-title"><strong>{item.name}</strong><small>v{String(item.version).replace(/^v/i, "")}</small></div><p>{item.description}</p><span>插件工具</span></div><button onClick={() => toggleCapability(item)}>使用</button></article>}
+          {(item) => <article class="plugin-card"><img class="plugin-card-icon" src={pluginIcon(capabilities().find((value) => value.id === item.id)?.name ?? item.name)} alt="" /><div class="plugin-card-body"><div class="plugin-card-title"><strong>{item.name}</strong><small>v{String(item.version).replace(/^v/i, "")}</small></div><p>{item.description}</p><span>插件工具</span></div><button onClick={() => toggleCapability(item)}>使用</button></article>}
         </For>
       </div>
     </div>
@@ -951,7 +951,7 @@ export default function Chat() {
                                 <details class="tool-trace-item">
                                   <summary>
                                     <Icon name={["completed", "succeeded"].includes(toolStatus(part, index(), message().info.id)) ? "check" : "clock"} size={14} />
-                                    <span>{safeMessage(part.execution?.capability_name || part.execution?.name || part.state?.title || part.tool, "处理业务资料")}</span>
+                                    <span>{displayName(safeMessage(part.execution?.capability_name || part.execution?.name || part.state?.title || part.tool, "处理业务资料"))}</span>
                                     <Status value={toolStatus(part, index(), message().info.id)} />
                                   </summary>
                                   <div class="tool-trace-detail">
