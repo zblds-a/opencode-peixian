@@ -35,6 +35,10 @@ def observed(snapshot, part):
     if isinstance(output, dict) and output.get('status') == 'needs_input' and status == 'completed':
         status = 'waiting_input'
         name = '待你确认查询条件' if not capability else name
+    # Enrichment progress label for authorized candidate follow-up queries
+    enrich_name = _enrichment_step_name(snapshot, tool, part)
+    if enrich_name:
+        name = enrich_name
     outputs = display_values(output, display.get('output_fields'), snapshot.get('display_secrets', [])) if status in ('completed', 'waiting_input') else {}
     outputs={k:v for k,v in outputs.items() if not isinstance(v,float) or math.isfinite(v)}
     count = outputs.get('returned_count')
@@ -50,6 +54,47 @@ def observed(snapshot, part):
             'output_summary': f'返回 {count} 条记录' if 'returned_count' in outputs else '技能已加载' if skill and status == 'completed' else '无可公开的结果摘要' if status == 'completed' else '',
             'result': outputs, 'result_truncated': bool(isinstance(output, dict) and set(output) - set(outputs)),
             'record_count': count, 'details': {'inputs': inputs, 'outputs': outputs}}
+
+
+def _enrichment_step_name(snapshot, tool, part):
+    """Label authorized candidate enrichment steps with rank and progress."""
+    if not isinstance(tool, str) or not tool.startswith('peixian_query_'):
+        return None
+    kind = tool[len('peixian_query_'):]
+    from .theft_candidates import ENRICH_SCORE_KINDS, ENRICH_KIND_LABELS, enrichment_progress_label
+    if kind not in ENRICH_SCORE_KINDS:
+        return None
+    context = (snapshot or {}).get('native_tool_context') or {}
+    plan = context.get('enrichment_plan')
+    if not isinstance(plan, dict) or not plan.get('items'):
+        return None
+    call_id = part.get('callID') if isinstance(part.get('callID'), str) else part.get('id')
+    frozen = ((snapshot or {}).get('native_calls') or {}).get(call_id, {}).get('frozen') or {}
+    person_ref = (frozen.get('query') or {}).get('person_ref')
+    rank = None
+    for entry in plan.get('items') or []:
+        if entry.get('person_ref') == person_ref:
+            rank = entry.get('rank')
+            break
+    if rank is None:
+        for entry in context.get('candidate_set') or []:
+            if isinstance(entry, dict) and entry.get('person_ref') == person_ref:
+                rank = entry.get('rank')
+                break
+    # Progress index: count completed enrich calls of this plan + 1 for current
+    index = 1
+    for cid, item in ((snapshot or {}).get('native_calls') or {}).items():
+        if not isinstance(item, dict):
+            continue
+        f = item.get('frozen') or {}
+        k = f.get('kind')
+        if k not in ENRICH_SCORE_KINDS:
+            continue
+        if item.get('status') == 'completed' or (cid == call_id and item.get('status') in ('approved', 'dispatching', 'completed', 'review_pending')):
+            if cid == call_id:
+                break
+            index += 1
+    return enrichment_progress_label(plan, rank, kind, index)
 
 
 def event_view(row, snapshot=None):

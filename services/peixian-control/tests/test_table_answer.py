@@ -142,7 +142,7 @@ def test_case_to_person_stage1_ranking_table():
     choose(snap,source_refs=['run:call:a'])
     view=t.build(result,snap)
     assert view['ranking']['items'][0]['person_ref']=='person-a'
-    assert '嫌疑人可能性排序' in t.markdown(view)
+    assert '初步关注排序' in t.markdown(view)
 
 
 def test_accepts_legacy_v1_format_json():
@@ -237,15 +237,20 @@ def test_platform_suggestions_outrank_model_and_dedupe():
     view = t.build(result, snap)
     assert view['suggestions'][0]['action'] == 'authorize_candidates'
     assert view['suggestions'][0]['origin'] == 'platform_direction'
-    assert '核验前2名' in view['suggestions'][0]['text']
-    from control.theft_candidates import candidate_request_n
-    assert candidate_request_n(view['suggestions'][0]['reply']) == 2
+    from control.theft_candidates import candidate_request_n, recommend_n
+    n = recommend_n(view['ranking'])
+    assert candidate_request_n(view['suggestions'][0]['reply']) == n
+    assert view['suggestions'][0].get('recommended') == n
+    labels = [o['label'] for o in view['next_question']['options']]
+    assert any('推荐' in lab for lab in labels)
+    assert len(view['next_question']['options']) == min(5, len(view['ranking']['items']))
+    assert all(o['action'] == 'authorize_candidates' for o in view['next_question']['options'])
     output = t.markdown(view)
     assert '### 下一步分析建议' not in output
     assert '| 建议 |' not in output
     nq = view['next_question']
-    assert nq['options'][0]['label'] == view['suggestions'][0]['reply']
-    assert nq['options'][0]['send'] is True
+    assert all(o['send'] is True for o in nq['options'])
+    assert any('推荐' in o['label'] for o in nq['options'])
 
 
 def test_platform_skips_closed_tools_and_per_person_enrich():
@@ -282,12 +287,9 @@ def test_platform_skips_closed_tools_and_per_person_enrich():
     result['claims'] = []
     choose(snap, source_refs=['run:call:a'])
     view = t.build(result, snap)
-    texts = [x['text'] for x in view['suggestions']]
-    assert any('乙' in x and '夜间' in x for x in texts), texts
-    assert all('轨迹' not in x for x in texts)
-    # reply for person-b enrich must be recognizable / actionable
-    enrich = next(x for x in view['suggestions'] if '乙' in x['text'])
-    assert '补查' in enrich['reply'] and '夜间' in enrich['reply']
+    # Batch enrichment: while plan still pending, do not ask officer per person
+    assert all(x.get('action') != 'query' or '乙' not in x.get('text', '') for x in view['suggestions'])
+    assert all('轨迹' not in x.get('text', '') for x in view['suggestions'])
 
 
 def test_no_duplicate_clarify_when_model_already_asked():
@@ -366,3 +368,71 @@ def test_next_question_clarify_send_false():
     assert [o['label'] for o in nq['options']] == [s['reply'] for s in view['suggestions']]
     assert '### 下一步分析建议' not in t.markdown(view)
 
+
+
+def test_stage1_requires_two_persons():
+    result, snap = fixture()
+    snap['native_tool_context'] = {
+        'confirmed': {}, 'task_id': 'task', 'scoring_requested': True,
+        'direction': 'case_to_person', 'candidate_set': [],
+    }
+    snap['table_answer_policy']['person_ref'] = None
+    snap['table_answer_policy']['direction'] = 'case_to_person'
+    snap['native_calls'] = {'cap': {'status': 'completed', 'frozen': {'kind': 'captures', 'query': {}}}}
+    result['records'] = [
+        {'record_id': 'run:call:a', 'source_run_id': 'run', 'call_id': 'cap', 'module': 'captures', 'snapshot_id': 'a',
+         'fields': {'target_id_card': 'person-a', 'target_name': '甲', 'capture_count': 12, 'tags': '盗窃'}, 'result_digest': 'd'},
+    ]
+    result['claims'] = []
+    choose(snap, source_refs=['run:call:a'])
+    view = t.build(result, snap)
+    assert view.get('ranking') is None
+
+
+def test_entry_suggests_captures_after_incidents():
+    result, snap = fixture()
+    snap['native_tool_context'] = {
+        'confirmed': {'start': '2026-09-10 20:00:00', 'end': '2026-09-10 23:00:00', 'radius_m': 500, 'lon': 1, 'lat': 2},
+        'task_id': 'task', 'scoring_requested': True, 'direction': 'case_to_person', 'candidate_set': [],
+    }
+    snap['table_answer_policy']['person_ref'] = None
+    snap['table_answer_policy']['direction'] = 'case_to_person'
+    snap['native_tool_policy'] = {'allowed_tools': ['peixian_query_captures', 'peixian_query_incidents']}
+    snap['native_calls'] = {'inc': {'status': 'completed', 'frozen': {'kind': 'incidents', 'query': {}}}}
+    result['records'] = [
+        {'record_id': 'run:call:i', 'source_run_id': 'run', 'call_id': 'inc', 'module': 'incidents', 'snapshot_id': 'i',
+         'fields': {'gisX': 1, 'gisY': 2, 'cjbh': 'A1'}, 'result_digest': 'd'},
+    ]
+    result['claims'] = []
+    choose(snap)
+    view = t.build(result, snap)
+    assert view['suggestions'][0]['action'] == 'query'
+    assert view['suggestions'][0]['kind'] == 'captures'
+    assert '初排' in view['suggestions'][0]['text']
+
+
+def test_no_per_person_while_enrichment_pending():
+    result, snap = fixture()
+    snap['native_tool_context'] = {
+        'confirmed': {'start': '2026-09-10 20:00:00', 'end': '2026-09-10 23:00:00', 'radius_m': 500},
+        'task_id': 'task', 'scoring_requested': True, 'direction': 'case_to_person',
+        'candidate_set': [
+            {'rank': 1, 'person_ref': 'person-a', 'name': '甲', 'run_id': 'run', 'record_id': 'run:call:a',
+             'snapshot_id': 'a', 'result_digest': 'd'},
+        ],
+        'enrichment_plan': {'pending': 4, 'complete': False},
+    }
+    snap['table_answer_policy']['person_ref'] = None
+    snap['table_answer_policy']['direction'] = 'case_to_person'
+    snap['native_tool_policy'] = {
+        'allowed_tools': ['peixian_query_night', 'peixian_query_community', 'peixian_query_warning_detail', 'peixian_query_profile']
+    }
+    snap['native_calls'] = {'cap': {'status': 'completed', 'frozen': {'kind': 'captures', 'query': {}}}}
+    result['records'] = [
+        {'record_id': 'run:call:a', 'source_run_id': 'run', 'call_id': 'cap', 'module': 'captures', 'snapshot_id': 'a',
+         'fields': {'target_id_card': 'person-a', 'target_name': '甲', 'capture_count': 12, 'tags': '盗窃'}, 'result_digest': 'd'},
+    ]
+    result['claims'] = []
+    choose(snap)
+    view = t.build(result, snap)
+    assert not any(x.get('action') == 'query' for x in view['suggestions'])

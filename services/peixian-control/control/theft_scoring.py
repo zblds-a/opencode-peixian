@@ -285,6 +285,102 @@ def band(rate):
     return '关联度很高'
 
 
+_DIM_PLAIN = {
+    'd1': '抓拍频次',
+    'd2': '夜间活动',
+    'd3': '跨小区',
+    'd4': '预警',
+    'd5': '时空耦合',
+    'd6': '行为标签',
+}
+
+
+def _plain_reason(dim):
+    """One short plain-language line from a scored dimension."""
+    if not dim or dim.get('status') != 'available':
+        return None
+    evidence = (dim.get('evidence') or '').strip()
+    label = dim.get('label') or _DIM_PLAIN.get(dim.get('id'), '')
+    if dim.get('id') == 'd1' and 'capture_count=' in evidence:
+        try:
+            n = int(evidence.split('capture_count=', 1)[1].split('；', 1)[0])
+            return f'周边抓拍约{n}次'
+        except (ValueError, IndexError):
+            pass
+    if dim.get('id') == 'd2' and '夜间记录数=' in evidence:
+        try:
+            n = int(evidence.split('夜间记录数=', 1)[1].split('；', 1)[0])
+            return f'有{n}条夜间活动记录'
+        except (ValueError, IndexError):
+            pass
+    if dim.get('id') == 'd3' and '跨小区数=' in evidence:
+        try:
+            n = int(evidence.split('跨小区数=', 1)[1].split('；', 1)[0])
+            return f'跨{n}个小区活动'
+        except (ValueError, IndexError):
+            pass
+    if dim.get('id') == 'd4' and 'warningCount=' in evidence:
+        try:
+            n = int(evidence.split('warningCount=', 1)[1].split('；', 1)[0])
+            return f'预警概况计数{n}'
+        except (ValueError, IndexError):
+            pass
+    if dim.get('id') == 'd6':
+        if '高度关联' in evidence:
+            return '标签与侵财类表述高度关联'
+        if '部分关联' in evidence:
+            return '标签与警情类别部分关联'
+        if '无明显关联' in evidence or '无标签' in evidence:
+            return '标签无明显侵财关联'
+    if evidence:
+        short = evidence.split('；', 1)[0]
+        if len(short) > 40:
+            short = short[:40] + '…'
+        return f'{label}：{short}' if label else short
+    return label or None
+
+
+def reasons_and_checks(view, records=None, stage='六维'):
+    """Top contributing reasons and suggested human checks. Never a crime conclusion."""
+    dims = list((view or {}).get('dimensions') or [])
+    available = [d for d in dims if d.get('status') == 'available' and isinstance(d.get('score'), (int, float))]
+    available.sort(key=lambda d: (-(d.get('score') or 0), d.get('id') or ''))
+    reasons = []
+    for dim in available[:2]:
+        line = _plain_reason(dim)
+        if line and line not in reasons:
+            reasons.append(line)
+    if not reasons and stage == '初排':
+        reasons.append('仅依据抓拍频次与标签的初步排序')
+    next_checks = []
+    gaps = [d for d in dims if d.get('status') != 'available' and d.get('id') != 'd5']
+    if stage == '初排':
+        next_checks.append('确认核验人数后补查夜间、跨小区、预警与档案')
+    else:
+        for dim in gaps[:2]:
+            label = dim.get('label') or _DIM_PLAIN.get(dim.get('id'), '缺项')
+            next_checks.append(f'补齐{label}资料后再比较')
+        # Prefer a concrete source-based check when capture rows exist
+        for r in records or []:
+            if r.get('module') != 'captures':
+                continue
+            fields = r.get('fields') or {}
+            point = fields.get('device_name') or fields.get('capture_address') or fields.get('address')
+            when = fields.get('latestTime') or fields.get('timeRangeStart') or fields.get('captureTime')
+            parts = []
+            if isinstance(point, str) and point.strip():
+                parts.append(point.strip()[:30])
+            if isinstance(when, str) and when.strip():
+                parts.append(when.strip()[:19])
+            if parts:
+                next_checks.insert(0, '调取' + ' '.join(parts) + '录像核对衣着与同行人')
+                break
+        if not next_checks:
+            next_checks.append('人工核验来源记录与缺口维度')
+    # Cap length for table cells
+    return reasons[:2], next_checks[:2]
+
+
 def compute(records, include_d5=True):
     """Score one person's records only. Do not mix subjects."""
     dims = [score_d1(records), score_d2(records), score_d3(records), score_d4(records)]
@@ -343,6 +439,8 @@ def stage1_rank(capture_records):
                 name = value
                 break
         primary = rows[0]
+        stage_view = {'dimensions': [d1, d6], 'status': 'ready'}
+        reasons, next_checks = reasons_and_checks(stage_view, rows, stage='初排')
         items.append({
             'person_ref': person_ref,
             'name': name,
@@ -360,6 +458,8 @@ def stage1_rank(capture_records):
             'result_digest': primary.get('result_digest'),
             'gaps': [],
             'follow_up': '可确认核验前N名后补查夜间、跨小区、预警与档案',
+            'reasons': reasons,
+            'next_checks': next_checks,
             'scoring': view,
         })
     items.sort(key=lambda x: (-(x['rate'] or 0), -(x['earned'] or 0), x['person_ref']))
@@ -368,6 +468,7 @@ def stage1_rank(capture_records):
     return {
         'version': VERSION,
         'stage': 'stage1',
+        'title': '初步关注排序（仅依据抓拍频次与标签）',
         'status': 'ready' if items else 'empty',
         'items': items,
         'disclaimer': '初排仅依据抓拍频次与标签，辅助参考，需人工核验，不构成犯罪认定。',
@@ -390,6 +491,7 @@ def rank(records_by_person, include_d5=True):
             person = fields.get('person') if r.get('module') == 'profile' else None
             if isinstance(person, dict) and isinstance(person.get('name'), str):
                 name = person['name']
+        reasons, next_checks = reasons_and_checks(view, rows, stage='六维')
         entry = {
             'person_ref': person_ref,
             'name': name,
@@ -403,6 +505,8 @@ def rank(records_by_person, include_d5=True):
             'source_ids': [r['record_id'] for r in rows],
             'gaps': [d['label'] + '：' + (d.get('evidence') or '不可用') for d in view['dimensions'] if d['status'] != 'available'],
             'follow_up': '建议人工核验来源记录与缺口维度',
+            'reasons': reasons,
+            'next_checks': next_checks,
             'scoring': view,
             'status': view['status'],
         }
@@ -416,6 +520,7 @@ def rank(records_by_person, include_d5=True):
     return {
         'version': VERSION,
         'stage': 'stage2',
+        'title': '六维可疑度排序（辅助参考）',
         'status': 'ready' if items or insufficient else 'empty',
         'items': items,
         'insufficient': insufficient,

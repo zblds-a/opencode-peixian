@@ -84,3 +84,17 @@ def test_compute_single_person_buckets():
     by_id = {d['id']: d for d in view['dimensions']}
     assert by_id['d1']['score'] == 18
     assert by_id['d5']['status'] == 'unavailable'
+
+
+def test_reasons_and_next_checks_on_stage1():
+    import control.theft_scoring as s
+    records = [
+        rec('captures', 'a', 'person-a', capture_count=12, tags='盗窃', target_name='甲'),
+        rec('captures', 'b', 'person-b', capture_count=1, tags='', target_name='乙'),
+    ]
+    view = s.stage1_rank(records)
+    assert view['title'].startswith('初步关注排序')
+    top = view['items'][0]
+    assert top['reasons']
+    assert top['next_checks']
+    assert '抓拍' in top['reasons'][0] or '标签' in ''.join(top['reasons'])

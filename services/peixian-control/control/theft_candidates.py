@@ -160,6 +160,114 @@ ENRICH_KIND_LABELS = {
 }
 ENRICH_SCORE_KINDS = ('night', 'community', 'warning_detail', 'profile')
 
+# Bands at or above this threshold count toward recommend_n.
+_RECOMMEND_BANDS = frozenset({'存在一定关联', '关联度中等', '关联度较高', '关联度很高'})
+_RATE_DROP = 15
+
+
+def recommend_n(ranking):
+    """Pick a default authorize count from stage-1 ranking. Returns 1..MAX_N."""
+    items = list((ranking or {}).get('items') or [])
+    if not items:
+        return 1
+    eligible = []
+    for item in items:
+        if item.get('band') in _RECOMMEND_BANDS or (isinstance(item.get('rate'), (int, float)) and item['rate'] >= 20):
+            eligible.append(item)
+        else:
+            break
+    if not eligible:
+        eligible = items[:1]
+    cut = len(eligible)
+    for index in range(1, len(eligible)):
+        prev = eligible[index - 1].get('rate')
+        cur = eligible[index].get('rate')
+        if isinstance(prev, (int, float)) and isinstance(cur, (int, float)) and (prev - cur) >= _RATE_DROP:
+            cut = index
+            break
+    return max(1, min(MAX_N, cut, len(items)))
+
+
+def task_person_modules(store, uid, sid, task_id):
+    """Map person_ref -> completed module kinds for the same native task."""
+    rows = store.rows(
+        "SELECT b.request_ciphertext FROM business_runs b "
+        "WHERE b.uid=? AND b.session_id=? ORDER BY b.rowid DESC LIMIT 50",
+        (uid, sid),
+    )
+    present = {}
+    for row in rows:
+        snapshot = store.decrypt(row['request_ciphertext'])
+        context = snapshot.get('native_tool_context') or {}
+        if context.get('task_id') != task_id:
+            continue
+        for call in (snapshot.get('native_calls') or {}).values():
+            if not isinstance(call, dict) or call.get('status') != 'completed':
+                continue
+            plan = call.get('frozen') or {}
+            kind = plan.get('kind')
+            ref = (plan.get('query') or {}).get('person_ref')
+            if kind and ref:
+                present.setdefault(ref, set()).add(kind)
+                if kind == 'warnings':
+                    present[ref].add('warning_detail')
+    return present
+
+
+def build_enrichment_plan(candidate_set, allowed_tools=None, records=None, snapshot=None, present_by_person=None):
+    """Static per-candidate enrichment jobs after authorize. Progress from records when given."""
+    allowed = set(allowed_tools) if allowed_tools is not None else None
+    groups = theft_scoring.group_by_person(records or [], snapshot) if records is not None else {}
+    items = []
+    done = 0
+    total = 0
+    for entry in candidate_set or []:
+        if not isinstance(entry, dict) or not entry.get('person_ref'):
+            continue
+        ref = entry['person_ref']
+        kinds = list(ENRICH_SCORE_KINDS)
+        if allowed is not None:
+            kinds = [k for k in kinds if 'peixian_query_' + k in allowed]
+        present = set()
+        if present_by_person and ref in present_by_person:
+            present |= set(present_by_person[ref])
+        if records is not None:
+            present |= {r.get('module') for r in groups.get(ref, [])}
+        if 'warnings' in present:
+            present.add('warning_detail')
+        missing = [k for k in kinds if k not in present]
+        finished = [k for k in kinds if k not in missing]
+        total += len(kinds)
+        done += len(finished)
+        items.append({
+            'rank': entry.get('rank'),
+            'person_ref': ref,
+            'name': entry.get('name'),
+            'kinds': kinds,
+            'missing_kinds': missing,
+            'done_kinds': finished,
+        })
+    pending = sum(len(i['missing_kinds']) for i in items)
+    return {
+        'version': VERSION,
+        'items': items,
+        'done': done,
+        'total': total,
+        'pending': pending,
+        'complete': pending == 0 and bool(items),
+    }
+
+
+
+def enrichment_progress_label(plan, rank, kind, index=None):
+    """Human label for an enrichment tool step."""
+    label = ENRICH_KIND_LABELS.get(kind, kind)
+    who = f'第{rank}名' if rank else '候选人'
+    if isinstance(plan, dict) and plan.get('total'):
+        i = index if isinstance(index, int) else (plan.get('done') or 0) + 1
+        return f'补查 {who} {label} ({i}/{plan["total"]})'
+    return f'补查 {who} {label}'
+
 
 def reply_authorize_n(n):
     """Reply text that candidate_request_n will parse as N."""
@@ -168,6 +276,14 @@ def reply_authorize_n(n):
     if n == 1:
         return '核验该候选人'
     return f'核验前{min(n, MAX_N)}名'
+
+
+def reply_authorize_option(n, recommended=None):
+    """Card option label; recommended N is marked."""
+    base = reply_authorize_n(n)
+    if recommended is not None and n == recommended:
+        return base + '（推荐）'
+    return base
 
 
 def reply_enrich(rank, name, kinds):
@@ -203,7 +319,7 @@ QUERY_REPLIES = {
     'profile': ('查询{who}档案', '核对{who}的基本信息和最近抓拍'),
     'tracks': ('查询{who}轨迹', '查看{who}在时间窗口内的行动轨迹'),
     'incidents': ('以轨迹点查询周边警情', '用已有轨迹点查周边警情，逐案核验候选案件'),
-    'captures': ('查询周边抓拍', '找出案发点附近出现过的关联人员'),
+    'captures': ('查询周边抓拍并初排', '找出案发点附近出现过的关联人员并做初步关注排序'),
 }
 
 
@@ -216,6 +332,10 @@ def reply_query_incidents():
     return '以轨迹点查询周边警情'
 
 
+def reply_query_captures():
+    return '查询周边抓拍并初排'
+
+
 def reply_inspect_cases():
     return '核对处警记录原文'
 
@@ -225,11 +345,12 @@ def candidate_request_n(text):
     import re
     if not isinstance(text, str):
         return None
-    if re.search(r'核验该候选人|对该候选人(?:核验|评分)', text):
+    cleaned = re.sub(r'[（(]\s*推荐\s*[）)]', '', text)
+    if re.search(r'核验该候选人|对该候选人(?:核验|评分)', cleaned):
         return 1
     match = re.search(
         r'(?:核验|评分|查|核对|筛)\s*前\s*([1-5])\s*名|(?:对|给)\s*前\s*([1-5])\s*(?:人|名)|前\s*([1-5])\s*名(?:核验|评分|排序)',
-        text,
+        cleaned,
     )
     if not match:
         return None

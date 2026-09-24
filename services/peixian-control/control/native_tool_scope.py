@@ -18,20 +18,27 @@ from shared import theft_provider_v2 as adapter
 TOOL_TO_KIND={'peixian_query_'+kind:kind for kind in ACTIVE_KINDS}
 FILTERS=re.compile(r'近期|最近|近\s*\d+\s*[天月年]|仅.*盗窃|只.*盗窃|限定时间|限定日期')
 SCORING_REQUEST=re.compile(r'评分|打分|可疑度|嫌疑评估|研判优先级|嫌疑程度|排序|筛选嫌疑人|可能性|嫌疑人列表|核验前')
-SCORING_NEGATE=re.compile(r'不要\s*评分|无需\s*评分|不用\s*评分|不\s*要\s*打分|禁止\s*评分|取消\s*评分')
+SCORING_NEGATE=re.compile(
+    r'不要\s*(?:评分|排序|研判)|无需\s*(?:评分|排序)|不用\s*(?:评分|排序|打分)|'
+    r'不\s*要\s*打分|禁止\s*(?:评分|排序)|取消\s*(?:评分|排序)'
+)
 CASE_HINT=re.compile(r'案件|警情|案发|盗窃案|由案到人|周边人员|可疑人员')
 PERSON_HINT=re.compile(r'由人到案|此人|该人|这名人员|已确认人员')
 
 
-def scoring_requested(text, prior=None):
-    """Freeze whether the user explicitly asked for auxiliary scoring."""
+def scoring_requested(text, prior=None, direction=None):
+    """Freeze scoring intent. case_to_person defaults on unless user opts out."""
     if not isinstance(text, str):
-        return bool(prior.get('scoring_requested')) if prior else False
+        if prior and 'scoring_requested' in prior:
+            return bool(prior.get('scoring_requested'))
+        return direction == 'case_to_person'
     if SCORING_NEGATE.search(text):
         return False
     if SCORING_REQUEST.search(text):
         return True
-    return bool(prior.get('scoring_requested')) if prior else False
+    if prior and 'scoring_requested' in prior:
+        return bool(prior.get('scoring_requested'))
+    return direction == 'case_to_person'
 
 
 def infer_direction(confirmed, refs, text, prior=None):
@@ -89,15 +96,19 @@ def freeze_context(store,uid,sid,data):
     if re.search(r'同意使用上游默认覆盖范围',text):
         prior_constraints=''
     constraints=(prior_constraints+' '+text)[-12000:]
-    want_score=scoring_requested(text, prior)
     direction=infer_direction(confirmed, refs, text, prior)
-    from .theft_candidates import candidate_request_n, stage1_from_task, authorize
+    want_score=scoring_requested(text, prior, direction)
+    from .theft_candidates import candidate_request_n, stage1_from_task, authorize, build_enrichment_plan, task_person_modules
     request_n=candidate_request_n(text)
     candidate_set=[] if changed_object else copy.deepcopy((prior or {}).get('candidate_set') or [])
     if request_n and want_score and direction == 'case_to_person':
         ranked=stage1_from_task(store, uid, sid, task_id)
         if ranked.get('items'):
             candidate_set=authorize(ranked['items'], request_n)
+    enrichment=None
+    if candidate_set and direction == 'case_to_person' and want_score:
+        present=task_person_modules(store, uid, sid, task_id)
+        enrichment=build_enrichment_plan(candidate_set, present_by_person=present)
     return {'version':'native-tool-context-v1','task_id':task_id,
         'scope_version':prior['scope_version']+1 if prior else 1,
         'confirmed':confirmed,'source_refs':refs,
@@ -105,7 +116,8 @@ def freeze_context(store,uid,sid,data):
         'scoring_requested':want_score,
         'direction':direction,
         'candidate_request_n':request_n,
-        'candidate_set':candidate_set}
+        'candidate_set':candidate_set,
+        'enrichment_plan':enrichment}
 
 
 FIELD_NAMES = {'person_identity':'人员','start':'开始时间','end':'结束时间','lon':'经度','lat':'纬度','radius_m':'半径','page':'页码','page_size':'每页条数'}
@@ -268,6 +280,24 @@ def named_sources(store,uid,sid,text):
 
 def model_context(context):
     """Explain the frozen argument contract; never rewrite submitted tool input."""
+    plan = context.get('enrichment_plan')
+    enrich_note = ''
+    payload = {
+        'version': 'native-tool-arguments-v1',
+        'scope_version': context['scope_version'],
+        'confirmed': context['confirmed'],
+        'selected_source_refs': context['source_refs'],
+    }
+    if isinstance(plan, dict) and plan.get('items'):
+        payload['enrichment_plan'] = plan
+        if not plan.get('complete'):
+            enrich_note = (
+                '本轮已授权核验候选人。请按 enrichment_plan 逐项调用对应资料工具（每次一个调用），'
+                '不要再向用户确认人数或是否补查；某次失败则记下缺口并继续下一项；'
+                '计划完成或无法继续取得新结果后再给出资料回答。'
+            )
+        else:
+            enrich_note = 'enrichment_plan 已完成；可基于已取得资料作答，覆盖不足者可再建议补查。'
     return ('\n本轮原生工具参数约定：person_identity 可填写用户已确认的原始单人身份号码，或本人本会话中同一已确认对象的 person-* 引用；'
         'person-* 不是新对象或身份证号，平台会校验它是否等于本轮已确认对象；不要要求用户确认内部引用。'
         '已选定来源时，对象或坐标由平台从该来源读取，不在工具参数中重复传入。'
@@ -275,6 +305,6 @@ def model_context(context):
         '服务端会补齐本任务已确认且用途适用的人员和时间；抓拍条件仍需独立确认。'
         '若工具返回 status=needs_input 与 question，请立即用 question 工具原样提出该问题的 header、问题文字和选项，不得改写；'
         '用户回答后，再调用同一工具一次。不要更换参数，不要改用其他工具重试。'
-        '真正失败（非 needs_input）不代表记录为零；不要自行重试失败调用。\n'
-        +adapter.canonical({'version':'native-tool-arguments-v1','scope_version':context['scope_version'],
-            'confirmed':context['confirmed'],'selected_source_refs':context['source_refs']}))
+        '真正失败（非 needs_input）不代表记录为零；不要自行重试失败调用。'
+        + enrich_note + '\n'
+        + adapter.canonical(payload))
