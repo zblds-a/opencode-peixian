@@ -1,0 +1,46 @@
+{
+  "source_sha": "d04384bd5833102325ad1edae9b8296e9531472f",
+  "branch": "codex/adaptive-dialogue",
+  "workspace": "/root/PeiXianDB/adaptive-dialogue",
+  "candidate_image": "peixian-control:adaptive-dialogue-20260924",
+  "candidate_image_id": "sha256:38445d44614b258ea3931c90f359f66eda9d6a9e3cbc19451c25901cd73f1620",
+  "deployed": true,
+  "current_image": "peixian-control:adaptive-dialogue-20260924",
+  "current_image_id": "sha256:38445d44614b258ea3931c90f359f66eda9d6a9e3cbc19451c25901cd73f1620",
+  "static_files": 833,
+  "static_manifest_sha256": "51d09ffa1bb44d279e237989545a4312c99c94a0bcdcb375952baa378597ac9a",
+  "tests": {
+    "candidate_source_recovery_passed": 25,
+    "candidate_image_recovery_passed": 25,
+    "compatibility_passed": 29,
+    "compatibility_skipped": 16,
+    "baseline_reproduced_failures": 3
+  },
+  "model_requests": 0,
+  "supplier_requests": 0,
+  "browser_acceptance": "blocked_browser_tool_initialization",
+  "production_release": "deployed_after_explicit_approval",
+  "maintenance": "normal",
+  "worker": "active",
+  "accounts": {
+    "A": {
+      "status": "ready",
+      "gate": "open",
+      "recovery": 0,
+      "revision": 74,
+      "plugins": 8
+    },
+    "B": {
+      "status": "ready",
+      "gate": "open",
+      "recovery": 0,
+      "revision": 46,
+      "plugins": 8
+    }
+  },
+  "http": {
+    "homepage": 200,
+    "unauthenticated_me": 401
+  },
+  "prompt_sha256": "766ef1dec1711bcbd8571cd0761d963c7658d479ae7d4688fc73790e631373be"
+}
