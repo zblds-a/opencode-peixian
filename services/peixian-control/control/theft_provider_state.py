@@ -109,11 +109,14 @@ class ProviderState(FactsState):
                     value['response']=(v2.parse_response(module,plan['query'],response,plan['limits'],plan['identities']) if plan.get('version')==v2.VERSION else parse_response(module,plan['query'],response))
                     if plan.get('version')==v2.VERSION:
                         value['public_response']=v2.public_result(value['response'],self.store.worker_key.encode(),uid+'/'+row['session_id'])
-                except (ContractError,ValueError,TypeError,KeyError):status='rejected'
+                except (ContractError,ValueError,TypeError,KeyError) as exc:
+                    status='rejected'
+                    value['error_code']='provider_business_error' if str(exc)=='provider_business_error' else 'provider_response_invalid'
             value.update(status=status,completed=now())
             if snap.get('native_current_call'):
                 call=snap['native_calls'][key]
                 call['status']=status
+                if value.get('error_code'):call['error_code']=value['error_code']
                 if status=='completed':call['public_response']=copy.deepcopy(value['public_response'])
             self._save(db,rid,snap);self._event(rid,key,status)
             return status

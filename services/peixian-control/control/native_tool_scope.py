@@ -79,7 +79,7 @@ def freeze_context(store,uid,sid,data):
     if ambiguous_location:confirmed.pop('lon',None);confirmed.pop('lat',None)
     # A new explicit object or position supersedes any earlier selected source.
     # Otherwise a later question could silently query the old source instead.
-    changed_object=bool({'person_identity','lon','lat'} & current.keys()) or ambiguous_person or ambiguous_location
+    changed_object=any(canonical_field(k, current[k]) != canonical_field(k, (prior or {}).get('confirmed', {}).get(k)) if (prior or {}).get('confirmed', {}).get(k) is not None else True for k in ('person_identity','lon','lat') if k in current) or ambiguous_person or ambiguous_location
     if 'source_refs' in data:
         refs=copy.deepcopy(data['source_refs'])
     else:

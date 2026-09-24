@@ -59,7 +59,11 @@ async def execute(request, app, value, rpc, parent, process, *, native=False):
         key = value['call_id'] if native else kind
         item = (await call('read'))['state']['modules'].get(key, {})
         if item.get('status') != 'completed':
-            raise HTTPException(409, '资料结果尚未确认，本轮不会重试。')
+            from shared.tool_failure import public
+            code=item.get('error_code') or ('provider_cancelled' if item.get('status')=='cancelled' else 'provider_result_unknown')
+            detail=public({'code':code},'provider_complete',value.get('call_id'))
+            if item.get('response_count'):detail['dispatch_status']='dispatched'
+            raise HTTPException(409, detail)
         return item['response']
     finally:
         with contextlib.suppress(httpx.HTTPError, HTTPException):

@@ -44,7 +44,7 @@ def redact(text, identities=None):
     return re.sub(r'(?<!\d)\d{17}[\dXx](?!\d)',lambda match:references.get(match.group(), '[其他身份已脱敏]'),text)[:4000]
 
 
-def prepare(store,uid,sid,message_id,call_id,tool,args,revision):
+def _prepare(store,uid,sid,message_id,call_id,tool,args,revision):
     if not isinstance(call_id,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,160}',call_id):
         error('tool_call_identity_invalid','工具调用身份无法核对。',409)
     if not isinstance(args,dict):error('native_tool_invalid','资料工具参数必须是对象。',422)
@@ -234,3 +234,23 @@ def review_failed(store,uid,rid,call_id,plan_digest,revision):
             item.update(status='rejected',error_code='intent_review_unavailable',dispatch_status='not_dispatched')
             db.execute('UPDATE business_runs SET request_ciphertext=?,updated=? WHERE id=?',(store.encrypt(snapshot),now(),rid))
         return {'ok':True}
+
+
+def prepare(store,uid,sid,message_id,call_id,tool,args,revision):
+    """Record admission rejection without counting it as a supplier dispatch."""
+    from fastapi import HTTPException
+    from shared.tool_failure import public
+    from . import business_runs
+    try:
+        return _prepare(store,uid,sid,message_id,call_id,tool,args,revision)
+    except HTTPException as exc:
+        detail=public(exc.detail,'native_prepare',call_id)
+        if store is not None and isinstance(call_id,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,160}',call_id):
+            row=store.one('SELECT id FROM business_runs WHERE uid=? AND session_id=? AND message_id=?',(uid,sid,message_id))
+            if row:
+                key='native-rejection:'+call_id
+                business_runs.event(store,row['id'],key,'analysis','资料调用未执行','failed',completed=now(),
+                    metadata={'output_summary':detail['message'],'failure':detail})
+                with store.tx() as db:
+                    db.execute('UPDATE run_events SET error_code=? WHERE run_id=? AND event_key=?',(detail['code'],row['id'],key))
+        raise HTTPException(exc.status_code,detail) from None

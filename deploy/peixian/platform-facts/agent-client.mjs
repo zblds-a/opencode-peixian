@@ -12,10 +12,11 @@ export function remoteTool(token, name, definition) {
   if(!response.ok) {
    const body=await response.json().catch(()=>null);
    const detail=body?.detail;
-   const codes=new Set(['identity_parameter_invalid','scope_unconfirmed','scope_missing','unsupported_scope','real_provider_disabled','real_provider_configuration_invalid','provider_connection_mismatch','outside_acceptance_scope','intent_review_unavailable']);
-   if(detail?.dispatch_status==='not_dispatched' && codes.has(detail.code))
-    throw new Error(`${detail.message} [${detail.code}; not_dispatched]`);
-   throw new Error('资料操作未完成，请查看本轮执行状态；结果未知时不会自动重新取数。');
+   const codes=new Set(['source_selection_required','explicit_source_required','source_selection_limit','source_value_override','source_record_unavailable','source_version_changed','source_integrity_failed','source_coordinates_missing','source_identity_missing','identity_parameter_invalid','scope_unconfirmed','scope_parameter_invalid','scope_missing','unsupported_scope','unsupported_query_conditions','precise_time_required','time_range_limit','pagination_limit','native_tool_invalid','coordinate_contract_unconfirmed','real_provider_disabled','real_provider_configuration_invalid','provider_connection_mismatch','provider_connection_unavailable','provider_connection_unconfigured','provider_not_applied','native_authority_changed','native_tool_unavailable','tool_archived','intent_review_unavailable','tool_call_busy','tool_call_unconfirmed','tool_call_conflict','native_duplicate_call','native_no_progress','run_not_active','provider_business_error','provider_response_invalid','provider_cancelled','provider_result_unknown','provider_binding_changed']);
+   const safe = detail?.version==='tool-failure-v1' && codes.has(detail.code);
+   const message = safe ? detail.message : '本次资料操作未完成，请凭调用标识核对执行状态。';
+   const fields = safe && detail.field_errors ? Object.keys(detail.field_errors).filter(k=>['person_identity','start','end','lon','lat','radius_m','page','page_size'].includes(k)) : [];
+   throw new Error(JSON.stringify({code:safe?detail.code:'tool_execution_unavailable',message,stage:safe?detail.stage:'execution',dispatch_status:safe?detail.dispatch_status:'unknown',field_errors:fields,recovery_action:safe?detail.recovery_action:'reconcile',call_id:ctx.callID}));
   }
   return JSON.stringify(await response.json());
  }};

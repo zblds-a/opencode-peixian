@@ -80,40 +80,13 @@ def register(app):
             response=await app.state.client.post(config.control_url+'/internal/runtime/facts',headers={'X-Runtime-Key':config.runtime_key},
                 json={'action':action,'runtime_id':config.runtime_id,'revision':config.revision,'gateway_boot_id':gate.boot_id,**fields},timeout=5)
             if response.status_code>=400:
-                # Only native admission runs before any data dispatch. Never pass
-                # upstream messages/stack traces through this public boundary.
-                if action == 'native_prepare':
-                    try:
-                        detail=response.json()
-                        detail=detail.get('detail',detail)
-                        code=detail.get('code') if isinstance(detail,dict) else None
-                    except ValueError:code=None
-                    messages={
-                        'identity_parameter_invalid':'该人员引用与本轮已确认对象不一致或本轮尚未明确对象。请使用已确认对象，不要要求用户确认内部引用。',
-                        'scope_unconfirmed':'查询条件未确认或与已确认值不一致，不是授权错误。仅询问列出的字段，补充前不要更换参数重试。',
-                        'scope_parameter_invalid':'查询参数格式不符合接口合同，只补充列出的字段，不猜测授权。',
-                        'scope_missing':'请补充查询所需对象、时间或范围。',
-                        'unsupported_scope':'此接口不支持所要求的筛选条件，请先确认受支持范围。',
-                        'real_provider_disabled':'资料连接尚未配置，请联系管理员恢复当前资料连接。',
-                        'real_provider_configuration_invalid':'资料连接配置尚未通过校验，请联系管理员。',
-                        'provider_connection_mismatch':'资料插件与连接绑定不一致，请联系管理员。',
-                        'coordinate_contract_unconfirmed':'来源与目标接口的坐标兼容性尚未确认，请联系管理员。',
-                        'source_integrity_failed':'来源展示字段与原始记录不一致，请重新选择来源。',
-                        'source_coordinates_missing':'所选来源没有完整、受支持的坐标。',
-                        'source_identity_missing':'所选来源不能唯一确定一名人员。',
-                        'source_version_changed':'所选来源快照已变化，请重新选择。',
-                        'source_record_unavailable':'所选来源原始记录无法核对。',
-                        'native_no_progress':'连续调用没有取得新条件或结果，本轮停止取数。',
-                        'native_duplicate_call':'本轮已请求过相同资料；请使用已有结果。',
-                        'tool_call_busy':'当前工具调用尚未结束。',
-                        'native_tool_unavailable':'本轮未授权此资料工具。',
-                    }
-                    # A duplicate/in-progress call can already have dispatched.
-                    if code in messages:
-                        raise HTTPException(409,{'code':code,'dispatch_status':'not_dispatched',
-                            'message':messages[code]+' 本次未访问资料接口。',
-                            'field_errors':public_scope_fields(detail)})
-                raise HTTPException(409,'当前资料能力不可用或执行已停止')
+                from shared.tool_failure import public
+                try:
+                    detail=response.json()
+                    detail=detail.get('detail',detail) if isinstance(detail,dict) else {}
+                except ValueError:
+                    detail={}
+                raise HTTPException(response.status_code,public(detail,action,value.get('call_id')))
             return response.json()
         if value['tool'] in PROVIDER_TOOLS:
             from .theft_provider_execution import execute,execute_native
