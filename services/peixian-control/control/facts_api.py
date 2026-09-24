@@ -30,6 +30,10 @@ def register(app):
         if runtime['revision'] != data.get('revision'): reject('facts_revision_changed')
         if runtime['gateway_boot_id'] != data['gateway_boot_id']: reject('facts_gateway_changed')
         uid = runtime['uid']; action = data.get('action')
+        if action=='native_skill':
+            if set(data)!={'action','runtime_id','revision','gateway_boot_id','session_id','message_id','call_id','args'}:raise HTTPException(422,'技能调用协议无效')
+            from .skill_discovery import load
+            return load(store,uid,data['session_id'],data['message_id'],data['call_id'],data['args'],data['revision'])
         if action=='native_prepare':
             if set(data)!={'action','runtime_id','revision','gateway_boot_id','session_id','message_id','call_id','tool','args'}:
                 raise HTTPException(422,'原生资料调用协议无效')

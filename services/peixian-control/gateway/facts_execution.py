@@ -12,7 +12,7 @@ from fastapi import HTTPException, Request
 from .http_utils import json_body
 from .plugin_test import specification
 
-HELPERS={'peixian_get_scenario_context','peixian_prepare_scenario_facts','peixian_check_scenario_summary'}
+HELPERS={'peixian_load_personal_skill','peixian_get_scenario_context','peixian_prepare_scenario_facts','peixian_check_scenario_summary'}
 MODULES=('funds','calls','portrait','composite','night','vehicle','lookup')
 TOOLS={'peixian_get_'+m+'_records':m for m in MODULES}
 from shared.theft_provider import CATALOG
@@ -88,6 +88,10 @@ def register(app):
                     detail={}
                 raise HTTPException(response.status_code,public(detail,action,value.get('call_id')))
             return response.json()
+        if value['tool']=='peixian_load_personal_skill':
+            matches=[part for part in result.json().get('parts',[]) if part.get('type')=='tool' and part.get('callID')==value.get('call_id') and part.get('tool')==value['tool']]
+            if len(matches)!=1 or matches[0].get('state',{}).get('input')!=value['args']:raise HTTPException(409,'技能调用身份无法核对')
+            return await rpc('native_skill',session_id=value['session_id'],message_id=info['parentID'],call_id=value['call_id'],args=value['args'])
         if value['tool'] in PROVIDER_TOOLS:
             from .theft_provider_execution import execute,execute_native
             if 'call_id' in value:

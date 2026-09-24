@@ -19,8 +19,8 @@ def observed(snapshot, part):
     tool = part.get('tool'); state = part.get('state', {})
     plugin = next((p for p in snapshot.get('plugins', []) if tool in p.get('tools', [])), None)
     skill = None
-    if tool == 'skill' and isinstance(state.get('input'), dict):
-        skill = next((s for s in snapshot.get('skills', []) if s.get('name') == state['input'].get('name')), None)
+    if tool in ('skill','peixian_load_personal_skill') and isinstance(state.get('input'), dict):
+        skill = next((s for s in snapshot.get('skills', []) if (s.get('id') == state['input'].get('skill_id') if tool=='peixian_load_personal_skill' else s.get('name') == state['input'].get('name'))), None)
     capability = skill or plugin
     name = label((capability or {}).get('name'), '使用技能' if tool == 'skill' else '调用已授权插件' if plugin else '执行辅助操作')
     if plugin:
@@ -46,7 +46,7 @@ def observed(snapshot, part):
         count=0
     return {'call_id': part.get('callID') if isinstance(part.get('callID'), str) else part.get('id'),
             'message_id': part.get('messageID'), 'part_id': part.get('id'),
-            'step_type': 'skill' if tool == 'skill' else 'plugin' if plugin else 'analysis',
+            'step_type': 'skill' if tool in ('skill','peixian_load_personal_skill') else 'plugin' if plugin else 'analysis',
             'name': name, 'status': status, 'capability_id': capability.get('id') if capability else None,
             'capability_name': name if capability else None, 'capability_version': str(capability['version']) if capability and capability.get('version') is not None else None,
             'input_summary': '按本轮已确认范围执行' if capability else '',

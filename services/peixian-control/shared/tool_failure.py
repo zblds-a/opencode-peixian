@@ -1,6 +1,7 @@
 """Public error vocabulary. Never forward supplier text or query values."""
 import re
 MESSAGES = {
+ 'skill_unavailable': ('此技能已停用、依赖不可用或不属于本轮目录，请刷新能力状态。', 'check_capability'),
  'source_selection_required': ('请选择本次抓拍使用的位置来源；已提供的时间和半径仍可保留。', 'select_source'),
  'explicit_source_required': ('请明确要使用的位置来源。', 'select_source'),
  'source_selection_limit': ('本次查询需要明确一个位置来源。', 'select_source'),
