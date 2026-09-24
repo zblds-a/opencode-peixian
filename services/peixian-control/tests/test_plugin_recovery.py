@@ -48,9 +48,22 @@ def test_rejected_call_is_audited_without_dispatch(provider, monkeypatch):
     def missing(*args):raise HTTPException(409,{'code':'scope_missing','field_errors':{'start':'secret'}})
     monkeypatch.setattr(gate,'arguments',missing)
     for _ in range(2):
-        with pytest.raises(HTTPException) as exc:gate.prepare(store,uid,'ses_multi',run['message_id'],'reject-one',tool('tracks'),ARGS,1)
-        assert exc.value.detail['dispatch_status']=='not_dispatched'
+        reply=gate.prepare(store,uid,'ses_multi',run['message_id'],'reject-one',tool('tracks'),ARGS,1)
+        assert reply['needs_question'] and reply['dispatch_status']=='not_dispatched'
     events=store.rows('SELECT * FROM run_events WHERE run_id=? AND event_key=?',(run['id'],'native-rejection:reject-one'))
-    assert len(events)==1 and events[0]['error_code']=='scope_missing'
+    assert len(events)==1 and events[0]['status']=='pending'
     snap=store.decrypt(store.one('SELECT request_ciphertext FROM business_runs WHERE id=?',(run['id'],))['request_ciphertext'])
-    assert not snap.get('native_calls') and not snap.get('native_pending_questions')
+    assert not snap.get('native_calls') and len(snap['native_pending_questions'])==1
+
+def test_coordinates_can_be_confirmed_in_question():
+    from control import native_precheck_questions as q
+    context={'task_id':'t','scope_version':1,'source_refs':[],'confirmed':{'start':'2026-09-20 00:00:00','end':'2026-09-21 00:00:00','radius_m':500},'user_conditions':{}}
+    class Store:
+        def rows(self,*a):return []
+    spec=q.build('captures','source_selection_required',{},context,Store(),'u','s')
+    assert spec['fields']==['lon','lat']
+    updated,_,cancel=q.apply_reply(spec,[['116.1'],['34.1']],context)
+    assert not cancel and updated['capture_position_confirmed']
+    query=scope.arguments('captures',{},updated)
+    assert query['lon']=='116.1' and query['radius_m']=='500'
+    with pytest.raises(HTTPException):q.apply_reply(spec,[['116.1'],['34.1']],updated)

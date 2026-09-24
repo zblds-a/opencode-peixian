@@ -995,7 +995,7 @@ def register_files(app):
                         spec, data.get("answers") or [], context, store, uid, sid)
                     snapshot["native_tool_context"] = next_context
                     pending = snapshot.setdefault("native_pending_questions", {})
-                    pending[token] = {**spec, "status": "answered"}
+                    pending[token] = {**spec, "status": "rejected" if _cancel else "answered", "question_id": rid}
                     with store.tx() as db:
                         db.execute(
                             "UPDATE business_runs SET request_ciphertext=?,updated=? WHERE id=?",

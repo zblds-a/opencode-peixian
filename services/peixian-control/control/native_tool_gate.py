@@ -64,6 +64,8 @@ def _prepare(store,uid,sid,message_id,call_id,tool,args,revision):
         user=db.execute("SELECT auth_version,active FROM users WHERE id=?",(uid,)).fetchone()
         if not user or not user['active'] or user['auth_version']!=row['auth_version'] or not runtime or runtime['revision']!=revision or runtime['security_blocked'] or runtime['recovery_required'] or runtime['gate_policy']!='open':
             error('native_authority_changed','授权或运行环境已变化。',409)
+        if any(q.get('kind')==kind and q.get('status')=='rejected' for q in snapshot.get('native_pending_questions',{}).values()):
+            error('run_not_active','本轮已取消此资料查询。',409)
         calls=snapshot.setdefault('native_calls',{})
         if call_id in calls:
             item=calls[call_id]
@@ -127,7 +129,7 @@ def _prepare(store,uid,sid,message_id,call_id,tool,args,revision):
                 work_context['user_conditions']['person_identity']=checked_args['person_identity']
             from .native_tool_scope import resolve_arguments
             # Person-to-case: bind next stay-center source for location tools when none selected
-            if kind in ('incidents', 'captures') and not (work_context.get('source_refs') or []):
+            if kind in ('incidents', 'captures') and not (work_context.get('source_refs') or []) and not (kind=='captures' and work_context.get('capture_position_confirmed')):
                 from . import person_case_flow as pcf
                 ref, _item = pcf.next_center_source(work_context, kind)
                 if ref:
@@ -237,20 +239,42 @@ def review_failed(store,uid,rid,call_id,plan_digest,revision):
 
 
 def prepare(store,uid,sid,message_id,call_id,tool,args,revision):
-    """Record admission rejection without counting it as a supplier dispatch."""
+    """Persist recoverable missing fields before any provider dispatch."""
     from fastapi import HTTPException
     from shared.tool_failure import public
-    from . import business_runs
+    from . import business_runs, native_precheck_questions as questions
     try:
         return _prepare(store,uid,sid,message_id,call_id,tool,args,revision)
     except HTTPException as exc:
         detail=public(exc.detail,'native_prepare',call_id)
+        response=None
         if store is not None and isinstance(call_id,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,160}',call_id):
-            row=store.one('SELECT id FROM business_runs WHERE uid=? AND session_id=? AND message_id=?',(uid,sid,message_id))
+            row=store.one('SELECT * FROM business_runs WHERE uid=? AND session_id=? AND message_id=?',(uid,sid,message_id))
             if row:
+                if detail['code'] in ('scope_missing','scope_parameter_invalid','source_selection_required','explicit_source_required','source_selection_limit','identity_unconfirmed') and row['status'] in ('queued','running') and row['revision']==revision and not row['cancel_requested']:
+                    with store.tx() as db:
+                        latest=db.execute('SELECT * FROM business_runs WHERE id=?',(row['id'],)).fetchone()
+                        snapshot=store.decrypt(latest['request_ciphertext']);context=snapshot.get('native_tool_context') or {}
+                        kind=TOOL_TO_KIND.get(tool)
+                        from .native_tool_scope import canonical_field
+                        for field,value in (args.items() if isinstance(args,dict) else []):
+                            if field not in ('start','end','radius_m','page','page_size') or field in detail['field_errors']:continue
+                            try:value=canonical_field(field,value)
+                            except HTTPException:continue
+                            context.setdefault('confirmed',{})[field]=value
+                            context.setdefault('user_conditions',{})[field]=value
+                        pending=snapshot.get('native_pending_questions',{})
+                        spec=next((x for x in pending.values() if x.get('kind')==kind and x.get('code')==detail['code'] and x.get('scope_version')==context.get('scope_version') and x.get('status')=='pending'),None)
+                        if not spec:
+                            spec=questions.build(kind,detail['code'],detail['field_errors'],context,store,uid,sid)
+                            if spec:
+                                questions.record_pending(snapshot,spec)
+                        if spec:
+                            db.execute('UPDATE business_runs SET request_ciphertext=?,updated=? WHERE id=?',(store.encrypt(snapshot),now(),row['id']))
+                            response={'needs_question':True,'code':detail['code'],'question':questions.public(spec),'dispatch_status':'not_dispatched'}
                 key='native-rejection:'+call_id
-                business_runs.event(store,row['id'],key,'analysis','资料调用未执行','failed',completed=now(),
-                    metadata={'output_summary':detail['message'],'failure':detail})
-                with store.tx() as db:
-                    db.execute('UPDATE run_events SET error_code=? WHERE run_id=? AND event_key=?',(detail['code'],row['id'],key))
+                business_runs.event(store,row['id'],key,'analysis','等待补充查询条件' if response else '资料调用未执行','pending' if response else 'failed',completed=None if response else now(),metadata={'output_summary':detail['message'],'failure':detail})
+                if not response:
+                    with store.tx() as db:db.execute('UPDATE run_events SET error_code=? WHERE run_id=? AND event_key=?',(detail['code'],row['id'],key))
+        if response:return response
         raise HTTPException(exc.status_code,detail) from None

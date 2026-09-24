@@ -131,6 +131,7 @@ def freeze_context(store,uid,sid,data):
     return {'version':'native-tool-context-v1','task_id':task_id,
         'scope_version':prior['scope_version']+1 if prior else 1,
         'confirmed':confirmed,'source_refs':refs,
+        'capture_position_confirmed':bool((prior or {}).get('capture_position_confirmed')) and not changed_object,
         'current_text':text,'constraints_text':constraints,'user_conditions':current,
         'scoring_requested':want_score,
         'direction':direction,
@@ -201,7 +202,7 @@ def arguments(kind,args,context):
     if kind in adapter.TIMED:required|={'start','end'}
     if not required<=set(args):
         error('scope_missing','查询条件不完整，未访问资料接口；只补充列出的字段，不重试或猜测权限。',409,{k:FIELD_NAMES[k]+'尚未明确' for k in sorted(required-set(args))})
-    if kind=='captures' and len(context['source_refs'])!=1:
+    if kind=='captures' and len(context['source_refs'])!=1 and not (context.get('capture_position_confirmed') and {'lon','lat'} <= context.get('confirmed',{}).keys()):
         error('source_selection_required','周边抓拍必须先选择一个明确的位置来源。',409)
     # Accept model values into confirmed so later turns see them as known.
     confirmed=context.setdefault('confirmed',{})
@@ -212,6 +213,8 @@ def arguments(kind,args,context):
         confirmed[key]=copy.deepcopy(value)
         user_conditions[key]=copy.deepcopy(value)
     query={key:copy.deepcopy(value) for key,value in args.items() if key!='person_identity'}
+    if kind=='captures' and not context['source_refs'] and context.get('capture_position_confirmed'):
+        query.update({k:canonical_field(k,context['confirmed'][k]) for k in ('lon','lat')})
     return query
 
 def source_values(store,uid,sid,kind,context):

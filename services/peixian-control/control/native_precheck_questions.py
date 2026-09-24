@@ -93,7 +93,7 @@ def _parse_cjsj(value):
     return None
 
 
-def list_spatial_sources(store, uid, sid, limit=5):
+def list_spatial_sources(store, uid, sid, limit=5, task_id=None):
     """Incidents/tracks already obtained in this session, newest first."""
     from . import trusted_results
     found = []
@@ -109,6 +109,8 @@ def list_spatial_sources(store, uid, sid, limit=5):
             continue
         if result.get('data_environment') != 'acceptance_real':
             continue
+        if task_id and result.get('versions', {}).get('task_id') != task_id:
+            continue
         digest = trusted_results.digest(result)
         for index, record in enumerate(result.get('records') or [], 1):
             if record.get('module') not in ('incidents', 'tracks'):
@@ -117,7 +119,7 @@ def list_spatial_sources(store, uid, sid, limit=5):
             if record['module'] == 'incidents':
                 when = fields.get('cjsj') or '时间未提供'
                 where = fields.get('cjxz') or fields.get('bzdzmc') or fields.get('cjmlph') or '地址未提供'
-                title = f"来源{index} · {where} · {when}"
+                title = f"警情位置{len(found)+1} · {where} · {when}"
             else:
                 when = fields.get('captureTime') or fields.get('time') or '时间未提供'
                 where = f"{fields.get('lon', '?')},{fields.get('lat', '?')}"
@@ -183,21 +185,17 @@ def build(kind, code, field_errors, context, store, uid, sid):
         values['取消本次查询'] = {'cancel': True}
         fields = ['supported_scope']
     elif code in ('source_selection_required', 'explicit_source_required', 'source_selection_limit'):
-        sources = list_spatial_sources(store, uid, sid)
+        sources = list_spatial_sources(store, uid, sid, task_id=context.get('task_id'))
         if not sources:
-            # Nothing to pick yet — fall back to free-text record id instructions.
-            questions.append(_field_question(
-                'source',
-                options=[],
-                custom=True,
-                question='当前会话还没有可选用的位置来源。请先完成周边警情或轨迹查询，再指定一条来源记录编号。',
-            ))
+            questions.extend([_field_question('lon', question='当前没有可选的位置记录，请提供本次查询位置的经度。'),
+                              _field_question('lat', question='请提供同一位置的纬度；不支持仅凭地名自动转换坐标。')])
+            fields = ['lon','lat']
         else:
             options = [{'label': item['label'], 'description': '使用该记录坐标作为抓拍位置来源。'} for item in sources]
             questions.append(_field_question('source', options=options, custom=False))
             for item in sources:
                 values[item['label']] = {'source_ref': item['ref']}
-        fields = ['source']
+            fields = ['source']
     elif code == 'capture_scope_unconfirmed':
         refs = context.get('source_refs') or []
         anchor = None
@@ -274,6 +272,8 @@ def build(kind, code, field_errors, context, store, uid, sid):
         'kind': kind,
         'code': code,
         'status': 'pending',
+        'scope_version': context.get('scope_version'),
+        'task_id': context.get('task_id'),
         'fields': list(dict.fromkeys(fields)),
         'questions': questions,
         'values': values,
@@ -308,7 +308,7 @@ def match_public(spec, asked):
     for left, right in zip(expected['questions'], asked):
         if not isinstance(right, dict):
             return False
-        if left['header'] != right.get('header') or left['question'] != right.get('question'):
+        if left['header'] != right.get('header'):
             return False
         left_labels = [o['label'] for o in left.get('options') or []]
         right_labels = [o.get('label') for o in (right.get('options') or [])]
@@ -321,7 +321,7 @@ def match_public(spec, asked):
 
 def _resolve_answer(question, answer_labels, values):
     """Map one question's selected labels / free text into field updates."""
-    if not isinstance(answer_labels, list) or not answer_labels:
+    if not isinstance(answer_labels, list) or len(answer_labels) != 1:
         error('clarification_incomplete', '请回答全部问题。', 422)
     label = answer_labels[0]
     if not isinstance(label, str) or not label.strip():
@@ -391,6 +391,8 @@ def apply_reply(spec, answers, context, store=None, uid=None, sid=None):
     """Validate answers and merge into a copy of native_tool_context."""
     if not spec or spec.get('status') not in (None, 'pending'):
         error('clarification_changed', '待补充信息已变化。', 409)
+    if spec.get('scope_version') is not None and (spec['scope_version'] != context.get('scope_version') or spec.get('task_id') != context.get('task_id')):
+        error('clarification_changed', '本次条件已变化，请回答最新问题。', 409)
     questions = spec.get('questions') or []
     if not isinstance(answers, list) or len(answers) != len(questions):
         error('clarification_incomplete', '请回答全部问题。', 422)
@@ -448,6 +450,9 @@ def apply_reply(spec, answers, context, store=None, uid=None, sid=None):
             continue
         confirmed[key] = value
         user_conditions[key] = value
+    if spec.get('kind') == 'captures' and {'lon','lat'} <= updates.keys():
+        next_context['capture_position_confirmed'] = True
+        next_context['source_refs'] = []
     if updates.get('supported_scope'):
         next_context['constraints_text'] = ''
     if source_ref is not None:

@@ -38,9 +38,9 @@ def test_build_source_selection_without_sources():
         def rows(self, *a, **k):
             return []
     spec = q.build('captures', 'source_selection_required', {}, base_context(), FakeStore(), 'u', 's')
-    assert spec and spec['fields'] == ['source']
+    assert spec and spec['fields'] == ['lon','lat']
     pub = q.public(spec)
-    assert pub['questions'][0]['header'] == '来源记录'
+    assert pub['questions'][0]['header'] == '查询位置'
     assert pub['questions'][0]['custom'] is True
     assert 'source_ref' not in str(pub)
 

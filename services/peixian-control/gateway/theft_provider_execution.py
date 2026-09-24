@@ -112,7 +112,7 @@ async def _execute_native(request, app, value, rpc, parent, process):
             'code': prepared.get('code'),
             'question': prepared.get('question'),
             'instruction': (
-                '请立即用 question 工具原样提出以上问题和选项（不得改写 header、问题文字和选项），'
+                '请使用 question 工具补充以上缺项，题干可自然改写；保持 header、选项和 custom 不变以绑定来源，'
                 '等待用户回答后再调用同一工具一次；不要更换参数或改用其他工具重试。'
             ),
         }
