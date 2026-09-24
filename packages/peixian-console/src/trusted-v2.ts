@@ -25,6 +25,7 @@ export type Usage = {
 }
 export type PersonTableAnswer = {
   version: "person-tables-v1"
+  markdown?: string
   run_id: string
   person_ref: string | null
   status: "ready" | "partial"

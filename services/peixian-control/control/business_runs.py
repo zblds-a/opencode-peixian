@@ -100,6 +100,8 @@ def submit(store, user, sid, data, payload, applied, revision, parent=None, draf
             snapshot['provider_sentence_version']=SOURCE_SENTENCE_VERSION
             snapshot['task_spec']={'schema_version':'native-tools-v1','domain':'theft','agent_id':profile.id,'query_mode':'native','methods':[],'task_id':snapshot['native_tool_context']['task_id']}
             snapshot['data_environment']='acceptance_real'
+            from .table_answer import freeze as freeze_tables
+            freeze_tables(store,user['uid'],sid,snapshot,payload)
         from .facts_plan import build, bind_payload
         provider=task and task.get('provider_plan')
         plan = None if provider else build(applied, context, data, task) if task and task['spec'] and task['spec']['query_mode']=='new_query' else None if task else build(applied, context, data)

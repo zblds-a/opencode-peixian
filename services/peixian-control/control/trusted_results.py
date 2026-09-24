@@ -171,7 +171,14 @@ def build(row,snapshot,events):
 def project(store,row,snapshot):
     if snapshot.get('native_tool_policy'):
         from .native_tool_result import project as native_project
-        return native_project(row,snapshot)
+        result = native_project(row,snapshot)
+        from .table_answer import build as build_tables
+        view = build_tables(result,snapshot)
+        if view is not None:
+            from .table_answer import markdown as table_markdown
+            view['markdown'] = table_markdown(view)
+            result['answer_view'] = view
+        return result
     if snapshot.get('provider_plan'):
         from .theft_provider_result import project as provider_project
         return provider_project(row,snapshot)

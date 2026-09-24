@@ -1,0 +1,29 @@
+{
+  "account": "A",
+  "environment": "mock",
+  "viewports": [
+    {
+      "width": 1366,
+      "document_scroll_width": 1366
+    },
+    {
+      "width": 1920,
+      "document_scroll_width": 1920
+    },
+    {
+      "width": 390,
+      "document_scroll_width": 390
+    }
+  ],
+  "expanded_rows_before": 50,
+  "expanded_rows_after": 56,
+  "source_click_synchronous": {
+    "target_open": true,
+    "parent_open": true,
+    "focus": "SUMMARY"
+  },
+  "refresh_restored_persisted_answer": true,
+  "new_user_requests_after_final_history_answer": 0,
+  "account_b_browser": "not_executed_login_pending",
+  "pixel_visual_review": "not_executed_image_tool_sandbox_error"
+}

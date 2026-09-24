@@ -1,7 +1,7 @@
 {
   "closeout_status": "completed",
   "baseline": "d78451a26feff089f0ce1b7fea40f0ab482dd1d0",
-  "implementation_revision": "28f74fafecac6929e3daac8095ff2e054dd4ff7a",
+  "implementation_revision": "a2f4888cdada1ad2944fb95195e4a539351c1dbf",
   "schema_version": 6,
   "router_version": "peixian-router-v2",
   "task_spec_version": "task-spec-v2",
@@ -17,9 +17,9 @@
       "prompt_sha256": "0887ba3b75efa23834706957e623cb1a2684c59051d8ec76e794a38c65789d15"
     },
     "theft-assistant": {
-      "version": "1.0.0",
-      "profile_sha256": "9422ec59f7ac9a9b9e8b3d7d1a2381aed02ab6668c9a380db47eaf8b32cff245",
-      "prompt_sha256": "6acfc61d2d7f757b7870e331444a2e5bc9e7afc98a6782b1d53eb7b67863b244"
+      "version": "3.1.0",
+      "profile_sha256": "38660b0c7635ac53661305c0175f296928b3a008534d0c69d40006b2ef46db99",
+      "prompt_sha256": "8851ac13e269022aef67ea53b28e6fb64b257c8ebc7f515dd4caf4cb5f5143b1"
     }
   },
   "github_ci": {

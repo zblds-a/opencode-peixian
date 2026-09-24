@@ -67,12 +67,52 @@ async def execute(request, app, value, rpc, parent, process, *, native=False):
 
 
 async def execute_native(request, app, value, rpc, parent, process):
+    # Native providers may emit parallel tools. Serialize admission as well as
+    # dispatch; do not turn a harmless sibling call into an unknown operation.
+    if not hasattr(app.state, 'native_call_locks'):
+        app.state.native_call_locks = {}
+    locks = app.state.native_call_locks
+    key = (value['session_id'], parent)
+    slot = locks.setdefault(key, {'lock': asyncio.Lock(), 'users': 0})
+    if slot['users'] >= 8:
+        raise HTTPException(429, '同一执行等待的资料调用过多，尚未投递。')
+    slot['users'] += 1
+    acquired = False
+    try:
+        try:
+            await asyncio.wait_for(slot['lock'].acquire(), timeout=120)
+            acquired = True
+        except TimeoutError:
+            raise HTTPException(409, '等待前一项资料调用超时，本项尚未投递。') from None
+        if await request.is_disconnected():
+            raise asyncio.CancelledError()
+        return await _execute_native(request, app, value, rpc, parent, process)
+    finally:
+        if acquired:
+            slot['lock'].release()
+        slot['users'] -= 1
+        if not slot['users']:
+            locks.pop(key, None)
+
+
+async def _execute_native(request, app, value, rpc, parent, process):
     config = app.state.settings
     prepared = await rpc('native_prepare', session_id=value['session_id'],
         message_id=parent, call_id=value['call_id'], tool=value['tool'],
         args=value['args'])
     if prepared.get('cached'):
         return prepared['response']
+    if prepared.get('needs_question'):
+        return {
+            'status': 'needs_input',
+            'dispatch_status': 'not_dispatched',
+            'code': prepared.get('code'),
+            'question': prepared.get('question'),
+            'instruction': (
+                '请立即用 question 工具原样提出以上问题和选项（不得改写 header、问题文字和选项），'
+                '等待用户回答后再调用同一工具一次；不要更换参数或改用其他工具重试。'
+            ),
+        }
     body = {'call_id':prepared['review_id'], 'revision':prepared['revision'],
         'model_id':prepared['model_id'], 'system':REVIEW_PROMPT,
         'input':prepared['review_input']}

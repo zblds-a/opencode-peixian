@@ -19,6 +19,14 @@ from shared.theft_provider import CATALOG
 from shared.theft_provider_v2 import CATALOG as PROVIDER_V2
 PROVIDER_TOOLS={'peixian_query_'+m:m for m in set(CATALOG)|set(PROVIDER_V2)}
 
+def public_scope_fields(detail):
+    # Fixed labels only: never forward user values or arbitrary upstream prose.
+    labels={'person_identity':'人员','start':'开始时间','end':'结束时间','lon':'经度','lat':'纬度','radius_m':'半径','page':'页码','page_size':'每页条数'}
+    fields=detail.get('field_errors',{}) if isinstance(detail,dict) else {}
+    if not isinstance(fields,dict): return {}
+    return {key:labels[key]+'需要补充、核对或修正格式' for key in fields if key in labels}
+
+
 async def process(input):
     with tempfile.TemporaryDirectory(prefix='px-facts-') as temporary:
         child=await asyncio.create_subprocess_exec(os.environ.get('BUN_EXECUTABLE','/usr/local/bin/bun'),str(Path(__file__).with_name('facts_worker.mjs')),
@@ -82,23 +90,35 @@ def register(app):
                     except ValueError:code=None
                     messages={
                         'identity_parameter_invalid':'该人员引用与本轮已确认对象不一致或本轮尚未明确对象。请使用已确认对象，不要要求用户确认内部引用。',
-                        'scope_unconfirmed':'工具参数与已确认条件不一致，请补充或确认查询范围。',
+                        'scope_unconfirmed':'查询条件未确认或与已确认值不一致，不是授权错误。仅询问列出的字段，补充前不要更换参数重试。',
+                        'scope_parameter_invalid':'查询参数格式不符合接口合同，只补充列出的字段，不猜测授权。',
                         'scope_missing':'请补充查询所需对象、时间或范围。',
                         'unsupported_scope':'此接口不支持所要求的筛选条件，请先确认受支持范围。',
                         'real_provider_disabled':'资料连接尚未配置，请联系管理员恢复当前资料连接。',
                         'real_provider_configuration_invalid':'资料连接配置尚未通过校验，请联系管理员。',
                         'provider_connection_mismatch':'资料插件与连接绑定不一致，请联系管理员。',
                         'outside_acceptance_scope':'当前对象或位置不在已授权测试范围。',
+                        'coordinate_contract_unconfirmed':'来源与目标接口的坐标兼容性尚未确认，请联系管理员。',
+                        'source_integrity_failed':'来源展示字段与原始记录不一致，请重新选择来源。',
+                        'source_coordinates_missing':'所选来源没有完整、受支持的坐标。',
+                        'source_identity_missing':'所选来源不能唯一确定一名人员。',
+                        'source_version_changed':'所选来源快照已变化，请重新选择。',
+                        'source_record_unavailable':'所选来源原始记录无法核对。',
+                        'native_no_progress':'连续调用没有取得新条件或结果，本轮停止取数。',
+                        'native_duplicate_call':'本轮已请求过相同资料；请使用已有结果。',
+                        'tool_call_busy':'当前工具调用尚未结束。',
+                        'native_tool_unavailable':'本轮未授权此资料工具。',
                     }
                     # A duplicate/in-progress call can already have dispatched.
                     if code in messages:
                         raise HTTPException(409,{'code':code,'dispatch_status':'not_dispatched',
-                            'message':messages[code]+' 本次未访问资料接口。'})
+                            'message':messages[code]+' 本次未访问资料接口。',
+                            'field_errors':public_scope_fields(detail)})
                 raise HTTPException(409,'当前资料能力不可用或执行已停止')
             return response.json()
         if value['tool'] in PROVIDER_TOOLS:
             from .theft_provider_execution import execute,execute_native
-            if 'call_id' in value and value['args']!={}:
+            if 'call_id' in value:
                 parts=result.json().get('parts',[])
                 matches=[part for part in parts if part.get('type')=='tool' and part.get('callID')==value['call_id'] and part.get('tool')==value['tool']]
                 if len(matches)!=1 or matches[0].get('state',{}).get('input')!=value['args']:
