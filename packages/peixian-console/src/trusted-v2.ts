@@ -125,7 +125,7 @@ const values: Record<string, string> = {
   composite: "综合整理",
   gambling: "涉赌资料整理",
   theft: "盗窃时空核对",
-  synthetic: "合成测试环境",
+  synthetic: "资料",
 }
 export function label(value: unknown): string {
   if (value === null || value === undefined || value === "") return "未提供"

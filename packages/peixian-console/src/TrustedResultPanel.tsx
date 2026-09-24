@@ -367,7 +367,6 @@ export default function TrustedResultPanel(props: {
                 <ol><For each={props.events??[]}>{event=><li>{event.name} · {({completed:"已完成",failed:"失败",rejected:"已拒绝",cancelled:"已取消",running:"执行中",pending:"等待处理"} as Record<string,string>)[event.status]??"状态待确认"} · {event.completed_at??"—"}</li>}</For></ol>
                   <p>执行编号：{value().run_id}</p>
                   <p>结果时间：{value().generated_at}</p>
-                  <p>合成测试环境；不代表真实业务资料。</p>
                   <dl>
                     <For each={Object.entries(value().versions ?? {})}>
                       {([key, item]) => (
