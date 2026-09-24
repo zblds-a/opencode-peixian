@@ -148,11 +148,70 @@ def resolve(store, uid, sid, context, person_ref):
     return identity, ref
 
 
+# Standard reply phrases the platform shows for quick follow-up. Keep in sync with
+# candidate_request_n / SCORING_REQUEST recognition so a pasted reply advances the flow.
+ENRICH_KIND_LABELS = {
+    'night': '夜间',
+    'community': '跨小区',
+    'warning_detail': '预警',
+    'profile': '档案',
+    'tracks': '轨迹',
+    'incidents': '周边警情',
+}
+ENRICH_SCORE_KINDS = ('night', 'community', 'warning_detail', 'profile')
+
+
+def reply_authorize_n(n):
+    """Reply text that candidate_request_n will parse as N."""
+    if type(n) is not int or n < 1:
+        return '核验前1名'
+    if n == 1:
+        return '核验该候选人'
+    return f'核验前{min(n, MAX_N)}名'
+
+
+def reply_enrich(rank, name, kinds):
+    labels = [ENRICH_KIND_LABELS[k] for k in kinds if k in ENRICH_KIND_LABELS]
+    who = f'第{rank}名'
+    if name:
+        who = f'{who}（{name}）'
+    if not labels:
+        return f'对{who}补查资料'
+    return f'对{who}补查{"和".join(labels)}记录'
+
+
+def reply_clarify(fields):
+    parts = []
+    labels = {'start': '开始时间', 'end': '结束时间', 'radius_m': '半径', 'person_identity': '人员对象', 'lon': '经度', 'lat': '纬度'}
+    for key in fields or []:
+        if key == 'start':
+            parts.append('开始时间（例：2026-09-10 20:00）')
+        elif key == 'end':
+            parts.append('结束时间（例：2026-09-10 23:00）')
+        elif key == 'radius_m':
+            parts.append('半径（例：500米）')
+        elif key in labels:
+            parts.append(labels[key])
+    if not parts:
+        return '请补充事件窗口'
+    return '请补充' + '、'.join(parts)
+
+
+def reply_query_incidents():
+    return '以轨迹点查询周边警情'
+
+
+def reply_inspect_cases():
+    return '核对处警记录原文'
+
+
 def candidate_request_n(text):
-    """Parse 核验前N名 / 对前N人评分; return int 1..5 or None."""
+    """Parse 核验前N名 / 对前N人评分 / 核验该候选人; return int 1..5 or None."""
     import re
     if not isinstance(text, str):
         return None
+    if re.search(r'核验该候选人|对该候选人(?:核验|评分)', text):
+        return 1
     match = re.search(
         r'(?:核验|评分|查|核对|筛)\s*前\s*([1-5])\s*名|(?:对|给)\s*前\s*([1-5])\s*(?:人|名)|前\s*([1-5])\s*名(?:核验|评分|排序)',
         text,

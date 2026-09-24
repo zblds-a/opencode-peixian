@@ -39,3 +39,11 @@ def test_infer_direction_and_scoring_keywords():
     assert scoring_requested('筛选嫌疑人列表') is True
     assert scoring_requested('核验前3名') is True
     assert scoring_requested('不要评分') is False
+
+
+def test_candidate_request_n_phrases():
+    from control.theft_candidates import candidate_request_n, reply_authorize_n
+    assert candidate_request_n('核验前3名') == 3
+    assert candidate_request_n(reply_authorize_n(2)) == 2
+    assert candidate_request_n(reply_authorize_n(1)) == 1
+    assert candidate_request_n('核验该候选人') == 1

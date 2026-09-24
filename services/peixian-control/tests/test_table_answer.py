@@ -195,3 +195,121 @@ def test_json_selection_prefix_drops_trailing_free_text():
     view=t.build(result,snap)
     assert view['selection_status']=='accepted' and len(view['suggestions'])==1
     assert '实施盗窃' not in t.markdown(view) and '999' not in t.markdown(view)
+
+
+def test_platform_suggestions_outrank_model_and_dedupe():
+    """Platform flow steps come first even when model fills 3 generic queries."""
+    result, snap = fixture()
+    snap['native_tool_context'] = {
+        'confirmed': {}, 'task_id': 'task', 'scoring_requested': True,
+        'direction': 'case_to_person', 'candidate_set': [],
+    }
+    snap['table_answer_policy']['person_ref'] = None
+    snap['table_answer_policy']['direction'] = 'case_to_person'
+    snap['native_tool_policy'] = {
+        'allowed_tools': [
+            'peixian_query_captures', 'peixian_query_night',
+            'peixian_query_community', 'peixian_query_warning_detail', 'peixian_query_profile',
+        ]
+    }
+    snap['native_calls'] = {'cap': {'status': 'completed', 'frozen': {'kind': 'captures', 'query': {}}}}
+    captures = [
+        {'record_id': 'run:call:a', 'source_run_id': 'run', 'call_id': 'cap', 'module': 'captures', 'snapshot_id': 'a',
+         'fields': {'target_id_card': 'person-a', 'target_name': '甲', 'capture_count': 12, 'tags': '盗窃'}, 'result_digest': 'd'},
+        {'record_id': 'run:call:b', 'source_run_id': 'run', 'call_id': 'cap', 'module': 'captures', 'snapshot_id': 'b',
+         'fields': {'target_id_card': 'person-b', 'target_name': '乙', 'capture_count': 1, 'tags': ''}, 'result_digest': 'd'},
+    ]
+    result['records'] = captures
+    result['claims'] = []
+    choose(snap, source_refs=['run:call:a'], suggestions=[
+        {'action': 'query', 'kind': 'night'},
+        {'action': 'query', 'kind': 'community'},
+        {'action': 'query', 'kind': 'profile'},
+    ])
+    view = t.build(result, snap)
+    assert view['suggestions'][0]['action'] == 'authorize_candidates'
+    assert view['suggestions'][0]['origin'] == 'platform_direction'
+    assert '核验前2名' in view['suggestions'][0]['text']
+    from control.theft_candidates import candidate_request_n
+    assert candidate_request_n(view['suggestions'][0]['reply']) == 2
+    assert '可直接回复' in t.markdown(view)
+
+
+def test_platform_skips_closed_tools_and_per_person_enrich():
+    result, snap = fixture()
+    snap['native_tool_context'] = {
+        'confirmed': {'start': '2026-09-10 20:00:00', 'end': '2026-09-10 23:00:00', 'radius_m': 500},
+        'task_id': 'task', 'scoring_requested': True, 'direction': 'case_to_person',
+        'candidate_set': [
+            {'rank': 1, 'person_ref': 'person-a', 'name': '甲', 'run_id': 'run', 'record_id': 'run:call:a',
+             'snapshot_id': 'a', 'result_digest': 'd'},
+            {'rank': 2, 'person_ref': 'person-b', 'name': '乙', 'run_id': 'run', 'record_id': 'run:call:b',
+             'snapshot_id': 'b', 'result_digest': 'd'},
+        ],
+    }
+    snap['table_answer_policy']['person_ref'] = None
+    snap['table_answer_policy']['direction'] = 'case_to_person'
+    # tracks not allowed — must not suggest tracks; night allowed
+    snap['native_tool_policy'] = {
+        'allowed_tools': ['peixian_query_captures', 'peixian_query_night', 'peixian_query_warning_detail']
+    }
+    snap['native_calls'] = {
+        'cap': {'status': 'completed', 'frozen': {'kind': 'captures', 'query': {}}},
+        'n1': {'status': 'completed', 'frozen': {'kind': 'night', 'query': {'person_ref': 'person-a'}}},
+    }
+    records = [
+        {'record_id': 'run:call:a', 'source_run_id': 'run', 'call_id': 'cap', 'module': 'captures', 'snapshot_id': 'a',
+         'fields': {'target_id_card': 'person-a', 'target_name': '甲', 'capture_count': 12, 'tags': '盗窃'}, 'result_digest': 'd'},
+        {'record_id': 'run:call:b', 'source_run_id': 'run', 'call_id': 'cap', 'module': 'captures', 'snapshot_id': 'b',
+         'fields': {'target_id_card': 'person-b', 'target_name': '乙', 'capture_count': 1, 'tags': ''}, 'result_digest': 'd'},
+        {'record_id': 'run:call:n', 'source_run_id': 'run', 'call_id': 'n1', 'module': 'night', 'snapshot_id': 'n',
+         'fields': {'targetIdCard': 'person-a', 'captureTime': '2026-09-10 01:00:00'}, 'result_digest': 'd'},
+    ]
+    result['records'] = records
+    result['claims'] = []
+    choose(snap, source_refs=['run:call:a'])
+    view = t.build(result, snap)
+    texts = [x['text'] for x in view['suggestions']]
+    assert any('乙' in x and '夜间' in x for x in texts), texts
+    assert all('轨迹' not in x for x in texts)
+    # reply for person-b enrich must be recognizable / actionable
+    enrich = next(x for x in view['suggestions'] if '乙' in x['text'])
+    assert '补查' in enrich['reply'] and '夜间' in enrich['reply']
+
+
+def test_no_duplicate_clarify_when_model_already_asked():
+    result, snap = fixture()
+    snap['native_tool_context'] = {
+        'confirmed': {}, 'task_id': 'task', 'scoring_requested': False,
+        'direction': 'case_to_person', 'candidate_set': [],
+    }
+    snap['table_answer_policy']['person_ref'] = None
+    snap['native_calls'] = {}
+    choose(snap, suggestions=[{'action': 'clarify_scope', 'fields': ['start', 'end', 'radius_m']}])
+    view = t.build({**result, 'records': [], 'claims': []}, snap)
+    clarify = [x for x in view['suggestions'] if x.get('action') == 'clarify_scope']
+    assert len(clarify) == 1
+    assert clarify[0]['origin'] == 'model_selection'
+
+
+def test_semantic_dedup_keeps_platform_over_model():
+    result, snap = fixture()
+    snap['native_tool_context'] = {
+        'confirmed': {'person_identity': 'x', 'start': 'a', 'end': 'b'},
+        'task_id': 'task', 'direction': 'person_to_case', 'candidate_set': [],
+    }
+    snap['table_answer_policy']['person_ref'] = 'person-one'
+    snap['native_tool_policy'] = {'allowed_tools': ['peixian_query_tracks', 'peixian_query_incidents']}
+    snap['native_calls'] = {'tr': {'status': 'completed', 'frozen': {'kind': 'tracks', 'query': {'person_ref': 'person-one'}}}}
+    result['records'] = [
+        {'record_id': 'run:call:t', 'source_run_id': 'run', 'call_id': 'tr', 'module': 'tracks', 'snapshot_id': 't',
+         'fields': {'lon': 118.0, 'lat': 34.0, 'captureTime': '2026-09-10 12:00:00'}, 'result_digest': 'd'},
+    ]
+    result['claims'] = []
+    choose(snap, suggestions=[{'action': 'query', 'kind': 'incidents'}])
+    view = t.build(result, snap)
+    incidents = [x for x in view['suggestions'] if x.get('kind') == 'incidents']
+    assert len(incidents) == 1
+    assert incidents[0]['origin'] == 'platform_direction'
+    from control.theft_candidates import reply_query_incidents
+    assert incidents[0]['reply'] == reply_query_incidents()
