@@ -96,6 +96,9 @@ def submit(store, user, sid, data, payload, applied, revision, parent=None, draf
             payload['system']=payload.get('system','')+model_context(snapshot['native_tool_context'])
             snapshot['native_tool_policy']={'version':native_version,'allowed_tools':allowed,'revision':revision}
             snapshot['native_calls']={}
+            from .skill_discovery import bind as bind_skills
+            from .capabilities import catalog
+            bind_skills(snapshot,payload,applied,catalog(store,user['uid']))
             from .answer_delivery import freeze as freeze_delivery
             freeze_delivery(snapshot, identity)
             from .theft_provider_result import SOURCE_SENTENCE_VERSION

@@ -52,6 +52,8 @@ def catalog(store,uid):
         from .theft_planner import enabled as planner_enabled
         message_supported=native_enabled(store,uid) or not planner_enabled(store,uid)
         for item in items:
+            from shared.capability_labels import display
+            if item['kind']=='plugin':item['name']=display(item['id'],item['name'])
             selectable=bool(message_supported and item['available'] and item['kind'] in ('plugin','personal_skill'))
             item.update(selectable_in_message=selectable,
                         selection_mode=('preference' if item['kind']=='plugin' else 'method') if selectable else 'unavailable',
@@ -80,4 +82,5 @@ def register(app):
         return {'items':values[offset:offset+page_size],'total':len(values),'page':page,'page_size':page_size,
                 'message_support':{'version':'message-support-v1','file_ids':supports,
                     'max_files':5,'file_usage':'user_reference','requires_ready':True,'allows_truncated':False,
-                    'plugin_ids':'preference' if supports else 'unavailable','skill_ids':'method' if supports else 'unavailable'}}
+                    'plugin_ids':'preference' if supports else 'unavailable','skill_ids':'method' if supports else 'unavailable',
+                    'manual_selection':False,'skill_dispatch':'native_tool' if native_enabled(app.state.store,user['uid']) else 'unavailable'}}

@@ -23,6 +23,9 @@ def observed(snapshot, part):
         skill = next((s for s in snapshot.get('skills', []) if s.get('name') == state['input'].get('name')), None)
     capability = skill or plugin
     name = label((capability or {}).get('name'), '使用技能' if tool == 'skill' else '调用已授权插件' if plugin else '执行辅助操作')
+    if plugin:
+        from shared.capability_labels import display as display_name
+        name=display_name(plugin['id'],name)
     status = {'error': 'failed', 'completed': 'completed', 'running': 'running', 'pending': 'pending', 'cancelled': 'cancelled', 'waiting_input': 'waiting_input'}.get(state.get('status'), 'pending')
     # Only execution-time approved scalar fields are public. Skill content is never returned.
     display = (plugin or {}).get('display', {})

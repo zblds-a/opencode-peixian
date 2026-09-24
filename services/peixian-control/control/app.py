@@ -958,7 +958,8 @@ def register_files(app):
         public = []
         for item in items:
             await session_owned(request, user, item["sessionID"])
-            public.append({"id": item["id"], "sessionID": item["sessionID"], "questions": item.get("questions", []), "description": "模型需要你的确认才能继续"})
+            from .question_contract import project
+            public.append(project({"id": item["id"], "sessionID": item["sessionID"], "questions": item.get("questions", []), "description": "模型需要你的确认才能继续"}))
         return {"items": public}
 
     @app.post(PREFIX + "/{kind}/{rid}/{action}")
@@ -971,10 +972,13 @@ def register_files(app):
         if not item:
             fail("待确认事项不存在", 404)
         await session_owned(request, user, item["sessionID"])
-        data = body_fields(await request.json(), ("reply", "answers", "message"))
+        data = body_fields(await request.json(), ("reply", "answers", "message", "question_version"))
         if kind == "permissions" and data.get("reply") not in ("once", "reject"):
             fail("只能允许本次操作或拒绝")
         if kind == "questions" and action == "reply":
+            from .question_contract import validate
+            validate(item, data)
+            data.pop("question_version", None)
             from . import native_precheck_questions as precheck_q
             from .store import now as _now
             sid = item["sessionID"]
@@ -1011,7 +1015,7 @@ def register_files(app):
                 from fastapi import HTTPException as _HTTP
                 if isinstance(exc, _HTTP):
                     detail = exc.detail if isinstance(exc.detail, dict) else {}
-                    fail(detail.get("message") or "回答无效，请按提示重新填写", exc.status_code)
+                    raise
                 raise
         elif kind == "questions" and action == "reject":
             from . import native_precheck_questions as precheck_q

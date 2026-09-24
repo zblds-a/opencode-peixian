@@ -14,7 +14,7 @@ def public(store,row):
     snapshot=store.decrypt(row['request_ciphertext'])
     saved=store.one('SELECT 1 AS found FROM run_results WHERE run_id=?',(row['id'],)) is not None
     delivery=snapshot.get('answer_delivery') or {}
-    return {**runs.public(row),'outcome':project(store,row),'clarification':public_question(store,row),
+    return {**runs.public(row),'outcome':project(store,row),'clarification':None if snapshot.get('task_spec',{}).get('schema_version')=='native-tools-v1' else public_question(store,row),
             'event_sequence':sequence,'status_authority':'run','status_revision':snapshot.get('public_status_revision',0),
             'answer_delivery':{'version':delivery.get('version'),'sequence':len(delivery.get('segments',[])),
                 'final':bool(delivery.get('final')), 'result_saved':saved,
@@ -113,6 +113,13 @@ def register(app):
         from .trusted_results import read
         from .controlled_answer import public_result
         return public_result(read(app.state.store,user['uid'],sid,rid))
+
+    @app.get(PREFIX+'/sessions/{sid}/runs/{rid}/sources/{evidence_id}')
+    @blocking_endpoint(app)
+    def run_source(sid:str,rid:str,evidence_id:str,request:Request,user=Depends(normal)):
+        from .trusted_results import read
+        from .reply_presentation import source_detail
+        return source_detail(read(app.state.store,user['uid'],sid,rid),evidence_id)
 
     @app.get(PREFIX+'/sessions/{sid}/runs/{rid}/claims')
     @blocking_endpoint(app)

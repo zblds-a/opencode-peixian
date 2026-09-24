@@ -109,6 +109,7 @@ def contracts():
     add('get','/sessions/{sid}/runs/{rid}/task',None,ref('RunTask'),'读取本轮冻结任务',desc='仅本人可读；TaskSpec 为服务端生成，不接受客户端写入。schema v7 的历史解释使用冻结可信资料；旧 Run 按原契约返回。')
     for suffix,schema,title in [('result','TrustedResultResponse','读取不可变可信结果'),('claims','RunClaims','读取已核对声明'),('data-usage','RunDataUsage','读取资料实际使用状态')]:
         add('get','/sessions/{sid}/runs/{rid}/'+suffix,None,ref(schema),title,desc='本人资源；schema v9及账号灰度只影响新Run。终态结果不可变；旧Run返回legacy；活动Run仅返回pending状态，不重新取数。')
+    add('get','/sessions/{sid}/runs/{rid}/sources/{evidence_id}',None,ref('SourceDetail'),'读取本人已保存的来源记录',desc='按证据ID匹配冻结Result；不查上游，不重建旧结果；跨账号及不存在均404。')
     add('get','/sessions/{sid}/runs/{rid}/answer-segments',None,ref('AnswerSegments'),'读取可重放的受控资料片段',desc='仅本人；after为已收到的序号，limit为1至100；只读，不产生模型或资料调用。final表示片段流封闭，不表示执行成功。')
     add('get','/sessions/{sid}/runs/{rid}/events',None,ref('RunEventPage'),'增量查询持久步骤')
     add('get','/sessions/{sid}/runs/{rid}/evidence',None,ref('RunEvidence'),'查询固定执行证据',desc='按本人账号/会话/Run鉴权读取已保存证据；旧插件卸载不删除历史证据，读取不重新取数。')

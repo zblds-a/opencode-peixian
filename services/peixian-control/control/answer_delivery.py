@@ -35,7 +35,8 @@ def record(snapshot, row, call_id):
     if not selected and (result.get('records') or public['returned_count']!=0):
         return
     from shared.theft_provider_v2 import CATALOG
-    label = CATALOG[call['frozen']['kind']][0]
+    from shared.capability_labels import display
+    label = display(call['frozen']['kind'], CATALOG[call['frozen']['kind']][0])
     text = '### ' + label + '\n\n'
     text += '\n\n'.join(html.escape(c['summary']) for c in selected)
     if not selected:

@@ -294,6 +294,7 @@ def public(spec):
             'options': [{'label': o['label'], **({'description': o['description']} if o.get('description') else {})}
                         for o in (q.get('options') or [])],
             'custom': q.get('custom', True),
+            'multiple': False,
         } for q in spec.get('questions') or []],
     }
 
@@ -321,6 +322,8 @@ def match_public(spec, asked):
 
 def _resolve_answer(question, answer_labels, values):
     """Map one question's selected labels / free text into field updates."""
+    if isinstance(answer_labels, list) and len(answer_labels)>1:
+        error('too_many_answers', '此题只能选择一个答案。', 422)
     if not isinstance(answer_labels, list) or len(answer_labels) != 1:
         error('clarification_incomplete', '请回答全部问题。', 422)
     label = answer_labels[0]

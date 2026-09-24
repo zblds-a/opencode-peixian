@@ -55,6 +55,10 @@ def test_verified_increment_before_terminal_and_replay(provider,monkeypatch):
     assert last['final'] and last['items']==first['items']
     result=trusted_results.read(s,uid,'ses_multi',row['id'])
     assert result['presentation']['clues']
+    eid=result['presentation']['clues'][0]['evidence'][0]['id']
+    detail=reply_presentation.source_detail(result,eid)
+    assert detail['record']['record_id']==detail['evidence']['record_id']
+    with pytest.raises(HTTPException):reply_presentation.source_detail(result,'unknown')
     graph=entity_graph.build(result,'ses_multi')
     assert graph['edges'] and all(e['type']=='source_record' for e in graph['edges'])
     assert not any(e['properties'].get('synthetic') for e in graph['edges'])

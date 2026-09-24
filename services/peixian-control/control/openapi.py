@@ -105,7 +105,7 @@ def schemas():
             "message": STRING,
         }, ("reply",)),
         "QuestionReplyBody": obj({
-            "reply": STRING, "answers": array(array(STRING)), "message": STRING,
+            "reply": STRING, "answers": array(array(STRING)), "message": STRING, "question_version": STRING,
         }, ("answers",)),
         "QuestionRejectBody": obj({"reply": STRING, "answers": array(array(STRING)), "message": STRING}),
         "FileUploadBody": obj({"file": {"type": "string", "format": "binary",
@@ -208,7 +208,7 @@ def schemas():
         "Result": obj({"id": ID, "name": STRING, "relative_path": STRING, "size": INTEGER,
                        "modified_at": {"type": "string", "format": "date-time"}},
                       ("id", "name", "relative_path", "size", "modified_at")),
-        "Confirmation": obj({"id": ID, "sessionID": ID, "questions": array({"type": "object", "additionalProperties": True}),
+        "Confirmation": obj({"id": ID, "sessionID": ID, "question_version": STRING, "questions": array({"type": "object", "additionalProperties": True}),
                              "description": STRING}, ("id", "sessionID", "questions", "description")),
         "Audit": obj({"id": ID, "actor": STRING, "actor_role": STRING, "action": STRING, "target": STRING,
                       "result": {"type": "string", "enum": ["success", "denied", "failed"]},

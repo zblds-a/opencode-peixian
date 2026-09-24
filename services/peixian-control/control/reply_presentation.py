@@ -6,7 +6,7 @@ import json
 VERSION = 'source-clues-v1'
 TYPES = {'tracks': 'observation', 'incidents': 'place', 'captures': 'observation',
          'profile': 'person', 'night': 'night', 'community': 'place',
-         'warnings': 'observation', 'warning_logs': 'observation',
+         'warning_detail': 'observation', 'warnings': 'observation', 'warning_logs': 'observation',
          'funds': 'funds', 'vehicle': 'vehicle', 'portrait': 'person'}
 
 
@@ -37,7 +37,8 @@ def build(result):
         at = source_fields.get(time_key) if time_key else source_fields.get('occurred_at')
         text = claim['statement']
         from shared.theft_provider_v2 import CATALOG
-        title=CATALOG.get(record['module'], (record['module'],))[0] + '来源记录'
+        from shared.capability_labels import display
+        title=display(record['module'], CATALOG.get(record['module'], (record['module'],))[0]) + '来源记录'
         cards.append({'id': 'clue_' + identity, 'type': TYPES[record['module']],
                       'title': title, 'headline': text, 'summary': text,
                       'discoveries': [text], 'verification': 'source_fields',
@@ -51,3 +52,14 @@ def build(result):
     revision = hashlib.sha256(json.dumps(cards, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     return {'version': VERSION, 'status': 'partial' if cards and result.get('missing') else 'ready' if cards else 'empty',
             'revision': revision, 'clues': cards, 'missing': copy.deepcopy(result.get('missing', []))}
+
+
+def source_detail(result,evidence_id):
+    from .backend_contract import error
+    presentation=result.get('presentation') or {}
+    if presentation.get('version')!=VERSION:error('source_not_found','来源不存在或当前版本不支持。',404)
+    evidence=next((e for c in presentation.get('clues',[]) for e in c.get('evidence',[]) if e.get('id')==evidence_id),None)
+    if evidence is None:error('source_not_found','来源不存在或无权访问。',404)
+    record=next((r for r in result.get('records',[]) if r.get('record_id')==evidence['record_id'] and r.get('snapshot_id')==evidence['snapshot_id'] and r.get('source_run_id',evidence['source_run_id'])==evidence['source_run_id']),None)
+    if record is None:error('source_not_found','来源记录无法对应当前快照。',404)
+    return {'version':'source-detail-v1','run_id':result['run_id'],'evidence':copy.deepcopy(evidence),'record':copy.deepcopy(record),'versions':copy.deepcopy(result.get('versions',{}))}
