@@ -17,7 +17,8 @@ export function nextQuestionRequest(question: NextQuestion, sid: string): Pendin
         description: option.description,
       })),
       custom: question.custom !== false,
-      multiple: question.multiple !== false,
+      // Follow-up selections become a user message, so this form can retain every checked choice.
+      multiple: true,
     }],
   }
 }

@@ -38,6 +38,17 @@
 .business-shell .chat-layout .chat-send-button:hover:not(:disabled) { color: #fff; background: #4096ff; box-shadow: 0 4px 12px rgba(22,119,255,.25); transform: translateY(-1px); }
 .business-shell .chat-layout .chat-send-button:disabled { opacity: .55; }
 .business-shell .chat-layout .chat-trace-state { margin-left: auto; color: #3572b3; font-size: 12px; white-space: nowrap; }
+.business-shell .chat-layout .confirmation-card { min-width: 0; }
+.business-shell .chat-layout .question-page { margin-top: 12px; }
+.business-shell .chat-layout .question-page .question-options { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+.business-shell .chat-layout .question-page .question-option { min-width: 0; min-height: 54px; }
+.business-shell .chat-layout .question-page .question-option span { min-width: 0; }
+.business-shell .chat-layout .question-page .question-options textarea { grid-column: 1 / -1; }
+.business-shell .chat-layout .question-contract-note { display: block; margin-top: 8px; color: #ad4e00; }
+.business-shell .chat-layout .question-pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
+.business-shell .chat-layout .question-pager button { min-width: 88px; padding: 6px 10px; border: 1px solid #bdd5f0; border-radius: 8px; color: #245688; background: #f5f9ff; cursor: pointer; }
+.business-shell .chat-layout .question-pager button:disabled { opacity: .45; cursor: default; }
+.business-shell .chat-layout .question-pager span { color: #687f9b; font-size: 12px; white-space: nowrap; }
 .business-shell .chat-layout .theft-run-panel { gap: 6px; padding: 9px 11px; }
 .business-shell .chat-layout .related-capabilities-head { min-height: 70px; padding: 14px 16px; }
 .business-shell .chat-layout .related-capabilities-head strong { color: #123b6d; font-size: 18px; font-weight: 700; }
@@ -57,6 +68,7 @@
   .business-shell .chat-layout .chat-welcome { padding-inline: 8px; }
   .business-shell .chat-layout .composer-tools { flex-wrap: wrap; }
   .business-shell .chat-layout .model-choice { max-width: min(50%, 175px); }
+  .business-shell .chat-layout .question-page .question-options { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* Second-round dialogue layout. Every selector stays inside the user chat shell. */

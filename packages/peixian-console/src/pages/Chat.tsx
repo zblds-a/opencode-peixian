@@ -928,7 +928,7 @@ export default function Chat() {
                       <Index each={textParts().filter((item) => !item.afterTools)}>{renderText}</Index>
                       <Show when={entry().missingBody}><p class="message-no-body">本轮暂无可展示的 Markdown 正文；右侧线索仍可查看。</p></Show>
                       <Show when={toolParts().length}>
-                        <details class="tool-trace">
+                        <details class="tool-trace" open>
                           <summary>
                             <Icon
                               name={traceComplete() ? "check" : "clock"}

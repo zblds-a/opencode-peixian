@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, Index, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { list, post, safeMessage } from "./api"
 import { Button, ErrorLine, Icon } from "./components"
 import { useConsole } from "./context"
@@ -17,14 +17,19 @@ export function QuestionForm(props: { request: () => Pending; busy: boolean; ans
   const [selected, setSelected] = createSignal<string[][]>([])
   const [custom, setCustom] = createSignal<string[]>([])
   const [customEnabled, setCustomEnabled] = createSignal<boolean[]>([])
+  const [page, setPage] = createSignal(0)
   const questionID = createMemo(() => props.request().id)
   createEffect(() => {
     questionID()
     setSelected([])
     setCustom([])
     setCustomEnabled([])
+    setPage(0)
   })
   const questions = () => props.request().questions ?? []
+  const pages = createMemo(() => questions().flatMap((question, questionIndex) =>
+    Array.from({ length: Math.max(1, Math.ceil((question.options?.length ?? 0) / 3)) }, (_, optionPage) => ({ questionIndex, optionPage }))))
+  const active = () => pages()[Math.min(page(), pages().length - 1)]
   const answers = () =>
     questions().map((question, index) => [
       ...(selected()[index] ?? []),
@@ -32,23 +37,17 @@ export function QuestionForm(props: { request: () => Pending; busy: boolean; ans
         ? [custom()[index].trim()]
         : []),
     ])
-  const valid = () => questions().length > 0 && answers().every((answer) => answer.length > 0)
-  function choose(index: number, value: string, multiple?: boolean) {
+  const limited = () => questions().some((question, index) => question.multiple !== true && answers()[index]?.length > 1)
+  const valid = () => questions().length > 0 && answers().every((answer) => answer.length > 0) && !limited()
+    && !questions().some((question, index) => question.custom !== false && customEnabled()[index] && !custom()[index]?.trim())
+  function choose(index: number, value: string) {
     setSelected((current) => {
       const next = [...current]
-      next[index] = multiple
-        ? (next[index] ?? []).includes(value)
-          ? next[index].filter((item) => item !== value)
-          : [...(next[index] ?? []), value]
-        : [value]
+      next[index] = (next[index] ?? []).includes(value)
+        ? next[index].filter((item) => item !== value)
+        : [...(next[index] ?? []), value]
       return next
     })
-    if (!multiple)
-      setCustomEnabled((current) => {
-        const next = [...current]
-        next[index] = false
-        return next
-      })
   }
   return (
     <form
@@ -62,21 +61,25 @@ export function QuestionForm(props: { request: () => Pending; busy: boolean; ans
         <Icon name="chat" size={18} />
         <strong>{props.title ?? "需要补充信息"}</strong>
       </div>
-      <Index each={questions()}>
-        {(question, index) => (
-          <fieldset class="question-group">
+      <Show when={active()}>
+        {(current) => {
+          const index = () => current().questionIndex
+          const question = () => questions()[index()]
+          const options = () => (question()?.options ?? []).slice(current().optionPage * 3, current().optionPage * 3 + 3)
+          const lastOptionsPage = () => (current().optionPage + 1) * 3 >= (question()?.options?.length ?? 0)
+          return <fieldset class="question-group question-page">
             <legend>{safeMessage(question().header || "补充信息")}</legend>
             <p>{safeMessage(question().question)}</p>
             <div class="question-options">
-              <For each={question().options ?? []}>
+              <For each={options()}>
                 {(option) => (
                   <label class="question-option">
                     <input
-                      type={question().multiple ? "checkbox" : "radio"}
-                      name={props.request().id + "-" + index}
+                      type="checkbox"
+                      name={props.request().id + "-" + index()}
                       disabled={props.busy}
-                      checked={(selected()[index] ?? []).includes(option.label)}
-                      onChange={() => choose(index, option.label, question().multiple)}
+                      checked={(selected()[index()] ?? []).includes(option.label)}
+                      onChange={() => choose(index(), option.label)}
                     />
                     <span>
                       <strong>{safeMessage(option.label)}</strong>
@@ -90,55 +93,47 @@ export function QuestionForm(props: { request: () => Pending; busy: boolean; ans
               <Show when={question().custom !== false && !(question().options?.length)}>
                 <textarea
                   aria-label={safeMessage(question().header || "补充信息")}
-                  value={custom()[index] ?? ""}
+                  value={custom()[index()] ?? ""}
                   maxlength={1600}
                   rows={2}
-                  required
                   disabled={props.busy}
                   placeholder="请输入你的补充说明"
-                  onInput={(event) => setCustom((current) => { const next = [...current]; next[index] = event.currentTarget.value; return next })}
+                  onInput={(event) => setCustom((current) => { const next = [...current]; next[index()] = event.currentTarget.value; return next })}
                 />
               </Show>
-              <Show when={question().custom !== false && !!question().options?.length}>
+              <Show when={question().custom !== false && !!question().options?.length && lastOptionsPage()}>
                 <label class="question-option">
                   <input
-                    type={question().multiple ? "checkbox" : "radio"}
-                    name={props.request().id + "-" + index}
+                    type="checkbox"
+                    name={props.request().id + "-" + index()}
                     disabled={props.busy}
-                    checked={!!customEnabled()[index]}
+                    checked={!!customEnabled()[index()]}
                     onChange={(event) => {
                       const checked = event.currentTarget.checked
                       setCustomEnabled((current) => {
                         const next = [...current]
-                        next[index] = checked
+                        next[index()] = checked
                         return next
                       })
-                      if (!question().multiple)
-                        setSelected((current) => {
-                          const next = [...current]
-                          next[index] = []
-                          return next
-                        })
                     }}
                   />
                   <span>
                     <strong>自行填写</strong>
                   </span>
                 </label>
-                <Show when={customEnabled()[index]}>
+                <Show when={customEnabled()[index()]}>
                   <textarea
                     aria-label={safeMessage(question().header || "补充信息") + " · 自行填写"}
-                    value={custom()[index] ?? ""}
+                    value={custom()[index()] ?? ""}
                     maxlength={1600}
                     rows={2}
-                    required
                     disabled={props.busy}
                     placeholder="请输入你的补充说明"
                     onInput={(event) => {
                       const value = event.currentTarget.value
                       setCustom((current) => {
                         const next = [...current]
-                        next[index] = value
+                        next[index()] = value
                         return next
                       })
                     }}
@@ -146,17 +141,28 @@ export function QuestionForm(props: { request: () => Pending; busy: boolean; ans
                 </Show>
               </Show>
             </div>
-            <Show when={question().multiple}>
-              <small class="muted">可以选择多项</small>
+            <small class="muted">复选框可取消选择；不选择可使用下方跳过操作。</small>
+            <Show when={question().multiple !== true && answers()[index()]?.length > 1}>
+              <small class="question-contract-note" role="alert">当前接口对本题只处理一个答案。请选择一项，或等待后端开放多项回答。</small>
             </Show>
           </fieldset>
-        )}
-      </Index>
+        }}
+      </Show>
+      <Show when={pages().length > 1}>
+        <nav class="question-pager" aria-label="反问翻页">
+          <button type="button" disabled={props.busy || page() === 0} onClick={() => setPage((current) => current - 1)} aria-label="上一页">← 上一页</button>
+          <span>第 {Math.min(page() + 1, pages().length)} / {pages().length} 页</span>
+          <button type="button" disabled={props.busy || page() >= pages().length - 1} onClick={() => setPage((current) => current + 1)} aria-label="下一页">下一页 →</button>
+        </nav>
+      </Show>
+      <Show when={limited()}>
+        <small class="question-contract-note" role="alert">有题目当前仅支持提交一项。请返回该题取消多余选项，避免后端忽略所选内容。</small>
+      </Show>
       <div class="confirmation-actions">
         <Button type="button" disabled={props.busy} onClick={() => props.answer()}>
-          {props.rejectLabel ?? "暂不回答"}
+          {props.rejectLabel ?? "不选择，跳过"}
         </Button>
-        <Button type="submit" variant="primary" busy={props.busy} disabled={!valid()}>
+        <Button type="submit" variant="primary" busy={props.busy} disabled={!valid() || page() < pages().length - 1}>
           提交回答
         </Button>
       </div>
