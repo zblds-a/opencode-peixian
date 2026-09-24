@@ -9,7 +9,7 @@ from . import theft_scoring
 from shared import theft_provider_v2 as adapter
 
 VERSION = 'theft-candidates-v1'
-MAX_N = 5
+MAX_N = 20
 SCORE_KINDS = frozenset({'night', 'community', 'warning_detail', 'warnings', 'warning_logs', 'profile', 'tracks'})
 
 
@@ -49,9 +49,10 @@ def stage1_from_task(store, uid, sid, task_id):
 
 
 def authorize(ranked_items, n):
-    """Freeze top-N candidates from a stage-1 ranking. N is 1..5."""
-    if type(n) is not int or not 1 <= n <= MAX_N:
-        error('candidate_limit_invalid', '核验人数须为1至5名。', 422)
+    """Freeze top-N candidates from a stage-1 ranking. N is 1..MAX_N (soft ceiling)."""
+    if type(n) is not int or n < 1:
+        error('candidate_limit_invalid', '核验人数须为正整数。', 422)
+    n = min(n, MAX_N)
     items = list(ranked_items or [])
     selected = items[:n]
     if not selected:
@@ -84,11 +85,60 @@ def find(context, person_ref):
     return None
 
 
+def find_capture_person(store, uid, sid, context, person_ref):
+    """Locate a person_ref in completed capture records of this task (no authorize required)."""
+    if not isinstance(person_ref, str) or not person_ref.startswith('person-'):
+        return None
+    task_id = (context or {}).get('task_id')
+    if not task_id:
+        return None
+    for record in task_capture_records(store, uid, sid, task_id):
+        try:
+            identity = None
+            fields = record.get('fields') or {}
+            for name in ('target_id_card', 'targetIdCard', 'idCard'):
+                if name in fields:
+                    identity = adapter.person_id(fields[name])
+                    break
+            if not identity:
+                continue
+            ref = adapter.person_ref(identity, store.worker_key.encode(), uid + '/' + sid)
+            if not hmac.compare_digest(ref, person_ref):
+                continue
+            return {
+                'version': VERSION,
+                'rank': None,
+                'person_ref': person_ref,
+                'name': fields.get('target_name') or fields.get('name'),
+                'run_id': record.get('source_run_id') or record.get('run_id'),
+                'record_id': record.get('record_id'),
+                'snapshot_id': record.get('snapshot_id'),
+                'result_digest': record.get('result_digest'),
+                'source_ids': [record.get('record_id')],
+                'identity': identity,
+            }
+        except Exception:
+            continue
+    return None
+
+
+def resolve_capture_person(store, uid, sid, context, person_ref):
+    """Resolve any capture-sourced person_ref without requiring candidate_set authorization."""
+    entry = find(context, person_ref)
+    if entry:
+        return resolve(store, uid, sid, context, person_ref)
+    found = find_capture_person(store, uid, sid, context, person_ref)
+    if not found or not found.get('identity'):
+        error('identity_parameter_invalid', '该引用不在本任务已取得的抓拍结果中。', 409)
+    return found['identity'], person_ref
+
+
 def resolve(store, uid, sid, context, person_ref):
     """Resolve a candidate person_ref to raw identity via source integrity check."""
     entry = find(context, person_ref)
     if not entry:
-        error('identity_parameter_invalid', '该引用不在本轮已授权的核验候选人中。', 409)
+        # Fall back to any capture person from this task (authorization no longer required).
+        return resolve_capture_person(store, uid, sid, context, person_ref)
     if not entry.get('result_digest'):
         error('candidate_source_incomplete', '候选人来源摘要缺失，无法核验身份。', 409)
     from .analysis_tasks import source

@@ -15,7 +15,7 @@ def test_scoring_requested_keywords_and_negation():
 
 
 def test_case_to_person_defaults_scoring_on():
-    assert scoring_requested('查周边抓拍', None, 'case_to_person') is True
+    assert scoring_requested('查周边抓拍', None, 'case_to_person') is False
     assert scoring_requested('查周边抓拍', None, 'person_to_case') is False
     assert scoring_requested('不要排序', None, 'case_to_person') is False
     assert scoring_requested('继续', {'scoring_requested': False}, 'case_to_person') is False

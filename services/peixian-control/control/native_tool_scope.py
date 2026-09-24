@@ -16,7 +16,6 @@ from .theft_planner import slots
 from shared import theft_provider_v2 as adapter
 
 TOOL_TO_KIND={'peixian_query_'+kind:kind for kind in ACTIVE_KINDS}
-FILTERS=re.compile(r'近期|最近|近\s*\d+\s*[天月年]|仅.*盗窃|只.*盗窃|限定时间|限定日期')
 SCORING_REQUEST=re.compile(r'评分|打分|可疑度|嫌疑评估|研判优先级|嫌疑程度|排序|筛选嫌疑人|可能性|嫌疑人列表|核验前')
 SCORING_NEGATE=re.compile(
     r'不要\s*(?:评分|排序|研判)|无需\s*(?:评分|排序)|不用\s*(?:评分|排序|打分)|'
@@ -27,18 +26,21 @@ PERSON_HINT=re.compile(r'由人到案|此人|该人|这名人员|已确认人员
 
 
 def scoring_requested(text, prior=None, direction=None):
-    """Freeze scoring intent. case_to_person defaults on unless user opts out."""
+    """Fallback scoring intent when the model does not declare scoring.requested.
+
+    Defaults to False. Explicit user negation always wins. direction is ignored.
+    """
     if not isinstance(text, str):
         if prior and 'scoring_requested' in prior:
             return bool(prior.get('scoring_requested'))
-        return direction == 'case_to_person'
+        return False
     if SCORING_NEGATE.search(text):
         return False
     if SCORING_REQUEST.search(text):
         return True
     if prior and 'scoring_requested' in prior:
         return bool(prior.get('scoring_requested'))
-    return direction == 'case_to_person'
+    return False
 
 
 def infer_direction(confirmed, refs, text, prior=None):
@@ -151,14 +153,19 @@ def resolve_arguments(kind, args, context):
     reusable=set()
     if kind in adapter.PERSON and not context['source_refs']: reusable.add('person_identity')
     if kind in adapter.TIMED and kind!='captures': reusable.update(('start','end'))
-    if kind=='captures': reusable.update({'start','end','radius_m'} & context.get('user_conditions',{}).keys())
+    if kind=='captures': reusable.update({'start','end','radius_m'})
     for key in reusable:
         if key not in resolved and key in confirmed: resolved[key]=copy.deepcopy(confirmed[key])
     return {key:canonical_field(key,value) for key,value in resolved.items()}
 
 
 def arguments(kind,args,context):
-    """Return only values the user explicitly confirmed; never trust tool input."""
+    """Accept model-supplied values with format and required-field checks only.
+
+    Authorization-style blocks (scope_unconfirmed, capture_scope_unconfirmed,
+    page_unconfirmed, unsupported_scope) are removed. Values that pass
+    canonical_field are accepted and may be written back to confirmed by the caller.
+    """
     if kind not in ACTIVE_KINDS or not isinstance(args,dict):
         error('native_tool_invalid','资料工具或参数无效。',422)
     supported={'lon','lat','radius_m','person_identity','start','end','page','page_size'}
@@ -166,45 +173,24 @@ def arguments(kind,args,context):
     if set(args)-supported:
         error('native_tool_invalid','查询参数包含未开放的条件。',422)
     args=resolve_arguments(kind,args,context)
-    confirmed=context['confirmed']
     if isinstance(args.get('person_identity'),str) and args['person_identity'].startswith('person-'):
         error('identity_parameter_invalid','person_identity 必须使用已确认的原始身份号码，不能使用展示引用。',409)
-    mismatches={}
-    for key,value in args.items():
-        # Only explicit contract defaults are exempt; never override a user choice.
-        if kind in adapter.PAGED and key in ('page','page_size') and key not in confirmed and value=={'page':1,'page_size':20}[key]:
-            continue
-        if key not in confirmed:
-            mismatches[key]=FIELD_NAMES[key]+'尚未确认'
-        elif canonical_field(key,confirmed[key])!=value:
-            mismatches[key]=FIELD_NAMES[key]+'与当前任务已确认值不一致'
-    if mismatches:
-        error('scope_unconfirmed','查询条件尚未确认或不一致，未访问资料接口；这不是授权错误。只询问列出的字段，用户补充前不要改换参数重试。',409,mismatches)
-    # A supplied user condition cannot be silently discarded for the selected
-    # interface. In particular /jq/search has no time/category filter.
-    if kind=='incidents' and FILTERS.search(context.get('constraints_text',context['current_text'])):
-        error('unsupported_scope','当前警情接口只支持空间及分页；请说明上游默认覆盖范围并征求确认。',409)
-    # A person may be present in a multi-tool task without filtering the
-    # spatial incident query. Explicit person-only restrictions cannot be enforced.
-    if (kind=='incidents' and 'person_identity' in context.get('user_conditions',{})
-            and re.search(r'(仅|只)(查询|查|看)?.{0,12}(此人|该人员|这名人员|身份证|该人)',context['current_text'])):
-        error('unsupported_scope','当前警情接口不能按人员筛选；请说明限制并澄清查询范围。',409)
     if context['source_refs'] and {'lon','lat','person_identity'} & args.keys():
         error('source_value_override','已选择来源时不能再替换对象或坐标。',409)
     required=({'radius_m'} if context['source_refs'] else {'lon','lat','radius_m'}) if kind=='incidents' else {'radius_m'} if kind=='captures' else set() if context['source_refs'] else {'person_identity'}
     if kind in adapter.TIMED:required|={'start','end'}
     if not required<=set(args):
         error('scope_missing','查询条件不完整，未访问资料接口；只补充列出的字段，不重试或猜测权限。',409,{k:FIELD_NAMES[k]+'尚未明确' for k in sorted(required-set(args))})
-    if kind=='captures':
-        if len(context['source_refs'])!=1:
-            error('source_selection_required','周边抓拍必须先选择一个明确的位置来源。',409)
-        if not {'radius_m','start','end'}<=set(context['user_conditions']):
-            error('capture_scope_unconfirmed','抓拍时间和半径必须独立确认，不能沿用轨迹或警情范围。',409)
-    if kind in adapter.PAGED:
-        # Pagination defaults are contract defaults; page >1 requires an
-        # explicit user-supplied value, not a model continuation guess.
-        if args.get('page',1)>1 and 'page' not in context['user_conditions']:
-            error('page_unconfirmed','翻页需要用户明确请求。',409)
+    if kind=='captures' and len(context['source_refs'])!=1:
+        error('source_selection_required','周边抓拍必须先选择一个明确的位置来源。',409)
+    # Accept model values into confirmed so later turns see them as known.
+    confirmed=context.setdefault('confirmed',{})
+    user_conditions=context.setdefault('user_conditions',{})
+    for key,value in args.items():
+        if key=='person_identity':
+            continue
+        confirmed[key]=copy.deepcopy(value)
+        user_conditions[key]=copy.deepcopy(value)
     query={key:copy.deepcopy(value) for key,value in args.items() if key!='person_identity'}
     return query
 
@@ -279,7 +265,7 @@ def named_sources(store,uid,sid,text):
 
 
 def model_context(context):
-    """Explain the frozen argument contract; never rewrite submitted tool input."""
+    """Explain available confirmed values; model decides direction, scoring and next steps."""
     plan = context.get('enrichment_plan')
     enrich_note = ''
     payload = {
@@ -292,19 +278,18 @@ def model_context(context):
         payload['enrichment_plan'] = plan
         if not plan.get('complete'):
             enrich_note = (
-                '本轮已授权核验候选人。请按 enrichment_plan 逐项调用对应资料工具（每次一个调用），'
-                '不要再向用户确认人数或是否补查；某次失败则记下缺口并继续下一项；'
-                '计划完成或无法继续取得新结果后再给出资料回答。'
+                '本轮已有候选人补查计划。可按 enrichment_plan 逐项调用对应资料工具（每次一个调用）；'
+                '不必再向用户确认人数或是否补查；某次失败则记下缺口并继续下一项。'
             )
         else:
             enrich_note = 'enrichment_plan 已完成；可基于已取得资料作答，覆盖不足者可再建议补查。'
-    return ('\n本轮原生工具参数约定：person_identity 可填写用户已确认的原始单人身份号码，或本人本会话中同一已确认对象的 person-* 引用；'
-        'person-* 不是新对象或身份证号，平台会校验它是否等于本轮已确认对象；不要要求用户确认内部引用。'
+    return ('\n本轮原生工具参数约定：研判方向、是否评分、核验人数、下一步建议与追问均由你自行判断；'
+        '条件齐全即可直接查询，不必等用户逐项确认。缺条件时用 question 工具自己组织题干和选项。'
+        'person_identity 可填写原始身份号码，或本会话抓拍结果中的 person-* 引用；'
+        'person-* 不是新对象或身份证号，平台只校验来源完整性。'
         '已选定来源时，对象或坐标由平台从该来源读取，不在工具参数中重复传入。'
         '以下已确认值不是要求查询全部能力；只取当前问题需要的字段。'
-        '服务端会补齐本任务已确认且用途适用的人员和时间；抓拍条件仍需独立确认。'
-        '若工具返回 status=needs_input 与 question，请立即用 question 工具原样提出该问题的 header、问题文字和选项，不得改写；'
-        '用户回答后，再调用同一工具一次。不要更换参数，不要改用其他工具重试。'
-        '真正失败（非 needs_input）不代表记录为零；不要自行重试失败调用。'
+        '服务端会补齐本任务已确认且用途适用的人员和时间。'
+        '真正失败不代表记录为零；不要自行重试失败调用。分数、等级与排序数值只由平台按来源计算。'
         + enrich_note + '\n'
         + adapter.canonical(payload))

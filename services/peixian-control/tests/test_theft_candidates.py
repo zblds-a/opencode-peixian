@@ -22,7 +22,9 @@ def test_authorize_top_n_and_reject_empty():
     with pytest.raises(HTTPException):
         authorize([], 3)
     with pytest.raises(HTTPException):
-        authorize(ranked, 9)
+        authorize(ranked, 0)
+    # N above soft ceiling is clamped, not rejected
+    assert len(authorize(ranked, 9)) == 2
 
 
 def test_find_only_authorized_refs():
