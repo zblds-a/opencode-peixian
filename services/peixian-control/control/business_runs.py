@@ -91,9 +91,11 @@ def submit(store, user, sid, data, payload, applied, revision, parent=None, draf
             from .native_tool_scope import freeze_context, model_context
             from .data_plugin_policy import installable
             allowed=sorted({tool for p in applied.get('plugins',[]) if installable(p['id']) and p.get('version')=='3.0.0' for tool in p.get('manifest',{}).get('tools',[])})
-            payload['tools']={**payload.get('tools',{}),'*':False,'question':True,**{tool:True for tool in allowed}}
+            from .agents import theft_skills as theft_skills
+            payload['tools']={**payload.get('tools',{}),'*':False,'question':True,'skill':True,**{tool:True for tool in allowed}}
             snapshot['native_tool_context']=freeze_context(store,user['uid'],sid,data)
-            payload['system']=payload.get('system','')+model_context(snapshot['native_tool_context'])
+            snapshot['native_tool_context']['allowed_skills']=theft_skills.names()
+            payload['system']=payload.get('system','')+model_context(snapshot['native_tool_context'])+theft_skills.catalog_text()
             snapshot['native_tool_policy']={'version':native_version,'allowed_tools':allowed,'revision':revision}
             snapshot['native_calls']={}
             from .theft_provider_result import SOURCE_SENTENCE_VERSION

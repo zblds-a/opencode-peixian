@@ -87,13 +87,11 @@ def select_records(result, snapshot, subject, spatial=False, subjects=None):
 INSTRUCTION = """
 回答展示协议 person-tables-v3：保持模型原生工具选择，不机械查询全部工具。每次发出一个资料工具调用，等待其结果后再选择下一项，避免并行请求。
 问候、介绍、能力咨询或缺项追问自然回答；缺条件时用 question 工具自己组织题干和选项，不查询档案。
-研判方向、是否评分、核验人数、下一步建议与可回复话术、候选案件核验行均由你自行判断；条件齐全即可直接查询，不必等用户逐项确认。
-由案到人：可先查周边抓拍得到候选人，再自行决定是否初排、核验几人、补查哪些资料。不得下犯罪认定。
-由人到案：在已确认人员后查轨迹，再以轨迹点为来源查周边警情；案件核验行由你填写，不得直接认定涉案。
-整理资料时，如下方同任务资料没有该人员档案，可按用户目标调用已授权 peixian_query_profile；无权限、失败或未知不重试。多个候选先用 question 选择，不默认第一人。
-资料回答完成时仅输出一个 JSON 对象，不输出 Markdown、开场白或其他文字：
-{"format":"person-tables-v3","mode":"data","direction":"case_to_person|person_to_case","source_refs":["实际来源"],"scoring":{"requested":true},"suggestions":[{"action":"query|clarify_scope|inspect_sources|authorize_candidates|inspect_cases","kind":"tracks","text":"建议文案","reply":"可直接发送的回复","reason":"原因","fields":["start","end"]}],"next_question":{"header":"下一步分析","question":"请选择下一步","options":[{"label":"可发送文案","description":"说明","send":true}]},"case_checks":{"items":[{"cjbh":"编号","cjsj":"时间","relation":"关系","status":"待核验","follow_up":"补证","source_ids":["实际来源"]}]}}
-分数、等级与排序数值只由平台按来源计算，你不得自行写分数或排名。scoring.requested 与 direction 以你声明为准。source_refs 不可编造。建议最多五项。普通对话不使用上述 JSON。
+研判方向、案类、是否评分、核验人数、下一步建议与可回复话术、候选案件核验行均由你自行判断；条件齐全即可直接查询。
+按需用 skill 读取盗窃研判技能；技能不能取数。由案到人可先抓拍再补查；由人到案先轨迹再周边警情。不得下犯罪认定。
+资料回答完成时仅输出一个 JSON 对象：
+{"format":"person-tables-v3","mode":"data","direction":"case_to_person|person_to_case","case_type":"ebike|cable|incar|burglary","source_refs":["实际来源"],"scoring":{"requested":true},"suggestions":[{"action":"query|clarify_scope|inspect_sources|authorize_candidates|inspect_cases","kind":"tracks","text":"建议文案","reply":"可直接发送的回复","reason":"原因","fields":["start","end"]}],"next_question":{"header":"下一步分析","question":"请选择下一步","options":[{"label":"可发送文案","description":"说明","send":true}],"multiple":true},"case_checks":{"items":[{"cjbh":"编号","cjsj":"时间","item_or_id":"物品或编号","time_link":"时间联系","behavior_link":"行为联系","compare":"待核验|仅案类相同|存在待核联系","relation":"关系","status":"待核验","follow_up":"补证","source_ids":["实际来源"]}]}}
+分数与排序只由平台计算。source_refs 不可编造。建议最多五项。普通对话不用上述 JSON。
 """
 
 
@@ -209,11 +207,18 @@ def model_case_checks(chosen, record_ids):
         sources = [s for s in sources if isinstance(s, str) and s in allowed]
         if not sources:
             continue
+        compare = _clip(row.get('compare') or row.get('comparison') or '', 40)
+        if compare and compare not in ('待核验', '仅案类相同', '存在待核联系'):
+            compare = '待核验'
         items.append({
             'cjbh': _clip(row.get('cjbh') or '未提供编号', 80),
             'cjsj': _clip(row.get('cjsj') or '未提供处警时间', 80),
             'distance_m': row.get('distance_m') if isinstance(row.get('distance_m'), (int, float)) else None,
             'time_delta_hours': row.get('time_delta_hours') if isinstance(row.get('time_delta_hours'), (int, float)) else None,
+            'item_or_id': _clip(row.get('item_or_id') or row.get('item') or '', 120),
+            'time_link': _clip(row.get('time_link') or '', 200),
+            'behavior_link': _clip(row.get('behavior_link') or '', 200),
+            'compare': compare or '待核验',
             'relation': _clip(row.get('relation') or '', 200),
             'status': _clip(row.get('status') or '待核验', 40),
             'follow_up': _clip(row.get('follow_up') or '', 200),
@@ -434,7 +439,8 @@ def build(result, snapshot):
         'selection_status': 'accepted' if chosen else 'fallback',
         'source_runs': sorted({r['source_run_id'] for r in records}),
         'scoring': scoring, 'ranking': ranking, 'case_checks': case_view,
-        'direction': direction}
+        'direction': direction,
+        'case_type': chosen.get('case_type') if isinstance(chosen.get('case_type'), str) else None}
 
 
 def escape(value):
@@ -521,11 +527,15 @@ def markdown(view):
                 item.get('cjsj'),
                 '—' if item.get('distance_m') is None else f"{item['distance_m']} 米",
                 '—' if item.get('time_delta_hours') is None else f"{item['time_delta_hours']} 小时",
+                item.get('item_or_id') or '—',
+                item.get('time_link') or '—',
+                item.get('behavior_link') or '—',
+                item.get('compare') or item.get('status') or '待核验',
                 item.get('relation'),
                 item.get('status'),
                 item.get('follow_up'),
             ))
-        sections += [table(['警情编号', '处警时间', '最近直线距离', '时间差', '关系', '核验状态', '补证任务'], rows)]
+        sections += [table(['警情编号', '处警时间', '最近直线距离', '时间差', '物品／编号', '时间联系', '行为联系', '比较结论', '关系', '核验状态', '补证任务'], rows)]
         sections += [case_view.get('disclaimer') or '']
 
     output = '\n\n'.join(sections)

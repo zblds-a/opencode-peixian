@@ -1,7 +1,7 @@
 {
   "schema_version": "agent-profile-v1",
   "id": "theft-assistant",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "name": "盗窃研判助手",
   "description": "通过自然语言选择已授权只读资料能力；支持由案到人与由人到案的隐式研判，用户明确要求时可展示嫌疑人可能性排序。",
   "domain": "theft",
