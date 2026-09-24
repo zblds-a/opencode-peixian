@@ -83,57 +83,76 @@ def prepare(store,uid,sid,message_id,call_id,tool,args,revision):
         # A scoped display reference is accepted only when it proves equality
         # to this Run's already confirmed raw identity, or belongs to the
         # user-authorized candidate_set from stage-1 capture ranking.
+        from . import native_precheck_questions as precheck_q
+        from fastapi import HTTPException
         checked_args=copy.deepcopy(args)
         identity_format='raw'
         candidate_rank=None
         candidate_authorized=False
-        if kind in adapter.PERSON and isinstance(args.get('person_identity'),str) and args['person_identity'].startswith('person-'):
-            identity=context['confirmed'].get('person_identity')
-            matched=False
-            if identity:
-                try:expected=adapter.person_ref(adapter.person_id(identity),store.worker_key.encode(),uid+'/'+sid)
-                except adapter.ContractError:expected=None
-                if expected and hmac.compare_digest(args['person_identity'],expected):
+        derived={}
+        try:
+            if kind in adapter.PERSON and isinstance(args.get('person_identity'),str) and args['person_identity'].startswith('person-'):
+                identity=context['confirmed'].get('person_identity')
+                matched=False
+                if identity:
+                    try:expected=adapter.person_ref(adapter.person_id(identity),store.worker_key.encode(),uid+'/'+sid)
+                    except adapter.ContractError:expected=None
+                    if expected and hmac.compare_digest(args['person_identity'],expected):
+                        checked_args['person_identity']=identity
+                        identity_format='confirmed_scoped_reference'
+                        matched=True
+                if not matched:
+                    from . import theft_candidates
+                    entry=theft_candidates.find(context, args['person_identity'])
+                    if not entry:
+                        error('identity_parameter_invalid','该引用与本轮已确认对象不一致，也不在已授权核验候选人中。',409)
+                    identity, ref=theft_candidates.resolve(store,uid,sid,context,args['person_identity'])
                     checked_args['person_identity']=identity
-                    identity_format='confirmed_scoped_reference'
+                    identity_format='candidate_scoped_reference'
+                    candidate_rank=entry.get('rank')
+                    candidate_authorized=True
                     matched=True
-            if not matched:
-                from . import theft_candidates
-                entry=theft_candidates.find(context, args['person_identity'])
-                if not entry:
-                    error('identity_parameter_invalid','该引用与本轮已确认对象不一致，也不在已授权核验候选人中。',409)
-                identity, ref=theft_candidates.resolve(store,uid,sid,context,args['person_identity'])
-                checked_args['person_identity']=identity
-                identity_format='candidate_scoped_reference'
-                candidate_rank=entry.get('rank')
-                candidate_authorized=True
-                matched=True
-            if not matched:
-                error('identity_parameter_invalid','请先明确本次查询对象；引用不能替代对象确认。',409)
-        work_context=context
-        if candidate_authorized:
-            # Bind the candidate identity into a call-local confirmed view so
-            # arguments() accepts it without mutating the frozen task context.
-            work_context=copy.deepcopy(context)
-            work_context['confirmed']=dict(work_context.get('confirmed') or {})
-            work_context['confirmed']['person_identity']=checked_args['person_identity']
-            work_context['user_conditions']=dict(work_context.get('user_conditions') or {})
-            work_context['user_conditions']['person_identity']=checked_args['person_identity']
-        from .native_tool_scope import resolve_arguments
-        checked_args=resolve_arguments(kind,checked_args,work_context)
-        query=arguments(kind,checked_args,work_context)
-        identities={}
-        if work_context['source_refs']:
-            from .native_tool_scope import source_values
-            derived,identities=source_values(store,uid,sid,kind,work_context)
-            query.update(derived)
-        elif kind in adapter.PERSON:
-            identity=checked_args.get('person_identity') or work_context['confirmed'].get('person_identity')
-            if identity!=checked_args.get('person_identity'):
-                error('identity_unconfirmed','人员条件尚未确认。',409)
-            ref=adapter.person_ref(adapter.person_id(identity),store.worker_key.encode(),uid+'/'+sid)
-            query['person_ref']=ref
-            identities[ref]=identity
+                if not matched:
+                    error('identity_parameter_invalid','请先明确本次查询对象；引用不能替代对象确认。',409)
+            work_context=context
+            if candidate_authorized:
+                # Bind the candidate identity into a call-local confirmed view so
+                # arguments() accepts it without mutating the frozen task context.
+                work_context=copy.deepcopy(context)
+                work_context['confirmed']=dict(work_context.get('confirmed') or {})
+                work_context['confirmed']['person_identity']=checked_args['person_identity']
+                work_context['user_conditions']=dict(work_context.get('user_conditions') or {})
+                work_context['user_conditions']['person_identity']=checked_args['person_identity']
+            from .native_tool_scope import resolve_arguments
+            checked_args=resolve_arguments(kind,checked_args,work_context)
+            query=arguments(kind,checked_args,work_context)
+            identities={}
+            if work_context['source_refs']:
+                from .native_tool_scope import source_values
+                derived,identities=source_values(store,uid,sid,kind,work_context)
+                query.update(derived)
+            elif kind in adapter.PERSON:
+                identity=checked_args.get('person_identity') or work_context['confirmed'].get('person_identity')
+                if identity!=checked_args.get('person_identity'):
+                    error('identity_unconfirmed','人员条件尚未确认。',409)
+                ref=adapter.person_ref(adapter.person_id(identity),store.worker_key.encode(),uid+'/'+sid)
+                query['person_ref']=ref
+                identities[ref]=identity
+        except HTTPException as exc:
+            detail=precheck_q.detail_of(exc)
+            code=detail.get('code') if detail else None
+            if not code or not precheck_q.is_clarifiable(code):
+                raise
+            if precheck_q.kind_question_count(snapshot, kind) >= 2:
+                raise
+            work_context=locals().get('work_context') or context
+            spec=precheck_q.build(kind, code, (detail or {}).get('field_errors') or {}, work_context, store, uid, sid)
+            if not spec:
+                raise
+            precheck_q.record_pending(snapshot, spec)
+            db.execute("UPDATE business_runs SET request_ciphertext=?,updated=? WHERE id=?",(store.encrypt(snapshot),now(),row['id']))
+            return {'needs_question': True, 'question': precheck_q.public(spec), 'code': code,
+                    'run_id': row['id'], 'call_id': call_id, 'revision': revision}
         applied=store.decrypt(runtime['applied_spec_ciphertext']) if runtime['applied_spec_ciphertext'] else {}
         frozen=provider_contracts.freeze(store,uid,kind,query,identities,applied)
         if frozen['plugin_version']!='3.0.0':

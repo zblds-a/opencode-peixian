@@ -271,9 +271,10 @@ def model_context(context):
     return ('\n本轮原生工具参数约定：person_identity 可填写用户已确认的原始单人身份号码，或本人本会话中同一已确认对象的 person-* 引用；'
         'person-* 不是新对象或身份证号，平台会校验它是否等于本轮已确认对象；不要要求用户确认内部引用。'
         '已选定来源时，对象或坐标由平台从该来源读取，不在工具参数中重复传入。'
-        '以下已确认值不是要求查询全部能力；只取当前问题需要的字段，缺项通过 question 提问。'
+        '以下已确认值不是要求查询全部能力；只取当前问题需要的字段。'
         '服务端会补齐本任务已确认且用途适用的人员和时间；抓拍条件仍需独立确认。'
-        'scope_unconfirmed/scope_missing 是条件问题，不是缺少授权；只按 field_errors 追问对应缺项，禁止擅自换参数重试。'
-        '意图核对或参数错误不代表记录为零；不自行重试失败调用。\n'
+        '若工具返回 status=needs_input 与 question，请立即用 question 工具原样提出该问题的 header、问题文字和选项，不得改写；'
+        '用户回答后，再调用同一工具一次。不要更换参数，不要改用其他工具重试。'
+        '真正失败（非 needs_input）不代表记录为零；不要自行重试失败调用。\n'
         +adapter.canonical({'version':'native-tool-arguments-v1','scope_version':context['scope_version'],
             'confirmed':context['confirmed'],'selected_source_refs':context['source_refs']}))

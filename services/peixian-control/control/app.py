@@ -336,7 +336,11 @@ def public_messages(values, displays=None):
                 except (TypeError, ValueError):
                     parsed = {}
                 details["outputs"] = display_values(parsed, display.get("output_fields"), display.get("_secrets", []))
-                output["parts"].append({**common, "tool": title, "state": {"status": state.get("status"), "title": title}, "details": details})
+                status = state.get("status")
+                if isinstance(parsed, dict) and parsed.get("status") == "needs_input" and status in (None, "completed", "running", "pending"):
+                    status = "waiting_input"
+                    title = title if title != "调用已启用的插件" else "待你确认查询条件"
+                output["parts"].append({**common, "tool": title, "state": {"status": status, "title": title}, "details": details})
         result.append(output)
     return result
 
@@ -968,6 +972,71 @@ def register_files(app):
         data = body_fields(await request.json(), ("reply", "answers", "message"))
         if kind == "permissions" and data.get("reply") not in ("once", "reject"):
             fail("只能允许本次操作或拒绝")
+        if kind == "questions" and action == "reply":
+            from . import native_precheck_questions as precheck_q
+            from .store import now as _now
+            sid = item["sessionID"]
+            uid = user["uid"]
+            store = request.app.state.store
+            def merge():
+                rows = store.rows(
+                    "SELECT * FROM business_runs WHERE uid=? AND session_id=? AND status IN ('queued','running','cancelling') ORDER BY rowid DESC LIMIT 5",
+                    (uid, sid),
+                )
+                for row in rows:
+                    snapshot = store.decrypt(row["request_ciphertext"])
+                    token, spec = precheck_q.find_pending(snapshot, item.get("questions") or [])
+                    if not spec:
+                        continue
+                    context = snapshot.get("native_tool_context")
+                    if not context:
+                        continue
+                    next_context, _text, _cancel = precheck_q.apply_reply(
+                        spec, data.get("answers") or [], context, store, uid, sid)
+                    snapshot["native_tool_context"] = next_context
+                    pending = snapshot.setdefault("native_pending_questions", {})
+                    pending[token] = {**spec, "status": "answered"}
+                    with store.tx() as db:
+                        db.execute(
+                            "UPDATE business_runs SET request_ciphertext=?,updated=? WHERE id=?",
+                            (store.encrypt(snapshot), _now(), row["id"]),
+                        )
+                    return True
+                return False
+            try:
+                await request.app.state.db_work.run(merge)
+            except Exception as exc:
+                from fastapi import HTTPException as _HTTP
+                if isinstance(exc, _HTTP):
+                    detail = exc.detail if isinstance(exc.detail, dict) else {}
+                    fail(detail.get("message") or "回答无效，请按提示重新填写", exc.status_code)
+                raise
+        elif kind == "questions" and action == "reject":
+            from . import native_precheck_questions as precheck_q
+            from .store import now as _now
+            sid = item["sessionID"]
+            uid = user["uid"]
+            store = request.app.state.store
+            def dismiss():
+                rows = store.rows(
+                    "SELECT * FROM business_runs WHERE uid=? AND session_id=? AND status IN ('queued','running','cancelling') ORDER BY rowid DESC LIMIT 5",
+                    (uid, sid),
+                )
+                for row in rows:
+                    snapshot = store.decrypt(row["request_ciphertext"])
+                    token, spec = precheck_q.find_pending(snapshot, item.get("questions") or [])
+                    if not spec:
+                        continue
+                    pending = snapshot.setdefault("native_pending_questions", {})
+                    pending[token] = {**spec, "status": "rejected"}
+                    with store.tx() as db:
+                        db.execute(
+                            "UPDATE business_runs SET request_ciphertext=?,updated=? WHERE id=?",
+                            (store.encrypt(snapshot), _now(), row["id"]),
+                        )
+                    return True
+                return False
+            await request.app.state.db_work.run(dismiss)
         return (await upstream(request, user, "POST", f"{path}/{rid}/{action}", json=data)).json()
 
 

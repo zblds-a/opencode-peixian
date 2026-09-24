@@ -98,6 +98,16 @@ def register(app):
                         'real_provider_configuration_invalid':'资料连接配置尚未通过校验，请联系管理员。',
                         'provider_connection_mismatch':'资料插件与连接绑定不一致，请联系管理员。',
                         'outside_acceptance_scope':'当前对象或位置不在已授权测试范围。',
+                        'coordinate_contract_unconfirmed':'来源与目标接口的坐标兼容性尚未确认，请联系管理员。',
+                        'source_integrity_failed':'来源展示字段与原始记录不一致，请重新选择来源。',
+                        'source_coordinates_missing':'所选来源没有完整、受支持的坐标。',
+                        'source_identity_missing':'所选来源不能唯一确定一名人员。',
+                        'source_version_changed':'所选来源快照已变化，请重新选择。',
+                        'source_record_unavailable':'所选来源原始记录无法核对。',
+                        'native_no_progress':'连续调用没有取得新条件或结果，本轮停止取数。',
+                        'native_duplicate_call':'本轮已请求过相同资料；请使用已有结果。',
+                        'tool_call_busy':'当前工具调用尚未结束。',
+                        'native_tool_unavailable':'本轮未授权此资料工具。',
                     }
                     # A duplicate/in-progress call can already have dispatched.
                     if code in messages:

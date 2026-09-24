@@ -67,10 +67,13 @@ def test_native_tool_one_confirmed_call(provider,monkeypatch):
 def test_native_precheck_rejects_unconfirmed_scope(provider,monkeypatch):
     store=provider[0];uid=provider[4]['uid'];row=native_candidate(provider,monkeypatch)
     wrong={**ARGS,'end':'2026-09-21 04:03:04'}
-    with pytest.raises(HTTPException) as exc:
-        native_tool_gate.prepare(store,uid,'ses_multi',row['message_id'],'wrong-scope',tool('tracks'),wrong,1)
-    assert exc.value.detail['code']=='scope_unconfirmed'
-    assert not store.decrypt(store.one('SELECT request_ciphertext FROM business_runs WHERE id=?',(row['id'],))['request_ciphertext'])['native_calls']
+    decision=native_tool_gate.prepare(store,uid,'ses_multi',row['message_id'],'wrong-scope',tool('tracks'),wrong,1)
+    assert decision.get('needs_question') is True
+    assert decision.get('code')=='scope_unconfirmed'
+    assert decision['question']['questions']
+    snap=store.decrypt(store.one('SELECT request_ciphertext FROM business_runs WHERE id=?',(row['id'],))['request_ciphertext'])
+    assert not snap.get('native_calls')
+    assert any(s.get('status')=='pending' for s in snap.get('native_pending_questions',{}).values())
 
 
 def test_native_review_rejection_and_no_replay(provider,monkeypatch):
@@ -184,12 +187,13 @@ def test_empty_review_closes_without_admitting_or_resending(provider,monkeypatch
 def test_display_identity_cannot_replace_raw_confirmed_parameter(provider,monkeypatch):
     store=provider[0];uid=provider[4]['uid'];row=native_candidate(provider,monkeypatch)
     wrong={**ARGS,'person_identity':'person-'+'a'*32}
-    with pytest.raises(HTTPException) as exc:
-        native_tool_gate.prepare(store,uid,'ses_multi',row['message_id'],'display-id',tool('tracks'),wrong,1)
-    assert exc.value.detail['code']=='identity_parameter_invalid'
+    decision=native_tool_gate.prepare(store,uid,'ses_multi',row['message_id'],'display-id',tool('tracks'),wrong,1)
+    assert decision.get('needs_question') is True
+    assert decision.get('code')=='identity_parameter_invalid'
     snapshot=store.decrypt(store.one('SELECT request_ciphertext FROM business_runs WHERE id=?',(row['id'],))['request_ciphertext'])
     assert snapshot['native_calls']=={}
     assert 'provider_plan' not in snapshot
+    assert any(s.get('status')=='pending' for s in snapshot.get('native_pending_questions',{}).values())
     context=native_tool_scope.model_context(snapshot['native_tool_context'])
     assert ID in context and 'person_identity' in context
     assert '不要要求用户确认内部引用' in context
@@ -208,9 +212,9 @@ def test_only_reference_equal_to_frozen_person_is_accepted(provider,monkeypatch)
     ref=adapter.person_ref(ID,store.worker_key.encode(),uid+'/ses_multi')
     for wrong in [adapter.person_ref(ID,store.worker_key.encode(),uid+'/other_session'),
                   adapter.person_ref(ID,store.worker_key.encode(),'other_user/ses_multi')]:
-        with pytest.raises(HTTPException) as exc:
-            native_tool_gate.prepare(store,uid,'ses_multi',row['message_id'],'bad-'+wrong,tool('tracks'),{**ARGS,'person_identity':wrong},1)
-        assert exc.value.detail['code']=='identity_parameter_invalid'
+        decision=native_tool_gate.prepare(store,uid,'ses_multi',row['message_id'],'bad-'+wrong,tool('tracks'),{**ARGS,'person_identity':wrong},1)
+        assert decision.get('needs_question') is True
+        assert decision.get('code')=='identity_parameter_invalid'
     accepted=native_tool_gate.prepare(store,uid,'ses_multi',row['message_id'],'same-person',tool('tracks'),{**ARGS,'person_identity':ref},1)
     assert accepted['review_input']['identity_binding']=={'status':'matched','person_ref':ref}
     snap=store.decrypt(store.one('SELECT request_ciphertext FROM business_runs WHERE id=?',(row['id'],))['request_ciphertext'])
@@ -231,9 +235,9 @@ def test_reference_without_confirmed_person_cannot_select_person(provider,monkey
     snap=store.decrypt(store.one('SELECT request_ciphertext FROM business_runs WHERE id=?',(row['id'],))['request_ciphertext'])
     snap['native_tool_context']['confirmed'].pop('person_identity')
     with store.tx() as db:db.execute('UPDATE business_runs SET request_ciphertext=? WHERE id=?',(store.encrypt(snap),row['id']))
-    with pytest.raises(HTTPException) as exc:
-        native_tool_gate.prepare(store,uid,'ses_multi',row['message_id'],'unconfirmed',tool('tracks'),{**ARGS,'person_identity':ref},1)
-    assert exc.value.detail['code']=='identity_parameter_invalid'
+    decision=native_tool_gate.prepare(store,uid,'ses_multi',row['message_id'],'unconfirmed',tool('tracks'),{**ARGS,'person_identity':ref},1)
+    assert decision.get('needs_question') is True
+    assert decision.get('code')=='identity_parameter_invalid'
 
 
 @pytest.mark.parametrize('args',[None,[], 'person-untrusted'])

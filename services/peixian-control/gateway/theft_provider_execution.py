@@ -102,6 +102,17 @@ async def _execute_native(request, app, value, rpc, parent, process):
         args=value['args'])
     if prepared.get('cached'):
         return prepared['response']
+    if prepared.get('needs_question'):
+        return {
+            'status': 'needs_input',
+            'dispatch_status': 'not_dispatched',
+            'code': prepared.get('code'),
+            'question': prepared.get('question'),
+            'instruction': (
+                '请立即用 question 工具原样提出以上问题和选项（不得改写 header、问题文字和选项），'
+                '等待用户回答后再调用同一工具一次；不要更换参数或改用其他工具重试。'
+            ),
+        }
     body = {'call_id':prepared['review_id'], 'revision':prepared['revision'],
         'model_id':prepared['model_id'], 'system':REVIEW_PROMPT,
         'input':prepared['review_input']}

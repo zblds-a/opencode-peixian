@@ -57,7 +57,13 @@ def track_messages(store,row,values,receipt):
             if (plan or snapshot.get('task_spec')) and tool not in permitted_tools:violations.append(str(part.get('id') or part.get('callID')))
             if pid:actual.add(pid)
             kind='skill' if tool=='skill' else 'plugin' if pid else 'analysis'
-            timing=state.get('time',{});status={'completed':'completed','error':'failed','running':'running','pending':'pending','cancelled':'cancelled'}.get(state.get('status'),'pending')
+            timing=state.get('time',{});status={'completed':'completed','error':'failed','running':'running','pending':'pending','cancelled':'cancelled','waiting_input':'waiting_input'}.get(state.get('status'),'pending')
+            try:
+                _out=json.loads(state.get('output','')) if isinstance(state.get('output'),str) else state.get('output')
+            except (TypeError,ValueError):
+                _out={}
+            if isinstance(_out,dict) and _out.get('status')=='needs_input' and status=='completed':
+                status='waiting_input'
             from .execution_view import observed
             metadata=observed(snapshot,{**part,'messageID':info.get('id')})
             runs.event(store,row['id'],str(part.get('id') or part.get('callID')),kind,metadata['name'],status,timing.get('start')//1000 if type(timing.get('start')) is int else None,timing.get('end')//1000 if type(timing.get('end')) is int else None,metadata['capability_id'],metadata['record_count'],metadata=metadata)

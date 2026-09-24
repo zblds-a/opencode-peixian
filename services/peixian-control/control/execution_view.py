@@ -23,7 +23,7 @@ def observed(snapshot, part):
         skill = next((s for s in snapshot.get('skills', []) if s.get('name') == state['input'].get('name')), None)
     capability = skill or plugin
     name = label((capability or {}).get('name'), '使用技能' if tool == 'skill' else '调用已授权插件' if plugin else '执行辅助操作')
-    status = {'error': 'failed', 'completed': 'completed', 'running': 'running', 'pending': 'pending', 'cancelled': 'cancelled'}.get(state.get('status'), 'pending')
+    status = {'error': 'failed', 'completed': 'completed', 'running': 'running', 'pending': 'pending', 'cancelled': 'cancelled', 'waiting_input': 'waiting_input'}.get(state.get('status'), 'pending')
     # Only execution-time approved scalar fields are public. Skill content is never returned.
     display = (plugin or {}).get('display', {})
     inputs = display_values(state.get('input'), display.get('input_fields'), snapshot.get('display_secrets', []))
@@ -32,7 +32,10 @@ def observed(snapshot, part):
         output = json.loads(raw) if isinstance(raw, str) and len(raw) <= 1048576 else raw if isinstance(raw, dict) else {}
     except (ValueError, TypeError):
         output = {}
-    outputs = display_values(output, display.get('output_fields'), snapshot.get('display_secrets', [])) if status == 'completed' else {}
+    if isinstance(output, dict) and output.get('status') == 'needs_input' and status == 'completed':
+        status = 'waiting_input'
+        name = '待你确认查询条件' if not capability else name
+    outputs = display_values(output, display.get('output_fields'), snapshot.get('display_secrets', [])) if status in ('completed', 'waiting_input') else {}
     outputs={k:v for k,v in outputs.items() if not isinstance(v,float) or math.isfinite(v)}
     count = outputs.get('returned_count')
     if type(count) is not int or not 0 <= count <= 1000000:
