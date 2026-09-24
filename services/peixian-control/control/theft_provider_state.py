@@ -117,7 +117,10 @@ class ProviderState(FactsState):
                 call=snap['native_calls'][key]
                 call['status']=status
                 if value.get('error_code'):call['error_code']=value['error_code']
-                if status=='completed':call['public_response']=copy.deepcopy(value['public_response'])
+                if status=='completed':
+                    call['public_response']=copy.deepcopy(value['public_response'])
+                    from .answer_delivery import record
+                    record(snap,row,key)
             self._save(db,rid,snap);self._event(rid,key,status)
             return status
     def check(self,uid,rid,revision,operation,module=None):

@@ -48,6 +48,14 @@ def catalog(store,uid):
         for p in db.execute('SELECT * FROM templates ORDER BY name'):
             official=identify(p['content'])
             items.append({'id':p['id'],'kind':'official_skill','name':p['name'],'description':p['description'],'version':None,'category':'template','recommended':False,'enabled':True,'owned':False,'scope':'official','available':False,'unavailable_reason':'unpublished_method' if official and official['state']!='published' else 'copy_required','dependency_ids':official['dependency_ids'] if official else [],'official_method':official_public(official) if official else None})
+        from .native_tool_gate import enabled as native_enabled
+        from .theft_planner import enabled as planner_enabled
+        message_supported=native_enabled(store,uid) or not planner_enabled(store,uid)
+        for item in items:
+            selectable=bool(message_supported and item['available'] and item['kind'] in ('plugin','personal_skill'))
+            item.update(selectable_in_message=selectable,
+                        selection_mode=('preference' if item['kind']=='plugin' else 'method') if selectable else 'unavailable',
+                        selection_unavailable_reason=None if selectable else item.get('unavailable_reason') or 'planning_selection_unsupported')
         return items
 
 
@@ -66,4 +74,10 @@ def register(app):
     @blocking_endpoint(app)
     def capability_catalog(request:Request,page:int=1,page_size:int=100,user=Depends(normal)):
         offset=page_values(page,page_size);values=catalog(app.state.store,user['uid'])
-        return {'items':values[offset:offset+page_size],'total':len(values),'page':page,'page_size':page_size}
+        from .native_tool_gate import enabled as native_enabled
+        from .theft_planner import enabled as planner_enabled
+        supports=native_enabled(app.state.store,user['uid']) or not planner_enabled(app.state.store,user['uid'])
+        return {'items':values[offset:offset+page_size],'total':len(values),'page':page,'page_size':page_size,
+                'message_support':{'version':'message-support-v1','file_ids':supports,
+                    'max_files':5,'file_usage':'user_reference','requires_ready':True,'allows_truncated':False,
+                    'plugin_ids':'preference' if supports else 'unavailable','skill_ids':'method' if supports else 'unavailable'}}

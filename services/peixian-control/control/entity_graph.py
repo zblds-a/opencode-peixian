@@ -48,7 +48,21 @@ def build(result, sid):
         module = record['module']; relation = None
         ref = {'id': record['record_id'], 'type': 'record', 'label': trusted_results.LABELS.get(module, '来源记录')}
         # Current frozen source contract explicitly defines these endpoints.
-        if module == 'portrait':
+        if result.get('versions',{}).get('reply_projection') == 'source-clues-v1':
+            fields=record.get('fields',{})
+            if claim['protected_fields'].get('fields') != fields:
+                omitted += 1
+                continue
+            subjects={v for k,v in fields.items() if k in ('idCard','target_id_card','targetIdCard') and isinstance(v,str) and v.startswith('person-')}
+            bound=record.get('subject_ref')
+            if bound and claim['protected_fields'].get('subject_ref')==bound and isinstance(bound,str) and bound.startswith('person-'):
+                subjects.add(bound)
+            if len(subjects)!=1:
+                omitted += 1
+                continue
+            relation=('source_record','来源记录归属')
+            endpoints=[('person',next(iter(subjects))),('record',record['record_id'])]
+        elif module == 'portrait':
             relation = {'same_frame': ('same_frame', '同框'), 'same_trip': ('same_trip', '明确同行'),
                         'same_vehicle': ('same_vehicle', '明确同乘')}.get(record.get('kind'))
             endpoints = [('person', record.get('member_ref')), ('person', record.get('co_member_ref'))]
@@ -75,6 +89,9 @@ def build(result, sid):
         a, b = [node(kind, value, ref) for kind, value in endpoints]
         a, b = sorted((a, b))
         props = {'synthetic': True}
+        if result.get('versions',{}).get('reply_projection') == 'source-clues-v1':
+            props = {'data_environment': result.get('data_environment')}
+            if result.get('data_environment')=='synthetic':props['synthetic']=True
         if record.get('occurred_at'):
             props['occurred_at'] = record['occurred_at']
         edges.append({'id': 'e_' + identity(module, record['record_id'], a, b, relation[0]), 'source': a, 'target': b,

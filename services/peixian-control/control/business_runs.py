@@ -91,13 +91,13 @@ def submit(store, user, sid, data, payload, applied, revision, parent=None, draf
             from .native_tool_scope import freeze_context, model_context
             from .data_plugin_policy import installable
             allowed=sorted({tool for p in applied.get('plugins',[]) if installable(p['id']) and p.get('version')=='3.0.0' for tool in p.get('manifest',{}).get('tools',[])})
-            from .agents import theft_skills as theft_skills
-            payload['tools']={**payload.get('tools',{}),'*':False,'question':True,'skill':True,**{tool:True for tool in allowed}}
+            payload['tools']={**payload.get('tools',{}),'*':False,'question':True,**{tool:True for tool in allowed}}
             snapshot['native_tool_context']=freeze_context(store,user['uid'],sid,data)
-            snapshot['native_tool_context']['allowed_skills']=theft_skills.names()
-            payload['system']=payload.get('system','')+model_context(snapshot['native_tool_context'])+theft_skills.catalog_text()
+            payload['system']=payload.get('system','')+model_context(snapshot['native_tool_context'])
             snapshot['native_tool_policy']={'version':native_version,'allowed_tools':allowed,'revision':revision}
             snapshot['native_calls']={}
+            from .answer_delivery import freeze as freeze_delivery
+            freeze_delivery(snapshot, identity)
             from .theft_provider_result import SOURCE_SENTENCE_VERSION
             snapshot['provider_sentence_version']=SOURCE_SENTENCE_VERSION
             snapshot['task_spec']={'schema_version':'native-tools-v1','domain':'theft','agent_id':profile.id,'query_mode':'native','methods':[],'task_id':snapshot['native_tool_context']['task_id']}
@@ -178,12 +178,19 @@ def set_state(store,rid,status,phase,code=None):
         if not row or row['status'] in TERMINAL:return
         if row['cancel_requested'] and status not in ('cancelling','cancelled','completed','failed','reconciling'):return
         if (row['status'],row['phase'],row['error_code'])==(status,phase,code):return
+        revision_snapshot=store.decrypt(db.execute('SELECT request_ciphertext FROM business_runs WHERE id=?',(rid,)).fetchone()[0])
+        revision_snapshot['public_status_revision']=revision_snapshot.get('public_status_revision',0)+1
+        db.execute('UPDATE business_runs SET request_ciphertext=? WHERE id=?',(store.encrypt(revision_snapshot),rid))
         if status=='cancelling':db.execute('UPDATE business_runs SET cancel_requested=1 WHERE id=?',(rid,))
         db.execute("UPDATE business_runs SET status=?,phase=?,error_code=?,updated=?,started=CASE WHEN ? IN ('running','cancelling') THEN coalesce(started,?) ELSE started END,completed=CASE WHEN ? IN ('completed','failed','cancelled') THEN ? ELSE completed END WHERE id=?",(status,phase,code,now(),status,now(),status,now(),rid))
         if status=='completed' and not store.decrypt(db.execute('SELECT request_ciphertext FROM business_runs WHERE id=?',(rid,)).fetchone()[0]).get('provider_plan'):
             from .task_context import completed
             completed(store,db,rid)
         if status in TERMINAL:
+            frozen=store.decrypt(db.execute('SELECT request_ciphertext FROM business_runs WHERE id=?',(rid,)).fetchone()[0])
+            from .answer_delivery import finish as finish_delivery
+            finish_delivery(frozen)
+            db.execute('UPDATE business_runs SET request_ciphertext=? WHERE id=?',(store.encrypt(frozen),rid))
             from .trusted_results import finalize
             finalize(store,db,rid)
 

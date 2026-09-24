@@ -22,6 +22,10 @@ def extend_schemas(result):
     from .task_spec import SPEC_SCHEMA,SPEC_V2_SCHEMA,SPEC_V3_SCHEMA,CANDIDATE_SCHEMA
     result['RunOutcome']=obj({'version':{'const':'run-outcome-v1'},'status':{'enum':['processing','unconfirmed','cancelled','failed','needs_input','historical','partial','data_ready','no_query']},'label':STRING,'message':STRING,'next_steps':array(STRING),'execution_status':STRING,'data_status':STRING,'queried':nullable(BOOL)},('version','status','label','message','next_steps','execution_status','data_status','queried'))
     result['Run']['properties']['outcome']=ref('RunOutcome')
+    result['Run']['properties'].update({'status_revision':integer,'event_sequence':integer,'status_authority':{'const':'run'},'answer_delivery':{'type':'object','additionalProperties':True}})
+    result['AnswerSegment']=obj({'sequence':integer,'content_revision':integer,'part_id':ID,'operation':{'const':'append'},'origin':{'const':'controlled_source'},'visibility':{'const':'user'},'display_kind':{'const':'source_answer'},'text':STRING,'source_ids':array(STRING),'claim_ids':array(ID)},('sequence','content_revision','part_id','operation','origin','visibility','display_kind','text','source_ids','claim_ids'))
+    result['AnswerSegments']=obj({'version':{'const':'controlled-segments-v1'},'run_id':ID,'message_id':ID,'status':STRING,'items':array(ref('AnswerSegment')),'next_sequence':integer,'final':BOOL,'has_more':BOOL,'execution_status':STRING},('version','run_id','status','items','next_sequence','final'))
+
     result['TaskSpecV1']=SPEC_SCHEMA
     result['TaskSpecV2']=SPEC_V2_SCHEMA
     result['TaskSpecV3']=SPEC_V3_SCHEMA
@@ -53,10 +57,12 @@ def extend_schemas(result):
     result['Capability']=obj({'id':ID,'kind':{'enum':['personal_skill','plugin','official_skill']},'name':STRING,'description':STRING,'version':nullable({}),'category':STRING,'recommended':BOOL,'enabled':BOOL,'owned':BOOL,'scope':STRING,'available':BOOL,'unavailable_reason':nullable(STRING),'dependency_ids':array(ID)},('id','kind','name','available'))
     result['OfficialMethod']=obj({'id':STRING,'version':STRING,'state':{'enum':['draft','published','disabled']},'method':STRING,'dependency_ids':array(ID),'sha256':STRING},('id','version','state','method','dependency_ids','sha256'))
     result['Capability']['properties']['official_method']=nullable(ref('OfficialMethod'))
+    result['Capability']['properties'].update({'selectable_in_message':BOOL,'selection_mode':{'enum':['preference','method','unavailable']},'selection_unavailable_reason':nullable(STRING)})
     for name in ('ScenarioEvidence','RunEvidence'):
         result[name]['properties'].update(processing_version=STRING,execution_methods=array(STRING),plugin_versions={'type':'object','additionalProperties':STRING})
     result['Invocation']=obj({'id':ID,'run_id':ID,'session_id':ID,'username':STRING,'display_name':nullable(STRING),'department_name':nullable(STRING),'model_id':ID,'model_name':nullable(STRING),'status':STRING,'query_summary':STRING,'created_at':dt,'duration_ms':nullable(integer),'record_count':integer,'skill_ids':array(ID),'plugin_ids':array(ID),'actual_plugin_ids':array(ID),'steps':array(ref('RunEvent'))},('id','run_id','status','query_summary','created_at'))
     for name in ('Run','RunEvent','Capability','Invocation'):result[name+'Page']=paginated(name)
+    result['CapabilityPage']['properties']['message_support']={'type':'object','additionalProperties':True}
     result['MessageBody']['properties'].update({'client_request_id':{'type':'string','format':'uuid','description':'新客户端必须发送。旧客户端省略时服务端生成，不具备客户端重试去重保证。'},'plugin_ids':array(ID,maxItems=5),'agent_id':{'type':'string','enum':['gambling-assistant','theft-assistant'],'description':'新客户端显式选择；省略兼容涉赌。盗窃需双白名单；同会话更换助手返回409，不增加授权。'},'mode':{'enum':['standard']}})
     result['RerunBody']=obj(dict(result['MessageBody']['properties']),('client_request_id',))
     for name in ('Skill','SkillCreateBody','SkillUpdateBody'):result[name]['properties']['dependency_ids']=array(ID,maxItems=20)
@@ -103,6 +109,7 @@ def contracts():
     add('get','/sessions/{sid}/runs/{rid}/task',None,ref('RunTask'),'读取本轮冻结任务',desc='仅本人可读；TaskSpec 为服务端生成，不接受客户端写入。schema v7 的历史解释使用冻结可信资料；旧 Run 按原契约返回。')
     for suffix,schema,title in [('result','TrustedResultResponse','读取不可变可信结果'),('claims','RunClaims','读取已核对声明'),('data-usage','RunDataUsage','读取资料实际使用状态')]:
         add('get','/sessions/{sid}/runs/{rid}/'+suffix,None,ref(schema),title,desc='本人资源；schema v9及账号灰度只影响新Run。终态结果不可变；旧Run返回legacy；活动Run仅返回pending状态，不重新取数。')
+    add('get','/sessions/{sid}/runs/{rid}/answer-segments',None,ref('AnswerSegments'),'读取可重放的受控资料片段',desc='仅本人；after为已收到的序号，limit为1至100；只读，不产生模型或资料调用。final表示片段流封闭，不表示执行成功。')
     add('get','/sessions/{sid}/runs/{rid}/events',None,ref('RunEventPage'),'增量查询持久步骤')
     add('get','/sessions/{sid}/runs/{rid}/evidence',None,ref('RunEvidence'),'查询固定执行证据',desc='按本人账号/会话/Run鉴权读取已保存证据；旧插件卸载不删除历史证据，读取不重新取数。')
     add('post','/sessions/{sid}/runs/{rid}/abort',None,ref('Run'),'请求停止执行')

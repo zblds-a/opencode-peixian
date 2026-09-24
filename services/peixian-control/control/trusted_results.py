@@ -172,6 +172,10 @@ def project(store,row,snapshot):
     if snapshot.get('native_tool_policy'):
         from .native_tool_result import project as native_project
         result = native_project(row,snapshot)
+        if snapshot.get('answer_delivery'):
+            from .reply_presentation import build as build_presentation
+            result['presentation'] = build_presentation(result)
+            result['versions']['reply_projection'] = 'source-clues-v1'
         from .table_answer import build as build_tables
         view = build_tables(result,snapshot)
         if view is not None:

@@ -190,6 +190,6 @@ def messages(store, uid, sid, values):
                 body = (view.get('markdown') or table_markdown(view)) if view and view.get('version') in ('person-tables-v1','person-tables-v2','person-tables-v3') else ('当前表格版本暂不受支持，请查看已有来源。' if view else ('请说明希望核对的人员或资料范围。' if selection(raw) else raw))
             else:
                 body = markdown(answer)
-            message["parts"].append({"id": "part_answer_" + row["id"], "type": "text", "origin": "controlled_answer", "run_id": row["id"], "text": body})
+            message["parts"].append({"id": "part_answer_" + row["id"], "type": "text", "origin": "controlled_answer", "visibility": "user", "display_kind": "final_answer", "content_revision": 1, "final": True, "run_id": row["id"], "text": body})
 
     return values

@@ -10,7 +10,15 @@ from .store import now
 def public(store,row):
     from .run_outcome import project
     from .theft_planner import public_question
-    return {**runs.public(row),'outcome':project(store,row),'clarification':public_question(store,row)}
+    sequence=store.one('SELECT coalesce(max(sequence),0) AS n FROM run_events WHERE run_id=?',(row['id'],))['n']
+    snapshot=store.decrypt(row['request_ciphertext'])
+    saved=store.one('SELECT 1 AS found FROM run_results WHERE run_id=?',(row['id'],)) is not None
+    delivery=snapshot.get('answer_delivery') or {}
+    return {**runs.public(row),'outcome':project(store,row),'clarification':public_question(store,row),
+            'event_sequence':sequence,'status_authority':'run','status_revision':snapshot.get('public_status_revision',0),
+            'answer_delivery':{'version':delivery.get('version'),'sequence':len(delivery.get('segments',[])),
+                'final':bool(delivery.get('final')), 'result_saved':saved,
+                'phase':'answer_ready' if saved else 'running' if row['status'] in runs.ACTIVE else 'unavailable'}}
 
 
 def evidence(store,row):
@@ -49,6 +57,8 @@ def attach_results(store,uid,values,sid=None):
     if sid:
         from .controlled_answer import messages
         values=messages(store,uid,sid,values)
+        from .answer_delivery import attach as attach_delivery
+        values=attach_delivery(store,uid,sid,values)
     return values
 
 
@@ -60,6 +70,11 @@ def cancel(store,uid,sid,rid):
 
 def register(app):
     from .app import PREFIX,normal,body_fields
+    @app.get(PREFIX+'/sessions/{sid}/runs/{rid}/answer-segments')
+    @blocking_endpoint(app)
+    def answer_segments(sid:str,rid:str,request:Request,after:int=0,limit:int=100,user=Depends(normal)):
+        from .answer_delivery import read
+        return read(app.state.store,runs.owned(app.state.store,user['uid'],sid,rid),after,limit)
     @app.get(PREFIX+'/sessions/{sid}/runs')
     async def run_list(sid:str,request:Request,page:int=1,page_size:int=20,user=Depends(normal)):
         from .app import session_owned

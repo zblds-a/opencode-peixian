@@ -64,7 +64,8 @@ def event_view(row, snapshot=None):
                       'output_summary':f"返回 {row['record_count']} 条记录" if row['status']=='completed' else '',
                       'result':{'returned_count':row['record_count']} if row['status']=='completed' else {},'result_truncated':False}
     value.update({k: v for k, v in metadata.items() if k not in ('status', 'record_count')})
-    value.update(run_id=row['run_id'], step_id=row['id'], call_id=metadata.get('call_id'),
+    value.update(origin='execution',visibility='user',display_kind='execution_step',
+                 run_id=row['run_id'], step_id=row['id'], call_id=metadata.get('call_id'),
                  capability_name=metadata.get('capability_name'), capability_version=metadata.get('capability_version'),
                  result=metadata.get('result', {}), result_truncated=metadata.get('result_truncated', False))
     return value

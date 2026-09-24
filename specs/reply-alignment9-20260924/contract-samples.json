@@ -1,0 +1,330 @@
+{
+  "notice": "隔离合成契约测试生成，非真实供应方接口验收",
+  "source": "test_reply_alignment9.py",
+  "result": {
+    "schema": "peixian.analysis-result",
+    "version": "2.0",
+    "run_id": "55d8b8ba1e71478783da63d82ffe8b94",
+    "agent": {
+      "schema_version": "agent-profile-v1",
+      "id": "theft-assistant",
+      "version": "3.2.0",
+      "domain": "theft",
+      "default_scenario_id": "DEMO-CASE-THEFT",
+      "registry_version": "agent-registry-v1",
+      "profile_sha256": "2c37d57933efab8d33c331cb86bb4d1d795e42513ba4d5d414a6818f9d0cbde2",
+      "prompt_sha256": "4c67b765f6b6b34607e35ebece31f06fca97024cce9ee286e9a8115b579ee15c"
+    },
+    "task": {
+      "schema_version": "native-tools-v1",
+      "domain": "theft",
+      "agent_id": "theft-assistant",
+      "query_mode": "native",
+      "methods": [],
+      "task_id": "eea5206a967f42f4987b231c009b2c47"
+    },
+    "data_environment": "acceptance_real",
+    "data_usage": {
+      "status": "confirmed",
+      "queried": true,
+      "attempted": true,
+      "may_have_sent": true,
+      "new_call_count": 1,
+      "reuse_count": 0,
+      "source_data_run_id": null,
+      "modules": [
+        {
+          "module": "tracks",
+          "call_id": "call-one",
+          "status": "completed",
+          "reserved": true,
+          "response_confirmed": true
+        }
+      ],
+      "basis": "逐次Gateway回执与代码核对；未确认调用不视为已取数"
+    },
+    "claims": [
+      {
+        "claim_id": "clm_7a9921ca257602521f2dc628",
+        "schema": "peixian.claim",
+        "version": "1.0",
+        "type": "fact",
+        "template_id": "provider.tracks.record.v1",
+        "agent_id": "theft-assistant",
+        "subject_refs": [],
+        "statement": "观测时间 2026-09-20 23:10:00；设备 test-device；来源地点 未提供；轨迹类型 未明确。",
+        "protected_fields": {
+          "record_id": "55d8b8ba1e71478783da63d82ffe8b94:call-one:response-364feb651cc54dab9f3a944b83446037:1",
+          "fields": {
+            "deviceId": "test-device",
+            "captureTime": "2026-09-20 23:10:00",
+            "lon": 116.1,
+            "lat": 34.1
+          },
+          "snapshot_id": "response-364feb651cc54dab9f3a944b83446037",
+          "subject_ref": "person-c5c16db7980c2b6d067ba0447fbf31ae"
+        },
+        "source_ids": [
+          "55d8b8ba1e71478783da63d82ffe8b94:call-one:response-364feb651cc54dab9f3a944b83446037:1"
+        ],
+        "rule": null,
+        "verification_status": "approved",
+        "source_run_id": "55d8b8ba1e71478783da63d82ffe8b94"
+      },
+      {
+        "claim_id": "clm_e47f109fde534bc277ecffec",
+        "schema": "peixian.claim",
+        "version": "1.0",
+        "type": "computed",
+        "template_id": "provider.page.v1",
+        "agent_id": "theft-assistant",
+        "subject_refs": [],
+        "statement": "人员轨迹：本次取得 1 条来源记录。",
+        "protected_fields": {
+          "returned_count": 1,
+          "total": null,
+          "coverage": "unknown",
+          "call_id": "call-one",
+          "snapshot_id": "response-364feb651cc54dab9f3a944b83446037"
+        },
+        "source_ids": [
+          "55d8b8ba1e71478783da63d82ffe8b94:call-one:response-364feb651cc54dab9f3a944b83446037:1"
+        ],
+        "rule": null,
+        "verification_status": "approved",
+        "source_run_id": "55d8b8ba1e71478783da63d82ffe8b94"
+      }
+    ],
+    "records": [
+      {
+        "record_id": "55d8b8ba1e71478783da63d82ffe8b94:call-one:response-364feb651cc54dab9f3a944b83446037:1",
+        "module": "tracks",
+        "source_run_id": "55d8b8ba1e71478783da63d82ffe8b94",
+        "call_id": "call-one",
+        "snapshot_id": "response-364feb651cc54dab9f3a944b83446037",
+        "fields": {
+          "deviceId": "test-device",
+          "captureTime": "2026-09-20 23:10:00",
+          "lon": 116.1,
+          "lat": 34.1
+        },
+        "subject_ref": "person-c5c16db7980c2b6d067ba0447fbf31ae"
+      }
+    ],
+    "missing": [
+      "来源轨迹总量未知；坐标未经兼容确认不得用于跨接口传递，不证明到达现场。"
+    ],
+    "narrative": {
+      "status": "unverified",
+      "text": null,
+      "claim_refs": [],
+      "conflicts": [],
+      "review_version": "native-separate-v1",
+      "coverage": "模型自由说明不自动成为已核验事实。"
+    },
+    "versions": {
+      "native_gate": "native-provider-gate-v1",
+      "task_id": "eea5206a967f42f4987b231c009b2c47",
+      "scope_version": 1,
+      "plugin_versions": {
+        "peixian-theft-tracks": "3.0.0"
+      },
+      "reply_projection": "source-clues-v1"
+    },
+    "generated_at": "2026-09-24T06:39:46Z",
+    "answer": {
+      "version": "controlled-zh-v1",
+      "status": "ready",
+      "summary": "本轮已取得 1 项已核对资料，可展开来源逐项查看。",
+      "items": [
+        {
+          "text": "观测时间 2026-09-20 23:10:00；设备 test-device；来源地点 未提供；轨迹类型 未明确。",
+          "claim_id": "clm_7a9921ca257602521f2dc628",
+          "source_run_id": "55d8b8ba1e71478783da63d82ffe8b94",
+          "source_ids": [
+            "55d8b8ba1e71478783da63d82ffe8b94:call-one:response-364feb651cc54dab9f3a944b83446037:1"
+          ]
+        },
+        {
+          "text": "人员轨迹：本次取得 1 条来源记录。",
+          "claim_id": "clm_e47f109fde534bc277ecffec",
+          "source_run_id": "55d8b8ba1e71478783da63d82ffe8b94",
+          "source_ids": [
+            "55d8b8ba1e71478783da63d82ffe8b94:call-one:response-364feb651cc54dab9f3a944b83446037:1"
+          ]
+        }
+      ],
+      "missing": [
+        "来源轨迹总量未知；坐标未经兼容确认不得用于跨接口传递，不证明到达现场。"
+      ],
+      "next_steps": [
+        "可查看本轮来源记录并指定需要继续核对的一项。"
+      ]
+    },
+    "presentation": {
+      "version": "source-clues-v1",
+      "status": "partial",
+      "revision": "8eef7d9967f9893769ab0d61c29adbdf43891b596c5e79bd028a435e1d64f64b",
+      "clues": [
+        {
+          "id": "clue_731e5ee1098deaf14b95fcda",
+          "type": "observation",
+          "title": "人员轨迹来源记录",
+          "headline": "观测时间 2026-09-20 23:10:00；设备 test-device；来源地点 未提供；轨迹类型 未明确。",
+          "summary": "观测时间 2026-09-20 23:10:00；设备 test-device；来源地点 未提供；轨迹类型 未明确。",
+          "discoveries": [
+            "观测时间 2026-09-20 23:10:00；设备 test-device；来源地点 未提供；轨迹类型 未明确。"
+          ],
+          "verification": "source_fields",
+          "evidence": [
+            {
+              "id": "source_731e5ee1098deaf14b95fcda",
+              "label": "来源记录",
+              "content": "观测时间 2026-09-20 23:10:00；设备 test-device；来源地点 未提供；轨迹类型 未明确。",
+              "occurred_at": "2026-09-20 23:10:00",
+              "time_semantics": "captureTime",
+              "source_run_id": "55d8b8ba1e71478783da63d82ffe8b94",
+              "record_id": "55d8b8ba1e71478783da63d82ffe8b94:call-one:response-364feb651cc54dab9f3a944b83446037:1",
+              "claim_id": "clm_7a9921ca257602521f2dc628",
+              "snapshot_id": "response-364feb651cc54dab9f3a944b83446037"
+            }
+          ],
+          "source_run_id": "55d8b8ba1e71478783da63d82ffe8b94",
+          "source_ids": [
+            "55d8b8ba1e71478783da63d82ffe8b94:call-one:response-364feb651cc54dab9f3a944b83446037:1"
+          ],
+          "claim_ids": [
+            "clm_7a9921ca257602521f2dc628"
+          ],
+          "missing": [
+            "来源轨迹总量未知；坐标未经兼容确认不得用于跨接口传递，不证明到达现场。"
+          ]
+        }
+      ],
+      "missing": [
+        "来源轨迹总量未知；坐标未经兼容确认不得用于跨接口传递，不证明到达现场。"
+      ]
+    }
+  },
+  "segments_before_terminal": {
+    "version": "controlled-segments-v1",
+    "run_id": "55d8b8ba1e71478783da63d82ffe8b94",
+    "message_id": "msg_delivery_55d8b8ba1e71478783da63d82ffe8b94",
+    "status": "streaming",
+    "items": [
+      {
+        "sequence": 1,
+        "content_revision": 1,
+        "part_id": "part_delivery_55d8b8ba1e71478783da63d82ffe8b94_1",
+        "operation": "append",
+        "origin": "controlled_source",
+        "visibility": "user",
+        "display_kind": "source_answer",
+        "text": "### 人员轨迹\n\n观测时间 2026-09-20 23:10:00；设备 test-device；来源地点 未提供；轨迹类型 未明确。\n\n当前展示 1 条／本次取得 1 条。",
+        "source_ids": [
+          "55d8b8ba1e71478783da63d82ffe8b94:call-one:response-364feb651cc54dab9f3a944b83446037:1"
+        ],
+        "claim_ids": [
+          "clm_7a9921ca257602521f2dc628"
+        ]
+      }
+    ],
+    "next_sequence": 1,
+    "final": false,
+    "has_more": false,
+    "execution_status": "queued"
+  },
+  "segments_final": {
+    "version": "controlled-segments-v1",
+    "run_id": "55d8b8ba1e71478783da63d82ffe8b94",
+    "message_id": "msg_delivery_55d8b8ba1e71478783da63d82ffe8b94",
+    "status": "ready",
+    "items": [
+      {
+        "sequence": 1,
+        "content_revision": 1,
+        "part_id": "part_delivery_55d8b8ba1e71478783da63d82ffe8b94_1",
+        "operation": "append",
+        "origin": "controlled_source",
+        "visibility": "user",
+        "display_kind": "source_answer",
+        "text": "### 人员轨迹\n\n观测时间 2026-09-20 23:10:00；设备 test-device；来源地点 未提供；轨迹类型 未明确。\n\n当前展示 1 条／本次取得 1 条。",
+        "source_ids": [
+          "55d8b8ba1e71478783da63d82ffe8b94:call-one:response-364feb651cc54dab9f3a944b83446037:1"
+        ],
+        "claim_ids": [
+          "clm_7a9921ca257602521f2dc628"
+        ]
+      }
+    ],
+    "next_sequence": 1,
+    "final": true,
+    "has_more": false,
+    "execution_status": "completed"
+  },
+  "graph": {
+    "schema": "peixian.entity-graph",
+    "version": "1.0",
+    "graph_id": "graph_7f1732b9b55b54f4a655f6d5",
+    "session_id": "ses_multi",
+    "run_id": "55d8b8ba1e71478783da63d82ffe8b94",
+    "status": "ready",
+    "nodes": [
+      {
+        "id": "n_5cbc50966ef94de46bd1dd23",
+        "type": "person",
+        "label": "人员1",
+        "properties": {
+          "synthetic": true
+        },
+        "evidence_refs": [
+          {
+            "id": "55d8b8ba1e71478783da63d82ffe8b94:call-one:response-364feb651cc54dab9f3a944b83446037:1",
+            "type": "record",
+            "label": "来源记录"
+          }
+        ]
+      },
+      {
+        "id": "n_bba12eb35ba7b9fafbf48fae",
+        "type": "record",
+        "label": "来源记录1",
+        "properties": {
+          "synthetic": true
+        },
+        "evidence_refs": [
+          {
+            "id": "55d8b8ba1e71478783da63d82ffe8b94:call-one:response-364feb651cc54dab9f3a944b83446037:1",
+            "type": "record",
+            "label": "来源记录"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "id": "e_bc599c7375a2d6578933403e",
+        "source": "n_5cbc50966ef94de46bd1dd23",
+        "target": "n_bba12eb35ba7b9fafbf48fae",
+        "type": "source_record",
+        "label": "来源记录归属",
+        "directed": false,
+        "properties": {
+          "data_environment": "acceptance_real"
+        },
+        "evidence_refs": [
+          {
+            "id": "55d8b8ba1e71478783da63d82ffe8b94:call-one:response-364feb651cc54dab9f3a944b83446037:1",
+            "type": "record",
+            "label": "来源记录"
+          }
+        ]
+      }
+    ],
+    "analysis": [],
+    "generated_at": "2026-09-24T06:39:46Z",
+    "omitted_records": 0,
+    "projection_version": "entity-graph-projector-v1",
+    "data_revision": "300a695be18deee0b8f1b84d1118992329196b108f228735e96d528a6165ba9c"
+  }
+}

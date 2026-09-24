@@ -27,6 +27,10 @@ def project(row,snapshot):
         if public.get('kind')!=kind or public.get('version')!=adapter.VERSION or public.get('response_snapshot_id') is None:
             missing.append(adapter.CATALOG[kind][0]+'的资料版本无法核对。')
             continue
+        subject = plan.get('query',{}).get('person_ref') if snapshot.get('answer_delivery') and kind in adapter.PERSON else None
+        if subject and public.get('query',{}).get('person_ref') != subject:
+            missing.append('资料对象与冻结查询对象不一致。')
+            continue
         source_ids=[]
         for entry in public.get('records',[]):
             if not isinstance(entry,dict) or not isinstance(entry.get('source_ref'),str) or not isinstance(entry.get('fields'),dict):
@@ -39,10 +43,10 @@ def project(row,snapshot):
             seen.add(rid);source_ids.append(rid)
             fields=copy.deepcopy(entry['fields'])
             records.append({'record_id':rid,'module':kind,'source_run_id':row['id'],
-                'call_id':call_id,'snapshot_id':public['response_snapshot_id'],'fields':fields})
+                'call_id':call_id,'snapshot_id':public['response_snapshot_id'],'fields':fields, **({'subject_ref':subject} if subject else {})})
             claims.append(claim(row,identity,'fact','provider.'+kind+('.record.v2' if kind=='tracks' and sentence_version==SOURCE_SENTENCE_VERSION else '.record.v1'),
                 sentence(kind,fields,sentence_version),{'record_id':rid,'fields':fields,
-                'snapshot_id':public['response_snapshot_id']},[rid]))
+                'snapshot_id':public['response_snapshot_id'], **({'subject_ref':subject} if subject else {})},[rid]))
         count=public.get('returned_count')
         if type(count) is int and count>=0:
             description=adapter.CATALOG[kind][0]+'：本次取得 '+str(count)+' 条来源记录。'

@@ -29,11 +29,17 @@ def test_incomplete_file_is_rejected_before_model_submission(context, monkeypatc
         applied = runtime_spec(store, account["id"], desired, db=database)
         database.execute("UPDATE runtimes SET status='ready',revision=desired,gate_policy='open',applied_spec_ciphertext=? WHERE uid=?", (store.encrypt(applied), account["id"]))
     prompt_requests = []
+    monkeypatch.setenv('PX_THEFT_NATIVE_UIDS',account['id'])
+    monkeypatch.setenv('PX_MULTI_AGENT_V1_UIDS',account['id'])
 
     async def fake_upstream(request, user, method, path, **kwargs):
         assert user["uid"] == account["id"]
         if method == "GET" and path == "/session/synthetic-session":
             return httpx.Response(200, json={"id": "synthetic-session", "directory": "/workspace"})
+        if method == 'GET' and path == '/session/synthetic-session/message':
+            return httpx.Response(200,json=[])
+        if method == 'GET' and path.startswith('/internal/runtime/runs/'):
+            return httpx.Response(200,json={'protocol':'durable_run_v1'})
         if method == "GET" and path == "/files/synthetic-file/text":
             return httpx.Response(200, json={
                 "status": status, "truncated": truncated, "name": "synthetic.txt",
@@ -49,7 +55,7 @@ def test_incomplete_file_is_rejected_before_model_submission(context, monkeypatc
     client = login_user(app, "person-a")
     try:
         response = client.post(P + "/sessions/synthetic-session/messages", json={
-            "text": "Describe the supplied fixture", "model_id": mid, "file_ids": ["synthetic-file"],
+            "text": "Describe the supplied fixture", "model_id": mid, "agent_id":"theft-assistant", "file_ids": ["synthetic-file"],
         })
         assert response.status_code == expected
         if expected == 413:
@@ -57,8 +63,12 @@ def test_incomplete_file_is_rejected_before_model_submission(context, monkeypatc
             assert prompt_requests == []
         else:
             assert response.json()["accepted"] is True
-            assert len(prompt_requests) == 1
-            submitted = prompt_requests[0]["parts"]
+            assert prompt_requests == []
+            row=store.one('SELECT request_ciphertext FROM business_runs WHERE id=?',(response.json()['run_id'],))
+            snapshot=store.decrypt(row['request_ciphertext'])
+            assert snapshot['attachments'][0]['parse_status']=='ready'
+            assert snapshot['attachments'][0]['verified_source'] is False
+            submitted = snapshot['payload']['parts']
             assert "Synthetic extracted text" in submitted[0]["text"]
             assert "[来源 " in submitted[0]["text"]
     finally:
