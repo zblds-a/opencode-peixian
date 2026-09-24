@@ -126,6 +126,25 @@ def prepare(store,uid,sid,message_id,call_id,tool,args,revision):
                 work_context['user_conditions']=dict(work_context.get('user_conditions') or {})
                 work_context['user_conditions']['person_identity']=checked_args['person_identity']
             from .native_tool_scope import resolve_arguments
+            # Person-to-case: bind next stay-center source for location tools when none selected
+            if kind in ('incidents', 'captures') and not (work_context.get('source_refs') or []):
+                from . import person_case_flow as pcf
+                ref, _item = pcf.next_center_source(work_context, kind)
+                if ref:
+                    work_context = copy.deepcopy(work_context)
+                    work_context['source_refs'] = [ref]
+                    confirmed = dict(work_context.get('confirmed') or {})
+                    user_conditions = dict(work_context.get('user_conditions') or {})
+                    radius = (_item or {}).get('radius_m') or confirmed.get('radius_m') or pcf.DEFAULT_RADIUS_M
+                    if 'radius_m' not in confirmed:
+                        confirmed['radius_m'] = radius
+                    user_conditions['radius_m'] = confirmed.get('radius_m') or radius
+                    # Reuse already confirmed person time window for location captures in the plan
+                    for key in ('start', 'end'):
+                        if key in confirmed and key not in user_conditions:
+                            user_conditions[key] = confirmed[key]
+                    work_context['confirmed'] = confirmed
+                    work_context['user_conditions'] = user_conditions
             checked_args=resolve_arguments(kind,checked_args,work_context)
             query=arguments(kind,checked_args,work_context)
             identities={}

@@ -85,14 +85,11 @@ def select_records(result, snapshot, subject, spatial=False, subjects=None):
 
 
 INSTRUCTION = """
-回答展示协议 person-tables-v3：保持模型原生工具选择，不机械查询全部工具。每次发出一个资料工具调用，等待其结果后再选择下一项，避免并行请求。
-问候、介绍、能力咨询或缺项追问自然回答；缺条件时用 question 工具自己组织题干和选项，不查询档案。
-研判方向、案类、是否评分、核验人数、下一步建议与可回复话术、候选案件核验行均由你自行判断；条件齐全即可直接查询。
-按需用 skill 读取盗窃研判技能；技能不能取数。由案到人可先抓拍再补查；由人到案先轨迹再周边警情。不得下犯罪认定。
-资料回答完成时仅输出一个 JSON 对象：
-{"format":"person-tables-v3","mode":"data","direction":"case_to_person|person_to_case","case_type":"ebike|cable|incar|burglary","source_refs":["实际来源"],"scoring":{"requested":true},"suggestions":[{"action":"query|clarify_scope|inspect_sources|authorize_candidates|inspect_cases","kind":"tracks","text":"建议文案","reply":"可直接发送的回复","reason":"原因","fields":["start","end"]}],"next_question":{"header":"下一步分析","question":"请选择下一步","options":[{"label":"可发送文案","description":"说明","send":true}],"multiple":true},"case_checks":{"items":[{"cjbh":"编号","cjsj":"时间","item_or_id":"物品或编号","time_link":"时间联系","behavior_link":"行为联系","compare":"待核验|仅案类相同|存在待核联系","relation":"关系","status":"待核验","follow_up":"补证","source_ids":["实际来源"]}]}}
-分数与排序只由平台计算。source_refs 不可编造。建议最多五项。普通对话不用上述 JSON。
+回答展示协议：由人到案人员研判且 person_case_plan 已完成（或仅剩失败缺口）时，用简体中文直接输出四段式（人员基本信息 / 研判摘要 / 分析依据 / 下一步研判），完成 7.3 融合；不要只输出 JSON。平台会附录评分、候选案与八接口覆盖。
+由案到人等场景资料回答完成时可输出 person-tables-v3 JSON。
+有 person_case_plan 且未完成时，按计划每次一个工具调用，打满前不要写终稿。分数与排序只由平台计算。普通对话不用 JSON。
 """
+
 
 
 def selection(text):
@@ -427,6 +424,42 @@ def build(result, snapshot):
             missing.append(scoring['disclaimer'])
 
     case_view = model_case_checks(chosen, {r['record_id'] for r in records})
+    if direction == 'person_to_case':
+        tracks = [r for r in records if r.get('module') == 'tracks']
+        incidents = [r for r in records if r.get('module') == 'incidents']
+        if tracks and incidents:
+            platform_cases = theft_scoring.case_checks(tracks, incidents)
+            if not case_view or not case_view.get('items'):
+                case_view = platform_cases
+            elif platform_cases.get('items'):
+                case_view = platform_cases
+        # Ensure six-dim scoring for the focused person
+        if want_score and scoring is None:
+            person_ref = policy.get('person_ref')
+            person_records = [r for r in records if person_ref and (
+                theft_scoring.subject_of(r, snapshot) == person_ref
+                or ((snapshot.get('native_calls') or {}).get(r.get('call_id'), {}).get('frozen', {}).get('query', {}).get('person_ref') == person_ref)
+            )]
+            if not person_records:
+                person_records = [r for r in records if r.get('module') in (
+                    'tracks', 'night', 'community', 'warning_detail', 'warnings', 'warning_logs', 'profile', 'incidents')]
+            scoring = theft_scoring.compute(person_records, include_d5=True)
+            if scoring.get('status') == 'ready':
+                conclusions = [{
+                    'text': f"关联可疑度（辅助）有效得分率 {scoring['rate']}%（{scoring['earned']} / {scoring['available_max']}），{scoring['band']}。不构成犯罪认定。",
+                    'source_ids': sorted({sid for d in scoring['dimensions'] for sid in d.get('source_ids', [])}),
+                    'source_run_id': result['run_id'],
+                    'claim_id': 'platform-scoring',
+                    'limitation': scoring['disclaimer'],
+                }] + conclusions
+            elif scoring.get('status') == 'insufficient':
+                missing.append(scoring['disclaimer'])
+
+    coverage = None
+    plan = context.get('person_case_plan')
+    if isinstance(plan, dict) and plan.get('coverage'):
+        from . import person_case_flow as pcf
+        coverage = {'version': plan.get('version'), 'rows': pcf.coverage_appendix(plan), 'complete': plan.get('complete')}
 
     # Model suggestions only; platform no longer injects flow steps.
     suggestions = model_suggestions(chosen, aliases=aliases)
@@ -439,6 +472,7 @@ def build(result, snapshot):
         'selection_status': 'accepted' if chosen else 'fallback',
         'source_runs': sorted({r['source_run_id'] for r in records}),
         'scoring': scoring, 'ranking': ranking, 'case_checks': case_view,
+        'coverage': coverage,
         'direction': direction,
         'case_type': chosen.get('case_type') if isinstance(chosen.get('case_type'), str) else None}
 
@@ -521,22 +555,59 @@ def markdown(view):
     if case_view and case_view.get('items'):
         sections += ['### 候选案件逐案核验']
         rows = []
+        graded = any(isinstance(item, dict) and item.get('grade') for item in case_view['items'])
         for item in case_view['items']:
-            rows.append((
-                item.get('cjbh'),
-                item.get('cjsj'),
-                '—' if item.get('distance_m') is None else f"{item['distance_m']} 米",
-                '—' if item.get('time_delta_hours') is None else f"{item['time_delta_hours']} 小时",
-                item.get('item_or_id') or '—',
-                item.get('time_link') or '—',
-                item.get('behavior_link') or '—',
-                item.get('compare') or item.get('status') or '待核验',
-                item.get('relation'),
-                item.get('status'),
-                item.get('follow_up'),
-            ))
-        sections += [table(['警情编号', '处警时间', '最近直线距离', '时间差', '物品／编号', '时间联系', '行为联系', '比较结论', '关系', '核验状态', '补证任务'], rows)]
+            if graded:
+                rows.append((
+                    item.get('cjbh'),
+                    item.get('cjsj'),
+                    '—' if item.get('distance_m') is None else f"{item['distance_m']} 米",
+                    '—' if item.get('time_delta_hours') is None else f"{item['time_delta_hours']} 小时",
+                    item.get('grade') or '',
+                    item.get('relation'),
+                    '；'.join(item.get('reasons') or []) or '—',
+                    '；'.join(item.get('next_checks') or []) or (item.get('follow_up') or ''),
+                    item.get('status'),
+                ))
+            else:
+                rows.append((
+                    item.get('cjbh'),
+                    item.get('cjsj'),
+                    '—' if item.get('distance_m') is None else f"{item['distance_m']} 米",
+                    '—' if item.get('time_delta_hours') is None else f"{item['time_delta_hours']} 小时",
+                    item.get('item_or_id') or '',
+                    item.get('time_link') or '',
+                    item.get('behavior_link') or '',
+                    item.get('compare') or '',
+                    item.get('relation'),
+                    item.get('status'),
+                    item.get('follow_up'),
+                ))
+        if graded:
+            sections += [table(
+                ['警情编号', '处警时间', '最近直线距离', '时间差', '时空等级', '关系', '主要依据', '建议核验', '核验状态'],
+                rows,
+            )]
+        else:
+            sections += [table(
+                ['警情编号', '处警时间', '最近直线距离', '时间差', '物品／编号', '时间联系', '行为联系', '比较结论', '关系', '核验状态', '补证任务'],
+                rows,
+            )]
         sections += [case_view.get('disclaimer') or '']
+
+
+    coverage = view.get('coverage')
+    if coverage and coverage.get('rows'):
+        sections += ['### 八接口覆盖清单']
+        sections += [table(['资料接口', '状态'], coverage['rows'])]
+        if coverage.get('complete'):
+            sections += ['本轮计划内接口已覆盖完毕（失败项见上表）。']
+
+    # Enrich platform case rows with grade/reasons when present
+    case_view = view.get('case_checks')
+    if case_view and case_view.get('items') and any(item.get('grade') for item in case_view['items']):
+        # Replace last case table section content by rebuilding from grade-aware rows if simple format was used
+        pass
 
     output = '\n\n'.join(sections)
     sources = []

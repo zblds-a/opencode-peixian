@@ -529,7 +529,7 @@ def rank(records_by_person, include_d5=True):
 
 
 def case_checks(track_records, incident_records):
-    """Person-to-case: pairwise track vs incident verification rows."""
+    """Person-to-case: pairwise track vs incident rows, ranked by space-time coupling."""
     rows = []
     for inc in incident_records or []:
         fields = inc.get('fields') or {}
@@ -537,33 +537,86 @@ def case_checks(track_records, incident_records):
         cjsj = fields.get('cjsj') or '未提供处警时间'
         best_dist = None
         best_delta = None
+        best_track = None
         sources = [inc['record_id']]
         for tr in track_records or []:
             tf = tr.get('fields') or {}
             dist = _haversine_m(tf.get('lon'), tf.get('lat'), fields.get('gisX'), fields.get('gisY'))
-            if dist is not None and (best_dist is None or dist < best_dist):
-                best_dist = dist
-                sources.append(tr['record_id'])
             t_time = _parse_time(tf.get('captureTime'))
-            i_time = _parse_time(fields.get('cjsj'))
-            if t_time and i_time:
-                delta = abs((t_time - i_time).total_seconds())
-                if best_delta is None or delta < best_delta:
-                    best_delta = delta
-                    sources.append(tr['record_id'])
+            i_time = _parse_time(fields.get('cjsj')) or _parse_time(fields.get('sfsjsx'))
+            delta = abs((t_time - i_time).total_seconds()) if t_time and i_time else None
+            # Prefer joint space-time: distance within 1000m and time within 24h
+            better = False
+            if dist is not None and delta is not None:
+                if best_dist is None or best_delta is None:
+                    better = True
+                else:
+                    # lower combined rank score is better
+                    cur = (dist / 100.0) + (delta / 3600.0)
+                    prev = (best_dist / 100.0) + (best_delta / 3600.0)
+                    better = cur < prev
+            elif dist is not None and (best_dist is None or (best_delta is None and dist < best_dist)):
+                better = best_delta is None
+            if better:
+                best_dist = dist if dist is not None else best_dist
+                best_delta = delta if delta is not None else best_delta
+                best_track = tr
+                sources = [inc['record_id'], tr['record_id']]
+            elif dist is not None and (best_dist is None or dist < best_dist) and best_delta is None:
+                best_dist = dist
+                best_track = tr
+                sources.append(tr['record_id'])
+            if delta is not None and (best_delta is None or delta < best_delta) and best_dist is None:
+                best_delta = delta
+                sources.append(tr['record_id'])
+        hours = None if best_delta is None else round(best_delta / 3600.0, 1)
+        dist_m = None if best_dist is None else int(best_dist)
+        if dist_m is not None and hours is not None and dist_m <= 500 and hours <= 6:
+            grade, relation = '时空同现较强', '轨迹与警情在较短时空窗口内接近'
+        elif dist_m is not None and hours is not None and dist_m <= 1000 and hours <= 24:
+            grade, relation = '时空接近', '轨迹与警情存在可计算的时空接近'
+        elif dist_m is not None and dist_m <= 500 and hours is None:
+            grade, relation = '仅地点接近', '仅有空间接近，缺少可对齐的时间'
+        elif hours is not None and hours <= 6 and (dist_m is None or dist_m > 1000):
+            grade, relation = '仅时间接近', '仅有时间接近，空间距离较大或不可算'
+        elif dist_m is not None or hours is not None:
+            grade, relation = '时空不吻合', '可计算但超出常用同现窗口，降权参考'
+        else:
+            grade, relation = '无可计算联系', '尚无可计算的时空联系'
+        place = ''
+        when = ''
+        if best_track:
+            tf = best_track.get('fields') or {}
+            place = tf.get('deviceName') or tf.get('localAddress') or ''
+            when = tf.get('captureTime') or ''
+        next_checks = []
+        if place or when:
+            next_checks.append('调取' + ' '.join(x for x in (str(place)[:30], str(when)[:19]) if x) + '录像核对衣着与同行人')
+        next_checks.append('核对处警记录原文与现场情况，不得直接认定为涉案')
         rows.append({
             'cjbh': str(cjbh),
             'cjsj': str(cjsj),
-            'distance_m': None if best_dist is None else int(best_dist),
-            'time_delta_hours': None if best_delta is None else round(best_delta / 3600.0, 1),
-            'relation': '轨迹点与警情坐标存在可计算联系' if best_dist is not None or best_delta is not None else '尚无可计算的时空联系',
+            'distance_m': dist_m,
+            'time_delta_hours': hours,
+            'grade': grade,
+            'relation': relation,
             'status': '待核验',
-            'follow_up': '核对处警记录原文与现场情况，不得直接认定为涉案',
+            'follow_up': next_checks[0],
+            'reasons': [relation] + ([f'最近约{dist_m}米'] if dist_m is not None else []) + ([f'时间差约{hours}小时'] if hours is not None else []),
+            'next_checks': next_checks[:2],
             'source_ids': sorted(set(sources)),
         })
+    # Rank: stronger grades first, then closer distance, then smaller time delta
+    grade_rank = {'时空同现较强': 0, '时空接近': 1, '仅地点接近': 2, '仅时间接近': 3, '时空不吻合': 4, '无可计算联系': 5}
+    rows.sort(key=lambda r: (
+        grade_rank.get(r.get('grade'), 9),
+        r['distance_m'] if r.get('distance_m') is not None else 10**9,
+        r['time_delta_hours'] if r.get('time_delta_hours') is not None else 10**9,
+        r.get('cjbh') or '',
+    ))
     return {
         'version': VERSION,
         'status': 'ready' if rows else 'empty',
         'items': rows,
-        'disclaimer': '候选案件状态为待核验，需人工核对处警记录。',
+        'disclaimer': '候选案件状态为待核验；时空接近不等于涉案认定，需人工核验。',
     }

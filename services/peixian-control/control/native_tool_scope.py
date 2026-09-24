@@ -111,6 +111,23 @@ def freeze_context(store,uid,sid,data):
     if candidate_set and direction == 'case_to_person' and want_score:
         present=task_person_modules(store, uid, sid, task_id)
         enrichment=build_enrichment_plan(candidate_set, present_by_person=present)
+    # Person-to-case full coverage: scoring on by default once identity+time confirmed
+    if direction == 'person_to_case' and 'person_identity' in confirmed and {'start','end'} <= set(confirmed):
+        if SCORING_NEGATE.search(text or ''):
+            want_score = False
+        else:
+            want_score = True
+    person_plan=None
+    center_set=[] if changed_object else copy.deepcopy((prior or {}).get('center_set') or [])
+    if direction == 'person_to_case' and 'person_identity' in confirmed and {'start','end'} <= set(confirmed):
+        from . import person_case_flow as pcf
+        radius = confirmed.get('radius_m') or pcf.DEFAULT_RADIUS_M
+        provisional = {
+            'task_id': task_id, 'confirmed': confirmed, 'center_set': center_set,
+        }
+        person_plan = pcf.build_person_case_plan(store, uid, sid, provisional, radius_m=radius)
+        if person_plan and person_plan.get('center_set'):
+            center_set = person_plan['center_set']
     stop_phrase='不再追问，请基于已取得资料直接作答。'
     stop_followup=bool((prior or {}).get('stop_followup')) or (text.strip() == stop_phrase) or ('不再追问' in text and '直接作答' in text)
     return {'version':'native-tool-context-v1','task_id':task_id,
@@ -122,6 +139,8 @@ def freeze_context(store,uid,sid,data):
         'candidate_request_n':request_n,
         'candidate_set':candidate_set,
         'enrichment_plan':enrichment,
+        'person_case_plan':person_plan,
+        'center_set':center_set,
         'stop_followup':stop_followup}
 
 
@@ -268,34 +287,74 @@ def named_sources(store,uid,sid,text):
 
 
 def model_context(context):
-    """Explain available confirmed values; model decides direction, scoring and next steps."""
+    """Explain available confirmed values; inject person_case_plan / enrichment_plan."""
     plan = context.get('enrichment_plan')
+    person_plan = context.get('person_case_plan')
     enrich_note = ''
     payload = {
         'version': 'native-tool-arguments-v1',
         'scope_version': context['scope_version'],
         'confirmed': context['confirmed'],
         'selected_source_refs': context['source_refs'],
+        'direction': context.get('direction') or 'unknown',
+        'scoring_requested': bool(context.get('scoring_requested')),
     }
+    if isinstance(person_plan, dict) and person_plan.get('items'):
+        public_plan = {
+            'version': person_plan.get('version'),
+            'phase': person_plan.get('phase'),
+            'done': person_plan.get('done'),
+            'pending': person_plan.get('pending'),
+            'total': person_plan.get('total'),
+            'complete': person_plan.get('complete'),
+            'coverage': person_plan.get('coverage'),
+            'next': person_plan.get('next'),
+            'items': list(person_plan.get('items') or []),
+            'center_set': [
+                {
+                    'rank': c.get('rank'), 'label': c.get('label'),
+                    'visit_count': c.get('visit_count'), 'domicile_like': c.get('domicile_like'),
+                    'record_id': c.get('record_id'), 'radius_m': c.get('radius_m'),
+                    'coordinate_reusable': True,
+                }
+                for c in (person_plan.get('center_set') or context.get('center_set') or [])
+            ],
+        }
+        payload['person_case_plan'] = public_plan
+        if not person_plan.get('complete'):
+            nxt = person_plan.get('next') or {}
+            i = (person_plan.get('done') or 0) + 1
+            total = person_plan.get('total') or 0
+            kind = nxt.get('kind') or ''
+            enrich_note = (
+                '本轮由人到案全量计划未完成（{}/{}）。请严格按 person_case_plan 下一项调用 {}（每次仅一个调用）；'
+                '位置维由平台绑定停留中心来源，不要手写经纬度。'
+                '失败则记下缺口并继续；全部完成后再输出四段式终稿与 7.3 融合分析。'
+            ).format(i, total, kind)
+        else:
+            enrich_note = (
+                'person_case_plan 已完成（或仅剩失败缺口）。请输出人员研判四段式，并完成 7.3 融合分析；'
+                '分数与排序引用平台结果，不要自造分。'
+            )
     if isinstance(plan, dict) and plan.get('items'):
         payload['enrichment_plan'] = plan
-        if not plan.get('complete'):
+        if not plan.get('complete') and not enrich_note:
             enrich_note = (
                 '本轮已有候选人补查计划。可按 enrichment_plan 逐项调用对应资料工具（每次一个调用）；'
                 '不必再向用户确认人数或是否补查；某次失败则记下缺口并继续下一项。'
             )
-        else:
+        elif plan.get('complete') and not enrich_note:
             enrich_note = 'enrichment_plan 已完成；可基于已取得资料作答，覆盖不足者可再建议补查。'
-    stop_note=''
+    stop_note = ''
     if context.get('stop_followup'):
-        stop_note='用户已要求停止追问，请基于已取得资料直接作答，不要再调用 question，也不要再写 next_question。'
-    return ('\n本轮原生工具参数约定：研判方向、是否评分、核验人数、下一步建议与追问均由你自行判断；'
-        '条件齐全即可直接查询，不必等用户逐项确认。缺条件时用 question 工具自己组织题干和选项。'
-        'person_identity 可填写原始身份号码，或本会话抓拍结果中的 person-* 引用；'
-        'person-* 不是新对象或身份证号，平台只校验来源完整性。'
-        '已选定来源时，对象或坐标由平台从该来源读取，不在工具参数中重复传入。'
-        '以下已确认值不是要求查询全部能力；只取当前问题需要的字段。'
+        stop_note = '用户已要求停止追问，请基于已取得资料直接作答，不要再调用 question，也不要再写 next_question。'
+    prefix = (
+        '\n本轮原生工具参数约定：研判方向、是否评分、下一步建议与追问由你判断；'
+        '由人到案且存在 person_case_plan 时以计划为准打满八类接口。'
+        '条件齐全即可直接查询。缺条件时用 question 工具自己组织题干和选项。'
+        'person_identity 可填写原始身份号码，或本会话抓拍结果中的 person-* 引用。'
+        '已选定来源或平台绑定停留中心时，对象或坐标由平台从来源读取，不要在参数中手写 lon/lat。'
         '服务端会补齐本任务已确认且用途适用的人员和时间。'
         '真正失败不代表记录为零；不要自行重试失败调用。分数、等级与排序数值只由平台按来源计算。'
-        + stop_note + enrich_note + '\n'
-        + adapter.canonical(payload))
+    )
+    return prefix + stop_note + enrich_note + '\n' + adapter.canonical(payload)
