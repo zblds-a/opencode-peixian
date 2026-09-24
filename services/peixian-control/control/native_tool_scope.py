@@ -26,21 +26,19 @@ PERSON_HINT=re.compile(r'由人到案|此人|该人|这名人员|已确认人员
 
 
 def scoring_requested(text, prior=None, direction=None):
-    """Fallback scoring intent when the model does not declare scoring.requested.
-
-    Defaults to False. Explicit user negation always wins. direction is ignored.
-    """
+    """Freeze scoring intent. case_to_person and person_to_case default on unless negated."""
     if not isinstance(text, str):
         if prior and 'scoring_requested' in prior:
             return bool(prior.get('scoring_requested'))
-        return False
+        return direction in ('case_to_person', 'person_to_case')
     if SCORING_NEGATE.search(text):
         return False
     if SCORING_REQUEST.search(text):
         return True
     if prior and 'scoring_requested' in prior:
         return bool(prior.get('scoring_requested'))
-    return False
+    return direction in ('case_to_person', 'person_to_case')
+
 
 
 def infer_direction(confirmed, refs, text, prior=None):
