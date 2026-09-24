@@ -66,7 +66,7 @@ def test_verified_increment_before_terminal_and_replay(provider,monkeypatch):
     assert reply_presentation.build(broken)['clues']==[]
     broken=copy.deepcopy(result);broken['claims'][0]['verification_status']='unverified'
     assert reply_presentation.build(broken)['clues']==[]
-    for suffix in ['answer-segments','result']:
+    for suffix in ['answer-segments','result','sources/'+eid]:
         reply=provider[3].get('/api/console/v1/sessions/ses_multi/runs/'+row['id']+'/'+suffix)
         assert reply.status_code==200,reply.text
     from control.openapi import build_openapi
@@ -83,7 +83,7 @@ def test_verified_increment_before_terminal_and_replay(provider,monkeypatch):
     create_user(provider[2], 'reply-other')
     other=login_user(provider[1], 'reply-other')
     try:
-        for suffix in ('answer-segments','result','graphs'):
+        for suffix in ('answer-segments','result','graphs','sources/'+eid):
             assert other.get('/api/console/v1/sessions/ses_multi/runs/'+row['id']+'/'+suffix).status_code==404
     finally:other.__exit__(None,None,None)
     old=copy.deepcopy(result);old['versions'].pop('reply_projection')

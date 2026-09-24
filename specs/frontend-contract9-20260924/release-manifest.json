@@ -1,0 +1,51 @@
+{
+  "backend_commit": "62492546d1584b3f083b9c0c6bc262abbdbd6d0d",
+  "frontend_commit": "6a710f67cd88c4df3700f97f10bbdf6cbc842776",
+  "control_tag": "peixian-control:contract9-r7-20260924-r2",
+  "control_image": "sha256:735e05d701180ecc10b4dc81734b92bf3c8e2f8c639f16ec18ee59f584d0302d",
+  "parent_image": "sha256:6a2d8df58a8b69891a7c051a5deaf82cac6d18809dae9da33c69c898a8a08777",
+  "gateway_tag": "peixian-gateway:contract9-20260924-r2",
+  "gateway_image": "sha256:2554c0a1676e4eed3f14a40f21c01dc9c2ba929410bc863aac0b682b48abbff9",
+  "status": "deployed",
+  "accounts": [
+    {
+      "account": "A",
+      "revision": 74,
+      "status": "ready",
+      "gate_policy": "open",
+      "recovery_required": 0,
+      "plugins_available": 8,
+      "skills_eligible": 3,
+      "skill_reason": null
+    },
+    {
+      "account": "B",
+      "revision": 46,
+      "status": "ready",
+      "gate_policy": "open",
+      "recovery_required": 0,
+      "plugins_available": 8,
+      "skills_eligible": 3,
+      "skill_reason": null
+    }
+  ],
+  "maintenance_mode": "normal",
+  "static_hashes": {
+    "index.html": "4a627d1705b4f4d0421c6d5cb908a54dc15487b15f41aad6c1c5b4f279330877",
+    "assets/index-ClDs-c3A.js": "4df7336ae9a06b2488a14d593c2271468dbed9a5e51caebd3d33f3a7df1aa89a",
+    "assets/index-Dv8XokA7.css": "32f1919d5f3a5b761cc85b686430b396232dd0f9af4c24ba20dc343f7156d26f"
+  },
+  "agent_client_sha256": "afe210ba3f59a4032495402f3db6a66cadfc0681a9bdec9a4e8b6aa9f23adf47",
+  "control_health": "healthy",
+  "schema_version": 11,
+  "source_tests": {
+    "passed": 80,
+    "skipped": 12,
+    "deselected": 1
+  },
+  "image_tests": {
+    "passed": 11
+  },
+  "browser_acceptance": "not_executed",
+  "real_provider_acceptance": "not_executed"
+}

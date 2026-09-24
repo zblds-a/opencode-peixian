@@ -1,0 +1,73 @@
+{
+  "single_question": {
+    "id": "question-example",
+    "sessionID": "session-example",
+    "questions": [
+      {
+        "header": "位置",
+        "question": "请选择本次位置",
+        "custom": false,
+        "multiple": false,
+        "options": [
+          {
+            "label": "位置甲"
+          },
+          {
+            "label": "位置乙"
+          }
+        ]
+      }
+    ]
+  },
+  "single_reply": {
+    "answers": [
+      [
+        "位置甲"
+      ]
+    ]
+  },
+  "too_many_reply": {
+    "answers": [
+      [
+        "位置甲",
+        "位置乙"
+      ]
+    ]
+  },
+  "multi_question": {
+    "id": "question-method",
+    "sessionID": "session-example",
+    "questions": [
+      {
+        "header": "资料",
+        "question": "希望说明哪些已取得内容",
+        "custom": false,
+        "multiple": true,
+        "options": [
+          {
+            "label": "时间范围"
+          },
+          {
+            "label": "资料缺口"
+          }
+        ]
+      }
+    ]
+  },
+  "multi_reply": {
+    "answers": [
+      [
+        "时间范围",
+        "资料缺口"
+      ]
+    ]
+  },
+  "reject_body": {},
+  "too_many_error": {
+    "code": "too_many_answers",
+    "message": "此题所选答案超过允许数量。",
+    "field_errors": {
+      "answers.0": "invalid_selection"
+    }
+  }
+}
