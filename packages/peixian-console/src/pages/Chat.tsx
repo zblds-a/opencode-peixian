@@ -4,6 +4,8 @@ import { Button, Empty, ErrorLine, Field, Icon, Markdown, Modal, Spinner, Status
 import { useConsole } from "../context"
 import BusinessConfirmations, { QuestionForm } from "../BusinessConfirmations"
 import { clarificationRequest, clarificationAnswer } from "../planner-question"
+import { nextQuestionRequest, nextQuestionAction, type NextQuestion } from "../next-question"
+import type { TrustedResult } from "../trusted-v2"
 import { ClueDrawer, CluePanel } from "../TrustedAnalysis"
 import RealEntityGraph from "../RealEntityGraph"
 import SmoothMarkdown from "../SmoothMarkdown"
@@ -65,6 +67,9 @@ export default function Chat() {
   const [draftTestText, setDraftTestText] = createSignal("")
   const [draftBusy, setDraftBusy] = createSignal(false)
   const [questionBusy, setQuestionBusy] = createSignal(false)
+  const [nextQuestion, setNextQuestion] = createSignal<NextQuestion>()
+  const [dismissedNextRun, setDismissedNextRun] = createSignal<string>()
+  const [nextQuestionBusy, setNextQuestionBusy] = createSignal(false)
   let scroll!: HTMLDivElement
   let textarea!: HTMLTextAreaElement
   let fileInput!: HTMLInputElement
@@ -371,6 +376,8 @@ export default function Chat() {
     setError("")
     setShowHistory(false)
     setBusy(false)
+    setNextQuestion(undefined)
+    setDismissedNextRun(undefined)
     textarea?.focus()
   }
   async function clearScene() {
@@ -471,6 +478,61 @@ export default function Chat() {
     } catch (cause) { if (selected()===sid) setError(safeMessage((cause as Error).message)) }
     finally { setQuestionBusy(false) }
   }
+
+  createEffect(() => {
+    const sid = selected()
+    const run = currentRun()
+    const rid = run?.id
+    setNextQuestion(undefined)
+    if (!sid || !run || !rid) return
+    if (!terminalRun(run.status)) return
+    if (run.clarification) return
+    if (dismissedNextRun() === rid) return
+    if (busy() || sending() || uncertain()) return
+    let alive = true
+    onCleanup(() => { alive = false })
+    void api<TrustedResult>(`/sessions/${sid}/runs/${rid}/result`)
+      .then((result) => {
+        if (!alive) return
+        if (selected() !== sid || currentRun()?.id !== rid) return
+        const question = result.answer_view?.next_question
+        if (question?.options?.length) setNextQuestion(question)
+      })
+      .catch(() => {})
+  })
+
+  async function answerNextQuestion(answers?: string[][]) {
+    const sid = selected()
+    const run = currentRun()
+    const question = nextQuestion()
+    if (!sid || !run || !question || nextQuestionBusy() || sending() || busy()) return
+    if (answers === undefined) {
+      setDismissedNextRun(run.id)
+      setNextQuestion(undefined)
+      return
+    }
+    setNextQuestionBusy(true)
+    setError("")
+    try {
+      const action = nextQuestionAction(question, answers)
+      if (selected() !== sid || currentRun()?.id !== run.id || nextQuestion()?.id !== question.id) return
+      if ("draft" in action) {
+        setDraft(action.draft)
+        setNextQuestion(undefined)
+        setDismissedNextRun(run.id)
+        queueMicrotask(() => textarea?.focus())
+        return
+      }
+      setNextQuestion(undefined)
+      setDismissedNextRun(run.id)
+      await send(action.send)
+    } catch (cause) {
+      if (selected() === sid) setError(safeMessage((cause as Error).message))
+    } finally {
+      setNextQuestionBusy(false)
+    }
+  }
+
   async function abort() {
     if (!selected()) return
     try {
@@ -918,6 +980,15 @@ export default function Chat() {
           <BusinessConfirmations sessionID={selected()} available={available()} onAnswered={() => void refresh()} />
           <Show when={selected() && currentRun()?.clarification?.version === "theft-clarification-v1"}>
             <QuestionForm request={() => clarificationRequest(currentRun()!, selected()!)} busy={questionBusy() || sending() || !ready()} answer={(answers) => void answerClarification(answers)} />
+          </Show>
+          <Show when={selected() && nextQuestion() && !currentRun()?.clarification && !busy() && !sending() && !uncertain()}>
+            <QuestionForm
+              title="下一步分析"
+              rejectLabel="暂不选择"
+              request={() => nextQuestionRequest(nextQuestion()!, selected()!)}
+              busy={nextQuestionBusy() || sending() || !ready()}
+              answer={(answers) => void answerNextQuestion(answers)}
+            />
           </Show>
           <ErrorLine message={error()} />
           <Show when={uncertain()}>

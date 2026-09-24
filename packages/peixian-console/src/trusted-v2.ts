@@ -31,7 +31,14 @@ export type PersonTableAnswer = {
   basic: { label: string; value: string; source_ids: string[]; source_run_id: string; obtained_at: string | null }[]
   conclusions: { text: string; source_ids: string[]; source_run_id: string; claim_id: string; limitation: string }[]
   evidence: { module: string; label: string; time: string; text: string; source_ids: string[]; source_run_id: string; snapshot_id: string }[]
-  suggestions: { text: string; reason: string; conditions: string; source_ids: string[]; origin: "model_selection"; action: "query" | "inspect_sources" | "clarify_scope"; kind: string | null }[]
+  suggestions: { text: string; reason: string; conditions: string; source_ids: string[]; origin: "model_selection" | "platform_direction"; action: "query" | "inspect_sources" | "clarify_scope" | "authorize_candidates"; kind: string | null; reply?: string }[]
+  next_question?: {
+    id: string
+    header: string
+    question: string
+    options: { label: string; description?: string; action: string; send: boolean }[]
+    custom: boolean
+  }
   missing: string[]
   preview_count: number
   total: number

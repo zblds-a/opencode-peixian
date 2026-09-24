@@ -13,7 +13,7 @@ type Question = {
 }
 export type Pending = { id: string; sessionID: string; description?: string; questions?: Question[] }
 
-export function QuestionForm(props: { request: () => Pending; busy: boolean; answer: (answers?: string[][]) => void }) {
+export function QuestionForm(props: { request: () => Pending; busy: boolean; answer: (answers?: string[][]) => void; title?: string; rejectLabel?: string }) {
   const [selected, setSelected] = createSignal<string[][]>([])
   const [custom, setCustom] = createSignal<string[]>([])
   const [customEnabled, setCustomEnabled] = createSignal<boolean[]>([])
@@ -60,7 +60,7 @@ export function QuestionForm(props: { request: () => Pending; busy: boolean; ans
     >
       <div class="confirmation-title">
         <Icon name="chat" size={18} />
-        <strong>需要补充信息</strong>
+        <strong>{props.title ?? "需要补充信息"}</strong>
       </div>
       <Index each={questions()}>
         {(question, index) => (
@@ -154,7 +154,7 @@ export function QuestionForm(props: { request: () => Pending; busy: boolean; ans
       </Index>
       <div class="confirmation-actions">
         <Button type="button" disabled={props.busy} onClick={() => props.answer()}>
-          暂不回答
+          {props.rejectLabel ?? "暂不回答"}
         </Button>
         <Button type="submit" variant="primary" busy={props.busy} disabled={!valid()}>
           提交回答
