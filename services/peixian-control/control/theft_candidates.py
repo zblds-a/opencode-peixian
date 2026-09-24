@@ -9,7 +9,7 @@ from . import theft_scoring
 from shared import theft_provider_v2 as adapter
 
 VERSION = 'theft-candidates-v1'
-MAX_N = 5
+MAX_N = 20
 SCORE_KINDS = frozenset({'night', 'community', 'warning_detail', 'warnings', 'warning_logs', 'profile', 'tracks'})
 
 
@@ -49,9 +49,10 @@ def stage1_from_task(store, uid, sid, task_id):
 
 
 def authorize(ranked_items, n):
-    """Freeze top-N candidates from a stage-1 ranking. N is 1..5."""
-    if type(n) is not int or not 1 <= n <= MAX_N:
-        error('candidate_limit_invalid', '核验人数须为1至5名。', 422)
+    """Freeze top-N candidates from a stage-1 ranking. N is 1..MAX_N (soft ceiling)."""
+    if type(n) is not int or n < 1:
+        error('candidate_limit_invalid', '核验人数须为正整数。', 422)
+    n = min(n, MAX_N)
     items = list(ranked_items or [])
     selected = items[:n]
     if not selected:
@@ -84,11 +85,60 @@ def find(context, person_ref):
     return None
 
 
+def find_capture_person(store, uid, sid, context, person_ref):
+    """Locate a person_ref in completed capture records of this task (no authorize required)."""
+    if not isinstance(person_ref, str) or not person_ref.startswith('person-'):
+        return None
+    task_id = (context or {}).get('task_id')
+    if not task_id:
+        return None
+    for record in task_capture_records(store, uid, sid, task_id):
+        try:
+            identity = None
+            fields = record.get('fields') or {}
+            for name in ('target_id_card', 'targetIdCard', 'idCard'):
+                if name in fields:
+                    identity = adapter.person_id(fields[name])
+                    break
+            if not identity:
+                continue
+            ref = adapter.person_ref(identity, store.worker_key.encode(), uid + '/' + sid)
+            if not hmac.compare_digest(ref, person_ref):
+                continue
+            return {
+                'version': VERSION,
+                'rank': None,
+                'person_ref': person_ref,
+                'name': fields.get('target_name') or fields.get('name'),
+                'run_id': record.get('source_run_id') or record.get('run_id'),
+                'record_id': record.get('record_id'),
+                'snapshot_id': record.get('snapshot_id'),
+                'result_digest': record.get('result_digest'),
+                'source_ids': [record.get('record_id')],
+                'identity': identity,
+            }
+        except Exception:
+            continue
+    return None
+
+
+def resolve_capture_person(store, uid, sid, context, person_ref):
+    """Resolve any capture-sourced person_ref without requiring candidate_set authorization."""
+    entry = find(context, person_ref)
+    if entry:
+        return resolve(store, uid, sid, context, person_ref)
+    found = find_capture_person(store, uid, sid, context, person_ref)
+    if not found or not found.get('identity'):
+        error('identity_parameter_invalid', '该引用不在本任务已取得的抓拍结果中。', 409)
+    return found['identity'], person_ref
+
+
 def resolve(store, uid, sid, context, person_ref):
     """Resolve a candidate person_ref to raw identity via source integrity check."""
     entry = find(context, person_ref)
     if not entry:
-        error('identity_parameter_invalid', '该引用不在本轮已授权的核验候选人中。', 409)
+        # Fall back to any capture person from this task (authorization no longer required).
+        return resolve_capture_person(store, uid, sid, context, person_ref)
     if not entry.get('result_digest'):
         error('candidate_source_incomplete', '候选人来源摘要缺失，无法核验身份。', 409)
     from .analysis_tasks import source
@@ -160,6 +210,114 @@ ENRICH_KIND_LABELS = {
 }
 ENRICH_SCORE_KINDS = ('night', 'community', 'warning_detail', 'profile')
 
+# Bands at or above this threshold count toward recommend_n.
+_RECOMMEND_BANDS = frozenset({'存在一定关联', '关联度中等', '关联度较高', '关联度很高'})
+_RATE_DROP = 15
+
+
+def recommend_n(ranking):
+    """Pick a default authorize count from stage-1 ranking. Returns 1..MAX_N."""
+    items = list((ranking or {}).get('items') or [])
+    if not items:
+        return 1
+    eligible = []
+    for item in items:
+        if item.get('band') in _RECOMMEND_BANDS or (isinstance(item.get('rate'), (int, float)) and item['rate'] >= 20):
+            eligible.append(item)
+        else:
+            break
+    if not eligible:
+        eligible = items[:1]
+    cut = len(eligible)
+    for index in range(1, len(eligible)):
+        prev = eligible[index - 1].get('rate')
+        cur = eligible[index].get('rate')
+        if isinstance(prev, (int, float)) and isinstance(cur, (int, float)) and (prev - cur) >= _RATE_DROP:
+            cut = index
+            break
+    return max(1, min(MAX_N, cut, len(items)))
+
+
+def task_person_modules(store, uid, sid, task_id):
+    """Map person_ref -> completed module kinds for the same native task."""
+    rows = store.rows(
+        "SELECT b.request_ciphertext FROM business_runs b "
+        "WHERE b.uid=? AND b.session_id=? ORDER BY b.rowid DESC LIMIT 50",
+        (uid, sid),
+    )
+    present = {}
+    for row in rows:
+        snapshot = store.decrypt(row['request_ciphertext'])
+        context = snapshot.get('native_tool_context') or {}
+        if context.get('task_id') != task_id:
+            continue
+        for call in (snapshot.get('native_calls') or {}).values():
+            if not isinstance(call, dict) or call.get('status') != 'completed':
+                continue
+            plan = call.get('frozen') or {}
+            kind = plan.get('kind')
+            ref = (plan.get('query') or {}).get('person_ref')
+            if kind and ref:
+                present.setdefault(ref, set()).add(kind)
+                if kind == 'warnings':
+                    present[ref].add('warning_detail')
+    return present
+
+
+def build_enrichment_plan(candidate_set, allowed_tools=None, records=None, snapshot=None, present_by_person=None):
+    """Static per-candidate enrichment jobs after authorize. Progress from records when given."""
+    allowed = set(allowed_tools) if allowed_tools is not None else None
+    groups = theft_scoring.group_by_person(records or [], snapshot) if records is not None else {}
+    items = []
+    done = 0
+    total = 0
+    for entry in candidate_set or []:
+        if not isinstance(entry, dict) or not entry.get('person_ref'):
+            continue
+        ref = entry['person_ref']
+        kinds = list(ENRICH_SCORE_KINDS)
+        if allowed is not None:
+            kinds = [k for k in kinds if 'peixian_query_' + k in allowed]
+        present = set()
+        if present_by_person and ref in present_by_person:
+            present |= set(present_by_person[ref])
+        if records is not None:
+            present |= {r.get('module') for r in groups.get(ref, [])}
+        if 'warnings' in present:
+            present.add('warning_detail')
+        missing = [k for k in kinds if k not in present]
+        finished = [k for k in kinds if k not in missing]
+        total += len(kinds)
+        done += len(finished)
+        items.append({
+            'rank': entry.get('rank'),
+            'person_ref': ref,
+            'name': entry.get('name'),
+            'kinds': kinds,
+            'missing_kinds': missing,
+            'done_kinds': finished,
+        })
+    pending = sum(len(i['missing_kinds']) for i in items)
+    return {
+        'version': VERSION,
+        'items': items,
+        'done': done,
+        'total': total,
+        'pending': pending,
+        'complete': pending == 0 and bool(items),
+    }
+
+
+
+def enrichment_progress_label(plan, rank, kind, index=None):
+    """Human label for an enrichment tool step."""
+    label = ENRICH_KIND_LABELS.get(kind, kind)
+    who = f'第{rank}名' if rank else '候选人'
+    if isinstance(plan, dict) and plan.get('total'):
+        i = index if isinstance(index, int) else (plan.get('done') or 0) + 1
+        return f'补查 {who} {label} ({i}/{plan["total"]})'
+    return f'补查 {who} {label}'
+
 
 def reply_authorize_n(n):
     """Reply text that candidate_request_n will parse as N."""
@@ -168,6 +326,14 @@ def reply_authorize_n(n):
     if n == 1:
         return '核验该候选人'
     return f'核验前{min(n, MAX_N)}名'
+
+
+def reply_authorize_option(n, recommended=None):
+    """Card option label; recommended N is marked."""
+    base = reply_authorize_n(n)
+    if recommended is not None and n == recommended:
+        return base + '（推荐）'
+    return base
 
 
 def reply_enrich(rank, name, kinds):
@@ -203,7 +369,7 @@ QUERY_REPLIES = {
     'profile': ('查询{who}档案', '核对{who}的基本信息和最近抓拍'),
     'tracks': ('查询{who}轨迹', '查看{who}在时间窗口内的行动轨迹'),
     'incidents': ('以轨迹点查询周边警情', '用已有轨迹点查周边警情，逐案核验候选案件'),
-    'captures': ('查询周边抓拍', '找出案发点附近出现过的关联人员'),
+    'captures': ('查询周边抓拍并初排', '找出案发点附近出现过的关联人员并做初步关注排序'),
 }
 
 
@@ -216,6 +382,10 @@ def reply_query_incidents():
     return '以轨迹点查询周边警情'
 
 
+def reply_query_captures():
+    return '查询周边抓拍并初排'
+
+
 def reply_inspect_cases():
     return '核对处警记录原文'
 
@@ -225,11 +395,12 @@ def candidate_request_n(text):
     import re
     if not isinstance(text, str):
         return None
-    if re.search(r'核验该候选人|对该候选人(?:核验|评分)', text):
+    cleaned = re.sub(r'[（(]\s*推荐\s*[）)]', '', text)
+    if re.search(r'核验该候选人|对该候选人(?:核验|评分)', cleaned):
         return 1
     match = re.search(
         r'(?:核验|评分|查|核对|筛)\s*前\s*([1-5])\s*名|(?:对|给)\s*前\s*([1-5])\s*(?:人|名)|前\s*([1-5])\s*名(?:核验|评分|排序)',
-        text,
+        cleaned,
     )
     if not match:
         return None

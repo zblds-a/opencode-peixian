@@ -34,7 +34,7 @@ def observed(snapshot, part):
         output = {}
     if isinstance(output, dict) and output.get('status') == 'needs_input' and status == 'completed':
         status = 'waiting_input'
-        name = '待你确认查询条件' if not capability else name
+        # Keep the capability name; do not override with a platform-authored label.
     outputs = display_values(output, display.get('output_fields'), snapshot.get('display_secrets', [])) if status in ('completed', 'waiting_input') else {}
     outputs={k:v for k,v in outputs.items() if not isinstance(v,float) or math.isfinite(v)}
     count = outputs.get('returned_count')

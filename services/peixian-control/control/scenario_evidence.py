@@ -34,7 +34,7 @@ def night(value):
 
 
 def project(messages, authorized):
-    result = {"schema_version": "1", "status": "empty", "scenario": None, "steps": [], "cards": [], "missing": [], "summary": [], "notice": "合成演示资料，仅整理已有记录，不判定违法犯罪。"}
+    result = {"schema_version": "1", "status": "empty", "scenario": None, "steps": [], "cards": [], "missing": [], "summary": [], "notice": "仅整理已有记录。"}
     if not authorized:
         return result
     starts = [i for i, m in enumerate(messages) if m.get("info", {}).get("role") == "user"]

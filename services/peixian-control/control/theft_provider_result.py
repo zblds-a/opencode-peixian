@@ -1,24 +1,47 @@
 """Projection of authenticated provider receipts, never model prose."""
 import copy
+import re
 from .trusted_results import claim
 from .backend_contract import iso
 from shared.theft_provider import CATALOG,LIMITATIONS
 from shared import theft_provider_v2 as v2
 
 SOURCE_SENTENCE_VERSION='provider-source-text-v2'
+_WIFI_DESC=re.compile(r'(?i)wi[- ]?fi|wif.?探针')
+
+
+def track_type_label(fields):
+    """Map track type code/desc to display label; WiFi probe is 非机动车."""
+    code=fields.get('trackType')
+    desc=fields.get('trackTypeDesc')
+    desc_text=desc.strip() if isinstance(desc,str) else ''
+    if code==2 or (desc_text and _WIFI_DESC.search(desc_text)):
+        return '非机动车'
+    if code==0:
+        return '人卡'
+    if code==1:
+        return '机动车'
+    if desc_text:
+        return desc_text
+    return '未明确'
 
 
 def sentence(kind,f,version=None):
-    if kind=='tracks' and version==SOURCE_SENTENCE_VERSION:
-        description=f.get('trackTypeDesc')
-        description=description if isinstance(description,str) and description.strip() else '未提供'
-        code=f.get('trackType')
-        code=str(code) if type(code) is int else '未提供'
-        return f"观测时间 {f.get('captureTime','未提供')}；设备 {f.get('deviceId','未提供')}；来源地点 {f.get('deviceName','未提供')}；来源类型描述 {description}；来源类型代码 {code}。"
+    if kind=='tracks':
+        label=track_type_label(f)
+        if version==SOURCE_SENTENCE_VERSION:
+            code=f.get('trackType')
+            code=str(code) if type(code) is int else '未提供'
+            return f"观测时间 {f.get('captureTime','未提供')}；设备 {f.get('deviceId','未提供')}；来源地点 {f.get('deviceName','未提供')}；轨迹类型 {label}；来源类型代码 {code}。"
+        return f"观测时间 {f.get('captureTime','未提供')}；设备 {f.get('deviceId','未提供')}；来源地点 {f.get('deviceName','未提供')}；轨迹类型 {label}。"
     if kind=='incidents':return f"警情引用 {f.get('cjbh','未提供')}；处警时间 {f.get('cjsj','未提供')}；来源地址 {f.get('bzdzmc') or f.get('cjxz') or f.get('address','未提供')}。"
-    if kind=='captures':return f"{f.get('target_name','对象未提供')}（{f.get('target_id_card','未提供')}）：来源范围内抓拍汇总 {f.get('capture_count','未提供')} 次，不等于到访次数。"
-    if kind=='tracks':return f"观测时间 {f.get('captureTime','未提供')}；设备 {f.get('deviceId','未提供')}；来源地点 {f.get('deviceName','未提供')}；轨迹类型 { {0:'人卡',1:'机动车',2:'非机动车'}.get(f.get('trackType'),'未明确')}。"
-    if kind in ('warnings','warning_detail'):return f"{f.get('personName','对象未提供')}（{f.get('idCard','未提供')}）：来源预警类型 {f.get('warningTypes','未提供')}；类型数 {f.get('warningCount','未提供')}；最新触发时间 {f.get('latestTime','未提供')}。"
+    if kind=='captures':
+        count=f.get('capture_count','未提供')
+        return f"{f.get('target_name','对象未提供')}（{f.get('target_id_card','未提供')}）：来源范围内抓拍汇总 {count} 次，不等于到访次数。"
+    if kind in ('warnings','warning_detail'):
+        types=f.get('warningTypes','未提供')
+        count=f.get('warningCount','未提供')
+        return f"{f.get('personName','对象未提供')}（{f.get('idCard','未提供')}）：来源预警类型 {types}；预警类型数量 {count}；最新触发时间 {f.get('latestTime','未提供')}。"
     if kind=='night':return f"来源夜间观测时间 {f.get('captureTime','未提供')}；来源地点 {f.get('location','未提供')}。"
     if kind=='community':return f"来源时间范围 {f.get('timeRangeStart','未提供')} 至 {f.get('timeRangeEnd','未提供')}；小区数量 {f.get('communityCount','未提供')}；来源描述 {f.get('trajectoryDesc','未提供')}。"
     if kind=='profile':return f"本次取得来源档案及 {len(f.get('captures',[]))} 条最近抓拍；不代表完整轨迹。"

@@ -46,7 +46,7 @@ def contracts():
  ('post','/sessions/{sid}/scenarios'):('AnalysisTaskBody',ref('AnalysisTask'),'创建资料任务','会话','任务组织同会话多个Run；不是用户必须选择的分析模式。'),
  ('get','/sessions/{sid}/scenarios/{scenario_id}/report'):(None,{'type':'string'},'任务资料包','会话','HTML或Markdown；同一只读快照；执行未结束409；不新增取数。'),
  ('get','/sessions/{sid}/scenarios/{scenario_id}'):(None,ref('AnalysisTask'),'读取资料任务','会话','本人任务、步骤和来源版本；跨账号404。'),
- ('get','/theft-provider/capabilities'):(None,ref('ProviderCapabilities'),'可用资料查询','会话','只列当前账号授权且已生效能力；合成接口，不访问供应方。'),
+ ('get','/theft-provider/capabilities'):(None,ref('ProviderCapabilities'),'可用资料查询','会话','只列当前账号授权且已生效能力；不访问供应方。'),
  ('post','/sessions/{sid}/provider-query/preview'):('ProviderPreviewBody',ref('ProviderPreview'),'确认资料范围','会话','只检查范围，签名有效期600秒，绑定账号、会话、配置、清除边界；不调用模型和资料服务。'),
  ('get','/sessions/{sid}/runs/{rid}/reviews'):(None,ref('ReviewList'),'本人来源复核','会话','分页读取；跨账号404，不授予管理员读取正文权限。'),
  ('post','/sessions/{sid}/runs/{rid}/clarification/reject'):(None,ref('ClarificationDismissed'),'暂不回答规划问题','会话','仅本人可操作；幂等关闭当前待补充问题，不查询资料或调用模型。'),

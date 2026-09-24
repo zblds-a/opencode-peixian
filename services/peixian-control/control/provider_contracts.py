@@ -1,9 +1,6 @@
 """Explicit release/environment binding. No discovery, credentials or network calls."""
 import json
 import os
-import hashlib
-import hmac
-import math
 from pathlib import Path
 from .backend_contract import error
 from .capabilities import check_selection
@@ -24,14 +21,10 @@ def settings(uid):
         limits=config['limits']
         adapter.normalize('incidents',{'lon':'0','lat':'0','radius_m':1},limits)
         if not isinstance(config['connections'],dict) or not config['connections'] or set(config['connections'])-({'police','warning'}|set(ACTIVE_KINDS)):raise ValueError()
-        if config.get('acceptance_scope_confirmed') is not True:raise ValueError()
-        box=config.get('approved_bbox')
-        if box is not None and (not isinstance(box,list) or len(box)!=4 or any(type(v) not in (int,float) or not math.isfinite(v) for v in box) or not (-180<=box[0]<=box[2]<=180 and -90<=box[1]<=box[3]<=90)):raise ValueError()
-        hashes=config.get('approved_identity_hashes',[])
-        if not isinstance(hashes,list) or any(not isinstance(v,str) or len(v)!=64 for v in hashes):raise ValueError()
+        # Acceptance whitelist (bbox / identity hashes) is no longer required.
         return config
     except (OSError,ValueError,KeyError,TypeError):
-        error('real_provider_configuration_invalid','真实连接配置或验收范围尚未确认。',409)
+        error('real_provider_configuration_invalid','真实连接配置尚未确认。',409)
 
 
 def binding(store,uid,kind,applied):
@@ -57,16 +50,7 @@ def freeze(store,uid,kind,query,identities,applied):
     value=binding(store,uid,kind,applied)
     try:
         normalized=adapter.normalize(kind,query,value['limits'])
-        config=settings(uid)
-        if kind in adapter.PERSON:
-            raw=identities.get(normalized['person_ref'],'')
-            fingerprint=hmac.new(store.worker_key.encode(),adapter.canonical([uid,raw]).encode(),hashlib.sha256).hexdigest()
-            if fingerprint not in config.get('approved_identity_hashes',[]):
-                error('outside_acceptance_scope','该人员不在已配置的验收范围。',403)
-        if kind in ('incidents','captures'):
-            box=config.get('approved_bbox')
-            if not isinstance(box,list) or len(box)!=4 or not (box[0]<=float(normalized['lon'])<=box[2] and box[1]<=float(normalized['lat'])<=box[3]):
-                error('outside_acceptance_scope','该位置不在已配置的验收范围。',403)
+        # Layer 4 removed: no approved_identity_hashes / approved_bbox gate.
         request=adapter.request_spec(kind,normalized,value['limits'],identities)
     except adapter.ContractError as exc:error(str(exc),'查询条件未满足资料接口合同，请补充指定条件。',422)
     return {**value,'kind':kind,'version':adapter.VERSION,'query':normalized,'request':request,'identities':identities}

@@ -310,7 +310,7 @@ CONTRACTS = {
     ("post", "/sessions"): ("SessionBody", ref("Session"), "创建空会话", "会话", "创建空会话本身不发起模型生成。"),
     ("patch", "/sessions/{sid}"): ("SessionBody", ref("Session"), "重命名自己的会话", "会话", ""),
     ("delete", "/sessions/{sid}"): (None, ref("Ok"), "删除自己的会话", "会话", ""),
-    ("get", "/sessions/{sid}/evidence"): (None, ref("ScenarioEvidence"), "读取本人会话的合成资料依据", "会话", "仅投影当前请求已完成且版本匹配的受信插件结果，重新校验插件授权；不解析模型自由文本，不返回内部配置。"),
+    ("get", "/sessions/{sid}/evidence"): (None, ref("ScenarioEvidence"), "读取本人会话的资料依据", "会话", "仅投影当前请求已完成且版本匹配的受信插件结果，重新校验插件授权；不解析模型自由文本，不返回内部配置。"),
     ("get", "/sessions/{sid}/messages"): (None, items(ref("Message")), "读取会话的已保存消息", "会话", "工具展示经过过滤，不返回原始内部配置或工具秘密。"),
     ("post", "/sessions/{sid}/messages"): ("MessageBody", ref("MessageAccepted"), "提交异步模型消息", "会话", "202 只表示已接受，run_id 不是结果查询资源。先订阅 events，收到变更后重新读取会话消息及状态。每次最多五个技能和五个文件；文件引用总计另限 24000 字符，合并文字/技能/文件另限 18000 UTF-8 字节。同一会话请串行提交。"),
     ("post", "/sessions/{sid}/abort"): (None, ref("Ok"), "终止自己的会话生成", "会话", ""),

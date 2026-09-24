@@ -141,5 +141,5 @@ def test_run_freezes_canonical_evidence_and_projects_only_server_result(v6,monke
         projected=attach_results(s,user['uid'],[{'info':{'id':'msg_final'},'parts':[]}])
         assert projected[0]['parts'][0]['data']==saved
         report=client.get(P+'/sessions/ses_facts/runs/'+row['id']+'/report')
-        assert '合成测试资料' in report.text and report.status_code==200
+        assert ('已取得的来源资料' in report.text or '本次说明未重新取数' in report.text) and report.status_code==200
     finally:client.__exit__(None,None,None)
