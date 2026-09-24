@@ -5,7 +5,7 @@ import { Button, Empty, ErrorLine, Field, Icon, Markdown, Modal, Spinner, Status
 import { useConsole } from "../context"
 import BusinessConfirmations, { QuestionForm } from "../BusinessConfirmations"
 import { clarificationRequest, clarificationAnswer } from "../planner-question"
-import { nextQuestionRequest, nextQuestionAction, type NextQuestion } from "../next-question"
+import { nextQuestionRequest, nextQuestionAction, STOP_FOLLOWUP_TEXT, type NextQuestion } from "../next-question"
 import type { TrustedResult } from "../trusted-v2"
 import { ClueDetailPanel, CluePanel } from "../TrustedAnalysis"
 import RealEntityGraph from "../RealEntityGraph"
@@ -525,8 +525,9 @@ export default function Chat() {
     const question = nextQuestion()
     if (!sid || !run || !question || nextQuestionBusy() || sending() || busy()) return
     if (answers === undefined) {
-      setDismissedNextRun(run.id)
       setNextQuestion(undefined)
+      setDismissedNextRun(run.id)
+      await send(STOP_FOLLOWUP_TEXT)
       return
     }
     setNextQuestionBusy(true)
@@ -1018,7 +1019,7 @@ export default function Chat() {
           <Show when={selected() && nextQuestion() && !currentRun()?.clarification && !busy() && !sending() && !uncertain()}>
             <QuestionForm
               title="下一步分析"
-              rejectLabel="暂不选择"
+              rejectLabel="不再追问，直接作答"
               request={() => nextQuestionRequest(nextQuestion()!, selected()!)}
               busy={nextQuestionBusy() || sending() || !ready()}
               answer={(answers) => void answerNextQuestion(answers)}

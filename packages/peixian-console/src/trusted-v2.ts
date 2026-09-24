@@ -39,6 +39,7 @@ export type PersonTableAnswer = {
     question: string
     options: { label: string; description?: string; action: string; send: boolean }[]
     custom: boolean
+    multiple?: boolean
   }
   missing: string[]
   preview_count: number

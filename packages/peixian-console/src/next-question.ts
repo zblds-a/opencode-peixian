@@ -3,6 +3,8 @@ import type { PersonTableAnswer } from "./trusted-v2"
 
 export type NextQuestion = NonNullable<PersonTableAnswer["next_question"]>
 
+export const STOP_FOLLOWUP_TEXT = "不再追问，请基于已取得资料直接作答。"
+
 export function nextQuestionRequest(question: NextQuestion, sid: string): Pending {
   return {
     id: question.id,
@@ -15,6 +17,7 @@ export function nextQuestionRequest(question: NextQuestion, sid: string): Pendin
         description: option.description,
       })),
       custom: question.custom !== false,
+      multiple: question.multiple !== false,
     }],
   }
 }
@@ -23,9 +26,13 @@ export function nextQuestionAction(
   question: NextQuestion,
   answers: string[][],
 ): { send: string } | { draft: string } {
-  const text = answers[0]?.[0]?.trim() ?? ""
-  if (!text) throw new Error("请选择下一步。")
-  const option = (question.options ?? []).find((item) => item.label === text)
-  if (option && option.send === false) return { draft: text }
+  const selected = (answers[0] ?? []).map((item) => item.trim()).filter(Boolean)
+  if (!selected.length) throw new Error("请选择下一步。")
+  const text = selected.join("；")
+  const draft = selected.some((label) => {
+    const option = (question.options ?? []).find((item) => item.label === label)
+    return option && option.send === false
+  })
+  if (draft) return { draft: text }
   return { send: text }
 }
