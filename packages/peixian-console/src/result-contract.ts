@@ -22,6 +22,24 @@ export function legacyPresentation(value: unknown): AnalysisResult | undefined {
   const sources = value.conclusions as NonNullable<AnalysisResult["conclusion_sources"]>
   return { schema: "peixian.analysis-result", version: "1.0", process: value.process as AnalysisResult["process"], subjects: [], conclusions: sources.map(item => item.text), conclusion_sources: sources, evidence: value.evidence as AnalysisResult["evidence"], clues: value.clues as AnalysisResult["clues"], missing: value.missing, presentation_version: value.version, diagram: isDiagram(value.diagram) ? value.diagram : undefined }
 }
+// The server projects only approved source facts into this display contract.
+export function sourcePresentation(value: unknown, runID: string): AnalysisResult | undefined {
+  if (!object(value) || value.schema !== "peixian.analysis-result" || value.version !== "2.0" || value.run_id !== runID || !object(value.presentation)) return
+  const presentation = value.presentation
+  if (presentation.version !== "source-clues-v1" || !["ready", "partial", "empty"].includes(String(presentation.status)) || !Array.isArray(presentation.clues)) return
+  const valid = presentation.clues.every((clue) => object(clue) && typeof clue.id === "string" && typeof clue.type === "string" && typeof clue.title === "string" && typeof clue.headline === "string" && typeof clue.summary === "string" && strings(clue.discoveries) && Array.isArray(clue.evidence) && clue.evidence.every((row: unknown) => object(row) && typeof row.id === "string" && typeof row.label === "string" && typeof row.content === "string"))
+  if (!valid) return
+  const clues = presentation.clues.map((clue) => ({
+    id: clue.id,
+    type: clue.type,
+    title: clue.title,
+    headline: clue.headline,
+    summary: clue.summary,
+    discoveries: clue.discoveries,
+    evidence: clue.evidence.map((row: Record<string, unknown>) => ({ id: row.id, type: "source", label: row.label, content: row.content, record_id: typeof row.record_id === "string" ? row.record_id : undefined, occurred_at: typeof row.occurred_at === "string" ? row.occurred_at : null, source_run_id: typeof row.source_run_id === "string" ? row.source_run_id : undefined })),
+  })) as AnalysisResult["clues"]
+  return { schema: "peixian.analysis-result", version: "1.0", run_id: runID, process: [], subjects: [], conclusions: [], evidence: [], clues, missing: strings(presentation.missing) ? presentation.missing : [], presentation_version: "source-clues-v1" }
+}
 export function acceptedRun(value: unknown, session: string): Run {
   if (!object(value) || value.accepted !== true || typeof value.run_id !== "string" || !value.run_id || typeof value.message_id !== "string" || !value.message_id) throw new Error("提交结果待确认，请核对执行记录，不要重复提交。")
   return { id: value.run_id, session_id: session, status: "queued", phase: "accepted", user_message_id: value.message_id, created_at: "" }

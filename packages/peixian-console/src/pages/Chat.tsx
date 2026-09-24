@@ -11,7 +11,7 @@ import { ClueDetailPanel, CluePanel } from "../TrustedAnalysis"
 import RealEntityGraph from "../RealEntityGraph"
 import SmoothMarkdown from "../SmoothMarkdown"
 import type { TrustedEvidence } from "../TrustedAnalysis"
-import { isAnalysisResult, legacyPresentation } from "../result-contract"
+import { isAnalysisResult, legacyPresentation, sourcePresentation } from "../result-contract"
 import RuntimeStatus from "../RuntimeStatus"
 import { displayName } from "../analysis-display"
 import { canObserve, canSend } from "../runtime-view"
@@ -39,7 +39,9 @@ export default function Chat() {
   const [selectedPlugins, setSelectedPlugins] = createSignal<string[]>([])
   const [busy, setBusy] = createSignal(false)
   const [sending, setSending] = createSignal(false)
-  const [pendingPrompt, setPendingPrompt] = createSignal<{ text: string; attachments: { id: string; name: string }[]; messageID?: string; accepted: boolean }>()
+  const [pendingPrompt, setPendingPrompt] = createSignal<{ text: string; attachments: { id: string; name: string }[]; messageID?: string }>()
+  const [replyJump, setReplyJump] = createSignal(false)
+  const [messageSupport, setMessageSupport] = createSignal<{ version?: string; file_ids?: boolean; max_files?: number; requires_ready?: boolean; allows_truncated?: boolean }>()
   const [uploading, setUploading] = createSignal(false)
   const [uncertain, setUncertain] = createSignal(false)
   const [loading, setLoading] = createSignal(true)
@@ -60,6 +62,7 @@ export default function Chat() {
   const [scene, setScene] = createSignal<{ scenario_id: string | null; name: string | null; source: string }>()
   const [clearingScene, setClearingScene] = createSignal(false)
   const [trusted, setTrusted] = createSignal<TrustedEvidence>()
+  const [sourceClues, setSourceClues] = createSignal<AnalysisResult>()
   const [selectedClue, setSelectedClue] = createSignal<AnalysisClue>()
   const [showClues, setShowClues] = createSignal(true)
   const [insightTab, setInsightTab] = createSignal<"clues" | "graph">("clues")
@@ -113,6 +116,7 @@ export default function Chat() {
   const shownModels = createMemo(() => models())
   const shownCapabilities = createMemo(() => capabilities().filter((item) => item.enabled).map(item=>({...item,name:displayName(item.name),description:displayName(item.name)!==item.name?"整理相关资料并核对来源。":item.description})))
   const relatedPlugins = createMemo(() => shownCapabilities().filter((item) => item.kind === "plugin"))
+  const fileSelectionReady = createMemo(() => messageSupport()?.version === "message-support-v1" && messageSupport()?.file_ids === true)
   const slashQuery = createMemo(() => draft().match(/^\s*\/([^\s]*)$/)?.[1]?.toLowerCase())
   const slashCapabilities = createMemo(() => {
     if (slashQuery() === undefined) return []
@@ -125,7 +129,7 @@ export default function Chat() {
     return result && typeof result === "object" && "run_id" in result ? String(result.run_id) : undefined
   })
   const latestAnalysis = createMemo(() => {
-    const result = messageAnalysis() ?? legacyPresentation(trusted()?.presentation)
+    const result = messageAnalysis() ?? sourceClues() ?? legacyPresentation(trusted()?.presentation)
     if (!result) return
     const gaps = result.run_id && runEvidence()?.run_id === result.run_id ? runEvidence()?.missing : undefined
     return { ...result, missing: [...new Set([...(result.missing ?? []), ...(gaps ?? [])])] }
@@ -240,6 +244,7 @@ export default function Chat() {
     if (!current()) return
     if (latestRun() && currentRun()?.id === latestRun() && !terminalRun(currentRun()!.status) && !page.items.some((item) => item.id === latestRun())) return
     const run = page.items.find((item) => !terminalRun(item.status)) ?? page.items.find((item) => item.id === latestRun()) ?? page.items[0]
+    if (run && currentRun()?.id === run.id && (run.status_revision ?? 0) < (currentRun()?.status_revision ?? 0)) return
     if (!run) {
       setBusy(false)
       setCurrentRun(undefined)
@@ -247,6 +252,7 @@ export default function Chat() {
       setRunEvents([])
       setRunEventRun(undefined)
       setRunEvidence(undefined)
+      setSourceClues(undefined)
       return
     }
     setLatestRun(run.id)
@@ -271,6 +277,10 @@ export default function Chat() {
       setRunEventRun(run.id)
     }
     if (evidenceResult.status === "fulfilled") setRunEvidence(evidenceResult.value)
+    if (terminalRun(run.status)) {
+      const result = await api<TrustedResult>("/sessions/" + id + "/runs/" + run.id + "/result").catch(() => undefined)
+      if (current()) setSourceClues(result ? sourcePresentation(result, run.id) : undefined)
+    }
   }
   async function refresh() {
     if (!available()) {
@@ -301,6 +311,9 @@ export default function Chat() {
       list<Plugin>("/plugins"),
       list<Omit<CapabilityItem, "kind"> & { kind: "personal_skill" | "plugin" | "official_skill" }>("/capabilities?page=1&page_size=100"),
     ])
+    void api<{ message_support?: { version?: string; file_ids?: boolean; max_files?: number; requires_ready?: boolean; allows_truncated?: boolean } }>("/capabilities?page=1&page_size=100")
+      .then((value) => setMessageSupport(value.message_support))
+      .catch(() => setMessageSupport(undefined))
     if (result[0].status === "fulfilled") {
       setModels(result[0].value as Model[])
       const data = result[0].value as Model[]
@@ -359,6 +372,7 @@ export default function Chat() {
     completedToolTraces.clear()
     toolStatuses.clear()
     followOutput = true
+    setReplyJump(false)
     setSelected(id)
     setPendingPrompt(undefined)
     setSelectedFiles([])
@@ -367,6 +381,7 @@ export default function Chat() {
     setSelectedPlugins([])
     setMessages([])
     setTrusted(undefined)
+    setSourceClues(undefined)
     setCurrentRun(undefined)
     setLatestRun(undefined)
     setRunEvents([])
@@ -391,10 +406,12 @@ export default function Chat() {
     completedToolTraces.clear()
     toolStatuses.clear()
     followOutput = true
+    setReplyJump(false)
     setSelected(undefined)
     setPendingPrompt(undefined)
     setMessages([])
     setTrusted(undefined)
+    setSourceClues(undefined)
     setCurrentRun(undefined)
     setLatestRun(undefined)
     setRunEvents([])
@@ -433,20 +450,24 @@ export default function Chat() {
   async function send(textOverride?: string) {
     const text = textOverride ?? draft()
     if (!text.trim() || sending() || uncertain() || busy() || !ready() || !shownModels().length) return
-    const attachments: {id:string;name:string}[] = []
+    const fileIDs = fileSelectionReady() ? selectedFiles() : []
+    const attachments = fileIDs.map((id) => files().find((item) => item.id === id)).filter((item): item is FileItem => !!item).map((item) => ({ id: item.id, name: item.name }))
+    if (fileIDs.length !== attachments.length || fileIDs.some((id) => { const item = files().find((file) => file.id === id); return (item?.parse_status ?? item?.status) !== "ready" || item?.truncated === true })) { setError("关联文件尚未完成解析或已被删除，请重新选择后发送。"); return }
     const payload = {
       text: text.trim(),
       agent_id: "theft-assistant",
       model_id: model() || undefined,
       skill_ids: [],
       plugin_ids: [],
-      file_ids: [],
+      file_ids: fileIDs,
       mode: "standard",
       client_request_id: crypto.randomUUID(),
     }
     const uid = app.user().id
+    const showJump = Boolean(scroll && scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight >= 96)
+    if (showJump) setReplyJump(true)
     setSending(true)
-    setPendingPrompt({ text, attachments, accepted: false })
+    setPendingPrompt({ text, attachments })
     setError("")
     let submitting = false
     let accepted = false
@@ -471,7 +492,8 @@ export default function Chat() {
       if (result.accepted !== true) throw new ApiError("提交结果待确认，请核对历史记录。", 0, "unknown_submission")
       accepted = true
       setSentAttachments((current) => ({ ...current, [result.message_id]: attachments }))
-      setPendingPrompt({ text, attachments, messageID: result.message_id, accepted: true })
+      setPendingPrompt({ text, attachments, messageID: result.message_id })
+      if (fileIDs.length) setSelectedFiles([])
       animatedRuns.add(result.run_id)
       setLatestRun(result.run_id)
       setCurrentRun({ id: result.run_id, session_id: id, status: "queued", phase: "accepted", user_message_id: result.message_id, created_at: new Date().toISOString() })
@@ -490,7 +512,7 @@ export default function Chat() {
         setPendingPrompt(undefined)
         setUncertain(true)
         setError("提交结果待确认，草稿已保留。请先检查历史和当前任务状态，避免重复调用。")
-      } else { setPendingPrompt(undefined); setError((error as Error).message) }
+      } else { setPendingPrompt(undefined); setReplyJump(false); setError((error as Error).message) }
     } finally {
       if (app.user().id === uid) setSending(false)
     }
@@ -650,14 +672,14 @@ export default function Chat() {
             setFiles(inventory)
             readyFile = inventory.find((item) => item.id === uploaded.id)
           }
-          if (readyFile?.status === "ready" && readyFile.truncated !== true) break
+          if ((readyFile?.parse_status ?? readyFile?.status) === "ready" && readyFile?.truncated !== true) break
           if (readyFile?.truncated || readyFile && ["partial", "no_text", "failed", "error"].includes(readyFile.status ?? "")) throw new Error(`${file.name} 解析未完成或内容被截断，请拆分或重传。`)
           await new Promise((resolve) => setTimeout(resolve, 2000))
         }
-        if (readyFile?.status !== "ready" || readyFile.truncated) throw new Error(`${file.name} 已上传但仍在解析，暂不能关联；请稍后重新选择。`)
+        if ((readyFile?.parse_status ?? readyFile?.status) !== "ready" || readyFile?.truncated) throw new Error(`${file.name} 已上传但仍在解析，暂不能关联；请稍后重新选择。`)
       }
       app.invalidate(["files"])
-      app.notify("文件已上传到资料库。当前研判暂不支持将文件随消息关联。")
+        app.notify(fileSelectionReady() ? "文件已上传并完成解析，可在文件选择中关联本次消息。" : "文件已上传到资料库；当前服务暂不支持随消息关联。")
     } catch (cause) {
       app.notify((cause as Error).message, "error")
     } finally {
@@ -665,24 +687,10 @@ export default function Chat() {
     }
   }
   function toggleCapability(item: CapabilityItem) {
-    if (item.available === false) {
-      app.notify(item.unavailable_reason || "该能力当前不可用。", "error")
-      return
-    }
-    if (item.kind === "skill") {
-      toggle(item.id, "skills")
-      return
-    }
-    const current = selectedPlugins()
-    if (!current.includes(item.id) && current.length >= 5) {
-      app.notify("每次最多选择五个插件。", "error")
-      return
-    }
-    setSelectedPlugins(current.includes(item.id) ? current.filter((value) => value !== item.id) : [...current, item.id])
+    app.notify("插件/技能由模型统一调用，暂不支持手动选择。")
   }
   function chooseSlashCapability(item: CapabilityItem) {
     toggleCapability(item)
-    setDraft("")
     setSlashFilter("")
     queueMicrotask(() => textarea?.focus())
   }
@@ -806,7 +814,7 @@ export default function Chat() {
       <div class="related-capabilities-head"><strong>相关插件</strong></div>
       <div class="related-capabilities-list">
         <For each={relatedPlugins()}>
-          {(item) => <article class="plugin-card"><img class="plugin-card-icon" src={pluginIcon(item.name)} alt="" /><div class="plugin-card-body"><div class="plugin-card-title"><strong>{item.name}</strong><small>v{String(item.version).replace(/^v/i, "")}</small></div><p>{item.description}</p><span>插件工具</span></div><button onClick={() => { const instruction = `请优先使用${item.name}协助核对`; setDraft((current) => current.includes(instruction) ? current : `${current.trim()}${current.trim() ? "\n" : ""}${instruction}`); textarea?.focus(); app.notify("已将插件需求填入问题；实际调用由研判服务判断。") }}>使用</button></article>}
+          {(item) => <article class="plugin-card"><img class="plugin-card-icon" src={pluginIcon(item.name)} alt="" /><div class="plugin-card-body"><div class="plugin-card-title"><strong>{item.name}</strong><small>v{String(item.version).replace(/^v/i, "")}</small></div><p>{item.description}</p><span>插件工具</span></div><button onClick={() => toggleCapability(item)}>使用</button></article>}
         </For>
       </div>
     </div>
@@ -897,7 +905,7 @@ export default function Chat() {
             <Status value={app.user().runtime?.status} />
           </div>
         </Show>
-        <div class="messages-scroll" ref={scroll} onPointerDown={() => { selectingText = true }} onPointerUp={() => { requestAnimationFrame(() => { selectingText = false }) }} onPointerCancel={() => { selectingText = false }} onScroll={() => { followOutput = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 96 }}>
+        <div class="messages-scroll" ref={scroll} onPointerDown={() => { selectingText = true }} onPointerUp={() => { requestAnimationFrame(() => { selectingText = false }) }} onPointerCancel={() => { selectingText = false }} onScroll={() => { followOutput = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 96; if (followOutput) setReplyJump(false) }}>
           <Show
             when={messages().length || pendingPrompt() || awaitingReply()}
             fallback={<div class="chat-welcome"><strong>你好，我是你的智能研判助手</strong><p>可以从一个问题开始，重要结论请结合原始资料核验。</p></div>}
@@ -909,7 +917,7 @@ export default function Chat() {
                   const attachments = () => message().attachments ?? sentAttachments()[message().info.id] ?? []
                   const textParts = () => entry().textParts
                   const toolParts = () => entry().toolParts
-                  const renderText = (item: () => ChatEntry["textParts"][number]) => message().info.role === "assistant" ? <div><SmoothMarkdown id={`${selected()}:${item().id}`} text={item().part.text ?? ""} live={animatedRuns.has(message().info.run_id ?? "") || busy() && currentRun()?.id === message().info.run_id} cache={displayedText} pause={() => selectingText || selectionInConversation()} onProgress={() => { if (scroll && followOutput && !selectingText && !selectionInConversation()) scroll.scrollTop = scroll.scrollHeight }} /></div> : <Markdown text={item().part.text ?? ""} />
+                  const renderText = (item: () => ChatEntry["textParts"][number]) => message().info.role === "assistant" ? <div><Show when={item().part.display_kind === "source_answer"}><span class="chat-source-answer-label">已核对资料</span></Show><SmoothMarkdown id={`${selected()}:${item().id}`} text={item().part.text ?? ""} live={animatedRuns.has(message().info.run_id ?? "") || busy() && currentRun()?.id === message().info.run_id} cache={displayedText} pause={() => selectingText || selectionInConversation()} onProgress={() => { if (scroll && followOutput && !selectingText && !selectionInConversation()) scroll.scrollTop = scroll.scrollHeight }} /></div> : <Markdown text={item().part.text ?? ""} />
                   const traceComplete = () => {
                     const key = `${selected()}:${message().info.id}`
                     if (toolParts().length && toolParts().every((part, index) => ["completed", "succeeded"].includes(toolStatus(part, index, message().info.id)))) completedToolTraces.add(key)
@@ -1007,13 +1015,14 @@ export default function Chat() {
                 }}
               </Index>
               <Show when={pendingPrompt()?.messageID && messages().some((message) => message.info.id === pendingPrompt()?.messageID) ? undefined : pendingPrompt()}>
-                {(prompt) => <article class="message user pending-prompt" aria-live="polite"><div class="message-avatar"><img src={app.user().avatar ?? chatAssets.userFallbackAvatar} alt="" /></div><div class="message-content"><div class="message-author">你</div><Show when={prompt().attachments.length}><div class="message-attachments"><For each={prompt().attachments}>{(file) => <span title={file.name}><Icon name="file" size={14} /><span>{file.name}</span></span>}</For></div></Show><Markdown text={prompt().text} /><small>{prompt().accepted ? "已发送" : "正在提交…"}</small></div></article>}
+                {(prompt) => <article class="message user pending-prompt"><div class="message-avatar"><img src={app.user().avatar ?? chatAssets.userFallbackAvatar} alt="" /></div><div class="message-content"><div class="message-author">你</div><Show when={prompt().attachments.length}><div class="message-attachments"><For each={prompt().attachments}>{(file) => <span title={file.name}><Icon name="file" size={14} /><span>{file.name}</span></span>}</For></div></Show><Markdown text={prompt().text} /></div></article>}
               </Show>
               <Show when={awaitingReply()}><div class="assistant-thinking" role="status"><span class="message-avatar"><img src={chatAssets.policeAvatar} alt="" /></span><span>智能助手正在思考…</span></div></Show>
             </div>
           </Show>
         </div>
         <div class="composer-area">
+          <Show when={replyJump()}><button type="button" class="reply-jump" aria-label={busy() || sending() ? "正在回复，跳转到最新消息" : "跳转到最新消息"} title={busy() || sending() ? "正在回复，点击查看" : "点击查看最新回复"} onClick={() => { followOutput = true; setReplyJump(false); if (scroll) scroll.scrollTop = scroll.scrollHeight }}><Show when={busy() || sending()} fallback={<span class="reply-jump-arrow" aria-hidden="true">↓</span>}><span class="reply-jump-dots" aria-hidden="true"><i/><i/><i/></span></Show></button></Show>
           <Show when={!messages().length && !pendingPrompt() && !awaitingReply()}>
             <div class="chat-suggestions"><span>为你推荐</span>
               <div class="chat-suggestions-track"
@@ -1073,7 +1082,8 @@ export default function Chat() {
             <div class="composer-tools">
               <div class="chat-upload-control">
                 <input ref={fileInput} type="file" accept=".xlsx,.pdf,.docx,.txt,.md,.csv" multiple hidden onChange={(event) => void uploadLocal(event.currentTarget.files)} />
-                <button type="button" disabled={!ready() || uploading()} title="上传到资料库；当前研判暂不支持随消息关联" aria-label={uploading() ? "正在上传文件" : "上传文件到资料库"} onClick={() => fileInput.click()}><img src={uploadIcon} alt="" /><span>{uploading() ? "上传中…" : "文件"}</span></button>
+                <button type="button" disabled={!ready() || uploading()} title={fileSelectionReady() ? "上传文件到资料库并选择关联" : "上传到资料库；当前服务暂不支持随消息关联"} aria-label={uploading() ? "正在上传文件" : "上传文件到资料库"} onClick={() => fileInput.click()}><img src={uploadIcon} alt="" /><span>{uploading() ? "上传中…" : "文件"}</span></button>
+                <Show when={fileSelectionReady()}><button type="button" onClick={() => setPicker("files")}>选择文件{selectedFiles().length ? `（${selectedFiles().length}）` : ""}</button></Show>
               </div>
               <div class="model-choice">
                 <span class="model-dot" />
@@ -1123,7 +1133,7 @@ export default function Chat() {
         {(type) => (
           <Modal
             title={type() === "files" ? "关联文件" : "能力选择"}
-            text={type() === "files" ? "仅可选择已完成解析的个人文件。" : "选择适合当前任务的能力；个人 Skill 可在此编辑和使用。"}
+             text={type() === "files" ? "仅可选择已完成解析且未截断的个人文件。" : "插件/技能由模型统一调用，暂不支持手动选择；个人 Skill 仍可编辑。"}
             onClose={() => setPicker(undefined)}
           >
             <Show when={type() === "capabilities"}>
@@ -1133,7 +1143,7 @@ export default function Chat() {
               <For
                 each={
                   type() === "files"
-                    ? files().filter((item) => ["ready", "partial"].includes(item.status ?? ""))
+                    ? files().filter((item) => ["ready", "partial"].includes(item.parse_status ?? item.status ?? ""))
                     : shownCapabilities().filter((item) => (capabilityKind() === "all" || item.kind === capabilityKind()) && (!search() || (item.name + (item.description ?? "")).toLowerCase().includes(search().toLowerCase())))
                 }
                 fallback={
@@ -1145,11 +1155,11 @@ export default function Chat() {
               >
                 {(item) => (
                   <div class="pick-row capability-row">
-                    <input
+                     <input
                       type="checkbox"
-                      disabled={(type() === "files" && "status" in item && item.status === "partial") || (type() === "capabilities" && "available" in item && item.available === false)}
+                       disabled={type() === "files" && "status" in item && ((item.parse_status ?? item.status) !== "ready" || item.truncated === true)}
                       checked={(type() === "files" ? selectedFiles() : "kind" in item && item.kind === "plugin" ? selectedPlugins() : selectedSkills()).includes(item.id)}
-                      onChange={() => type() === "files" ? toggle(item.id, "files") : "kind" in item && toggleCapability(item)}
+                       onChange={() => type() === "files" ? toggle(item.id, "files") : "kind" in item && toggleCapability(item)}
                     />
                     <Icon name={type() === "files" ? "file" : "skill"} />
                     <span>
