@@ -111,6 +111,8 @@ def freeze_context(store,uid,sid,data):
     if candidate_set and direction == 'case_to_person' and want_score:
         present=task_person_modules(store, uid, sid, task_id)
         enrichment=build_enrichment_plan(candidate_set, present_by_person=present)
+    stop_phrase='不再追问，请基于已取得资料直接作答。'
+    stop_followup=bool((prior or {}).get('stop_followup')) or (text.strip() == stop_phrase) or ('不再追问' in text and '直接作答' in text)
     return {'version':'native-tool-context-v1','task_id':task_id,
         'scope_version':prior['scope_version']+1 if prior else 1,
         'confirmed':confirmed,'source_refs':refs,
@@ -119,7 +121,8 @@ def freeze_context(store,uid,sid,data):
         'direction':direction,
         'candidate_request_n':request_n,
         'candidate_set':candidate_set,
-        'enrichment_plan':enrichment}
+        'enrichment_plan':enrichment,
+        'stop_followup':stop_followup}
 
 
 FIELD_NAMES = {'person_identity':'人员','start':'开始时间','end':'结束时间','lon':'经度','lat':'纬度','radius_m':'半径','page':'页码','page_size':'每页条数'}
@@ -283,6 +286,9 @@ def model_context(context):
             )
         else:
             enrich_note = 'enrichment_plan 已完成；可基于已取得资料作答，覆盖不足者可再建议补查。'
+    stop_note=''
+    if context.get('stop_followup'):
+        stop_note='用户已要求停止追问，请基于已取得资料直接作答，不要再调用 question，也不要再写 next_question。'
     return ('\n本轮原生工具参数约定：研判方向、是否评分、核验人数、下一步建议与追问均由你自行判断；'
         '条件齐全即可直接查询，不必等用户逐项确认。缺条件时用 question 工具自己组织题干和选项。'
         'person_identity 可填写原始身份号码，或本会话抓拍结果中的 person-* 引用；'
@@ -291,5 +297,5 @@ def model_context(context):
         '以下已确认值不是要求查询全部能力；只取当前问题需要的字段。'
         '服务端会补齐本任务已确认且用途适用的人员和时间。'
         '真正失败不代表记录为零；不要自行重试失败调用。分数、等级与排序数值只由平台按来源计算。'
-        + enrich_note + '\n'
+        + stop_note + enrich_note + '\n'
         + adapter.canonical(payload))

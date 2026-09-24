@@ -229,8 +229,11 @@ def model_case_checks(chosen, record_ids):
     }
 
 
-def next_question(run_id, suggestions, chosen=None):
+def next_question(run_id, suggestions, chosen=None, context=None):
     """Prefer model-authored next_question; else build options from suggestion replies."""
+    context = context or {}
+    if context.get('stop_followup'):
+        return None
     chosen = chosen or {}
     raw = chosen.get('next_question') if isinstance(chosen.get('next_question'), dict) else None
     if raw:
@@ -250,12 +253,14 @@ def next_question(run_id, suggestions, chosen=None):
             if len(options) >= 8:
                 break
         if options:
+            multiple = False if raw.get('multiple') is False else True
             return {
                 'id': f'next-{run_id}',
                 'header': _clip(raw.get('header') or '下一步分析', 40) or '下一步分析',
                 'question': _clip(raw.get('question') or '请选择下一步。', 200) or '请选择下一步。',
                 'options': options,
                 'custom': True,
+                'multiple': multiple,
             }
     options = []
     for item in suggestions or []:
@@ -278,6 +283,7 @@ def next_question(run_id, suggestions, chosen=None):
         'question': '请选择下一步，选择后才会查询。',
         'options': options,
         'custom': True,
+        'multiple': True,
     }
 
 
@@ -340,8 +346,6 @@ def build(result, snapshot):
             basic.append({'label': label, 'value': value, 'source_ids': [r['record_id']],
                           'source_run_id': r['source_run_id'], 'obtained_at': dates.get(r['source_run_id'])})
     missing = list(result.get('missing', []))
-    if not basic and policy.get('person_ref'):
-        missing.append('尚未取得当前人员的档案信息；不影响查看其他已取得资料。')
     if policy.get('omitted_runs'):
         missing.append('历史上下文达到资源上限，部分执行未纳入本次整理；可指定来源另行解释。')
     if policy.get('history_window_full'):
@@ -425,7 +429,7 @@ def build(result, snapshot):
     return {'version': VERSION, 'run_id': result['run_id'], 'person_ref': policy.get('person_ref'),
         'status': 'partial' if missing else 'ready',
         'basic': basic, 'conclusions': conclusions, 'evidence': evidence, 'suggestions': suggestions,
-        'next_question': next_question(result['run_id'], suggestions, chosen=chosen),
+        'next_question': next_question(result['run_id'], suggestions, chosen=chosen, context=context),
         'missing': list(dict.fromkeys(missing)), 'preview_count': min(10, len(evidence)), 'total': len(evidence),
         'selection_status': 'accepted' if chosen else 'fallback',
         'source_runs': sorted({r['source_run_id'] for r in records}),
@@ -448,19 +452,22 @@ def table(headers, rows):
 def markdown(view):
     if view.get('version') not in SUPPORTED_POLICY:
         return '当前表格版本暂不受支持，请查看已有来源。'
-    sections = ['### 人员基本信息', table(['信息项', '内容', '来源／说明'],
-        [(x['label'], x['value'], '、'.join(x['source_ids']) + '；取得时间：' + str(x['obtained_at'] or '未提供')) for x in view['basic']]
-        or [('档案信息', '尚未取得', '请查看下方资料缺口')]), '### 基本结论',
-        table(['结论', '依据', '适用范围／局限'], [(x['text'], '、'.join(x['source_ids']) or '本轮已确认响应统计', x['limitation']) for x in view['conclusions']]
-        or [('暂无可确认结论', '尚无对应事实', '不表示没有发生')]), '### 判断依据']
+    sections = []
+    if view.get('basic'):
+        sections += ['### 人员基本信息', table(['信息项', '内容', '来源／说明'],
+            [(x['label'], x['value'], '、'.join(x['source_ids']) + '；取得时间：' + str(x['obtained_at'] or '未提供')) for x in view['basic']])]
+    if view.get('conclusions'):
+        sections += ['### 基本结论',
+            table(['结论', '依据', '适用范围／局限'], [(x['text'], '、'.join(x['source_ids']) or '本轮已确认响应统计', x['limitation']) for x in view['conclusions']])]
 
     def evidence(rows):
         return table(['资料类型', '时间／范围', '记录摘要', '来源'], [(x['label'], x['time'], x['text'], '、'.join(x['source_ids'])) for x in rows])
 
-    sections += [f"当前展示 {view['preview_count']} 条／已取得 {view['total']} 条；不代表上游全部记录。", evidence(view['evidence'][:10])]
-    if len(view['evidence']) > 10:
-        sections += ['<details><summary>展开其余已取得记录</summary>\n\n' + evidence(view['evidence'][10:]) + '\n\n</details>']
-    if view['missing']:
+    if view.get('evidence'):
+        sections += ['### 判断依据', f"当前展示 {view['preview_count']} 条／已取得 {view['total']} 条；不代表上游全部记录。", evidence(view['evidence'][:10])]
+        if len(view['evidence']) > 10:
+            sections += ['<details><summary>展开其余已取得记录</summary>\n\n' + evidence(view['evidence'][10:]) + '\n\n</details>']
+    if view.get('missing'):
         sections += ['资料缺口：' + '；'.join(escape(x) for x in view['missing'])]
 
     ranking = view.get('ranking')

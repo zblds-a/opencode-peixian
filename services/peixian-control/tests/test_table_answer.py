@@ -102,7 +102,13 @@ def test_old_runs_unchanged():
 def test_zero_results_distinct_from_missing_profile():
     result,snap=fixture();result['records']=[];result['claims']=[{'protected_fields':{'call_id':'call'},'claim_id':'zero','source_run_id':'run','verification_status':'approved','type':'computed','source_ids':[],'statement':'本次取得0条来源记录。'}]
     view=t.build(result,snap)
-    assert '0条' in view['conclusions'][0]['text'] and view['missing']
+    assert '0条' in view['conclusions'][0]['text']
+    assert view['basic'] == []
+    assert '尚未取得当前人员的档案信息' not in ''.join(view['missing'])
+    md = t.markdown(view)
+    assert '人员基本信息' not in md
+    assert '档案信息' not in md
+    assert '### 基本结论' in md
 
 
 @pytest.mark.skip(reason="scoring.requested model-authoritative in v31g")

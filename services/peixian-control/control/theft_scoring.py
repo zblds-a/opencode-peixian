@@ -120,9 +120,9 @@ def score_d1(records):
             total += count
             sources.append(r['record_id'])
     if not sources:
-        return _dim('d1', 'unavailable', evidence='抓拍记录缺少 capture_count', limitation='缺失不计 0')
+        return _dim('d1', 'unavailable', evidence='抓拍记录缺少抓拍次数', limitation='缺失不计 0')
     score = _bucket(total, ((0, 0, 0), (1, 2, 5), (3, 5, 10), (6, 10, 18), (11, 10**9, 25)))
-    return _dim('d1', 'available', score, f'capture_count={total}', sources, '抓拍次数不等于到访次数')
+    return _dim('d1', 'available', score, f'抓拍次数={total}', sources, '抓拍次数不等于到访次数')
 
 
 def score_d2(records):
@@ -165,9 +165,9 @@ def score_d4(records):
             total = max(total, count)
             sources.append(r['record_id'])
     if not sources:
-        return _dim('d4', 'unavailable', evidence='预警记录缺少 warningCount', limitation='缺失不计 0')
+        return _dim('d4', 'unavailable', evidence='预警记录缺少预警类型数量', limitation='缺失不计 0')
     score = _bucket(total, ((0, 0, 0), (1, 2, 8), (3, 5, 14), (6, 10**9, 20)))
-    return _dim('d4', 'available', score, f'warningCount={total}', sources, '预警类型数量不是事件次数；未使用 deductScore')
+    return _dim('d4', 'available', score, f'预警类型数量={total}', sources, '预警类型数量不是事件次数；未使用来源扣分')
 
 
 def score_d5(records):
@@ -261,7 +261,7 @@ def score_d6(records):
                     tags.extend(str(x) for x in value if x)
     if not tags:
         return _dim('d6', 'available', 0, '无标签或标签为空', sorted(set(sources)) or [r['record_id'] for r in captures + profiles],
-                    '标签是来源行为描述，非已确认前科；未使用 deductScore')
+                    '标签是来源行为描述，非已确认前科；未使用来源扣分')
     text = '、'.join(tags)
     if THEFT_TAG.search(text):
         score, note = 8, '标签与侵财/盗窃类表述高度关联'
@@ -269,8 +269,8 @@ def score_d6(records):
         score, note = 5, '标签与警情类别存在部分关联'
     else:
         score, note = 2, '标签与警情类别无明显关联'
-    return _dim('d6', 'available', score, f'{note}；tags={text[:120]}', sorted(set(sources)),
-                '标签是来源行为描述，非已确认前科；未使用 deductScore')
+    return _dim('d6', 'available', score, f'{note}；标签={text[:120]}', sorted(set(sources)),
+                '标签是来源行为描述，非已确认前科；未使用来源扣分')
 
 
 def band(rate):
@@ -301,9 +301,9 @@ def _plain_reason(dim):
         return None
     evidence = (dim.get('evidence') or '').strip()
     label = dim.get('label') or _DIM_PLAIN.get(dim.get('id'), '')
-    if dim.get('id') == 'd1' and 'capture_count=' in evidence:
+    if dim.get('id') == 'd1' and '抓拍次数=' in evidence:
         try:
-            n = int(evidence.split('capture_count=', 1)[1].split('；', 1)[0])
+            n = int(evidence.split('抓拍次数=', 1)[1].split('；', 1)[0])
             return f'周边抓拍约{n}次'
         except (ValueError, IndexError):
             pass
@@ -319,9 +319,9 @@ def _plain_reason(dim):
             return f'跨{n}个小区活动'
         except (ValueError, IndexError):
             pass
-    if dim.get('id') == 'd4' and 'warningCount=' in evidence:
+    if dim.get('id') == 'd4' and '预警类型数量=' in evidence:
         try:
-            n = int(evidence.split('warningCount=', 1)[1].split('；', 1)[0])
+            n = int(evidence.split('预警类型数量=', 1)[1].split('；', 1)[0])
             return f'预警概况计数{n}'
         except (ValueError, IndexError):
             pass
