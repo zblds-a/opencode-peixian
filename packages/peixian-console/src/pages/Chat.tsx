@@ -45,6 +45,7 @@ export default function Chat() {
   const [uploading, setUploading] = createSignal(false)
   const [uncertain, setUncertain] = createSignal(false)
   const [loading, setLoading] = createSignal(true)
+  const [loadingConversation, setLoadingConversation] = createSignal(false)
   const [error, setError] = createSignal("")
   const [picker, setPicker] = createSignal<"files" | "capabilities">()
   const [search, setSearch] = createSignal("")
@@ -94,6 +95,7 @@ export default function Chat() {
   let messageFlight: { id: string; revision: number; trailing: boolean; detail: boolean; promise: Promise<void> } | undefined
   const completedToolTraces = new Set<string>()
   const toolStatuses = new Map<string, string>()
+  const draftsBySession = new Map<string, string>()
   const suggestedQuestions = ["你能帮我做什么？", "如何整理并核对已有资料？", "研判结论如何追溯依据？", "如何使用技能或插件？"]
 
   function updateSessions(values: Session[]) {
@@ -143,10 +145,10 @@ export default function Chat() {
     if (message.info.role === "user") return [{ message, textParts: message.parts.filter((part) => part.type === "text" && part.text).map((part, partIndex) => ({ part, id: `${message.info.id}:${part.id ?? partIndex}`, afterTools: false })), toolParts: [], missingBody: false }]
     const turnStart = all.slice(0, index).map((item) => item.info.role).lastIndexOf("user") + 1
     const nextUser = all.findIndex((item, offset) => offset > index && item.info.role === "user")
-    const turn = message.info.turn_id
-      ? all.filter((item) => item.info.role === "assistant" && item.info.turn_id === message.info.turn_id)
-      : message.info.run_id
-        ? all.filter((item) => item.info.role === "assistant" && item.info.run_id === message.info.run_id)
+    const turn = message.info.run_id
+      ? all.filter((item) => item.info.role === "assistant" && item.info.run_id === message.info.run_id)
+      : message.info.turn_id
+        ? all.filter((item) => item.info.role === "assistant" && item.info.turn_id === message.info.turn_id)
         : all.slice(turnStart, nextUser < 0 ? undefined : nextUser).filter((item) => item.info.role === "assistant")
     const anchor = turn[0]
     if (message !== anchor) return []
@@ -205,17 +207,30 @@ export default function Chat() {
         setMessages((previous) => {
           const incoming = new Set(data.map((message) => message.info.id))
           const retained = busy() && currentRun() ? previous.filter((message) => message.info.role === "assistant" && message.info.run_id === currentRun()?.id && !incoming.has(message.info.id)) : []
-          return [...data, ...retained].map((message) => {
-          const old = previous.find((item) => item.info.id === message.info.id)
-          if (old?.info.id !== message.info.id) return message
-          if (JSON.stringify(old) === JSON.stringify(message)) return old
-          return {
-            ...message,
-            parts: message.parts.map((part, partIndex) => {
-              const prior = old.parts.find((item) => item.id && item.id === part.id) ?? old.parts[partIndex]
-              return prior && JSON.stringify(prior) === JSON.stringify(part) ? prior : part
-            }),
+          const expectedUserID = pendingPrompt()?.messageID ?? currentRun()?.user_message_id
+          const waitingForUser = expectedUserID && !data.some((message) => message.info.role === "user" && message.info.id === expectedUserID)
+          const combined = [...data, ...retained].filter((message) => !waitingForUser || message.info.role !== "assistant" || message.info.run_id !== currentRun()?.id && message.info.parentID !== expectedUserID)
+          const users = new Set(combined.filter((message) => message.info.role === "user").map((message) => message.info.id))
+          const children = new Map<string, Message[]>()
+          for (const message of combined) {
+            if (message.info.role !== "assistant") continue
+            const parent = [message.info.parentID, message.info.turn_id, currentRun()?.id === message.info.run_id ? currentRun()?.user_message_id : undefined]
+              .find((value) => value && users.has(value))
+            if (parent) children.set(parent, [...(children.get(parent) ?? []), message])
           }
+          const grouped = new Set([...children.values()].flat())
+          const ordered = combined.flatMap((message) => grouped.has(message) ? [] : message.info.role === "user" ? [message, ...(children.get(message.info.id) ?? [])] : [message])
+          return ordered.map((message) => {
+            const old = previous.find((item) => item.info.id === message.info.id)
+            if (old?.info.id !== message.info.id) return message
+            if (JSON.stringify(old) === JSON.stringify(message)) return old
+            return {
+              ...message,
+              parts: message.parts.map((part, partIndex) => {
+                const prior = old.parts.find((item) => item.id && item.id === part.id) ?? old.parts[partIndex]
+                return prior && JSON.stringify(prior) === JSON.stringify(part) ? prior : part
+              }),
+            }
           })
         })
         if (pendingPrompt()?.messageID && data.some((message) => message.info.id === pendingPrompt()?.messageID)) setPendingPrompt(undefined)
@@ -366,7 +381,9 @@ export default function Chat() {
     return Boolean(selection && !selection.isCollapsed && selection.anchorNode && scroll?.contains(selection.anchorNode))
   }
   async function choose(id: string) {
-    selectionRevision++
+    if (selected()) draftsBySession.set(selected()!, draft())
+    const revision = ++selectionRevision
+    setLoadingConversation(true)
     displayedText.clear()
     animatedRuns.clear()
     completedToolTraces.clear()
@@ -374,6 +391,7 @@ export default function Chat() {
     followOutput = true
     setReplyJump(false)
     setSelected(id)
+    setDraft(draftsBySession.get(id) ?? "")
     setPendingPrompt(undefined)
     setSelectedFiles([])
     setScene(undefined)
@@ -396,11 +414,16 @@ export default function Chat() {
     try {
       await fetchMessages(id)
     } catch (error) {
-      setError((error as Error).message)
+      if (selected() === id && selectionRevision === revision) setError((error as Error).message)
+    } finally {
+      if (selected() === id && selectionRevision === revision) setLoadingConversation(false)
     }
   }
   function fresh() {
+    if (selected()) draftsBySession.set(selected()!, draft())
+    const hadSession = Boolean(selected())
     selectionRevision++
+    setLoadingConversation(false)
     displayedText.clear()
     animatedRuns.clear()
     completedToolTraces.clear()
@@ -420,7 +443,7 @@ export default function Chat() {
     setSelectedClue(undefined)
     setShowClues(true)
     setInsightTab("clues")
-    if (!uncertain()) setDraft("")
+    if (hadSession || !uncertain()) setDraft("")
     setSelectedFiles([])
     setScene(undefined)
     setSelectedSkills([])
@@ -449,7 +472,7 @@ export default function Chat() {
   }
   async function send(textOverride?: string) {
     const text = textOverride ?? draft()
-    if (!text.trim() || sending() || uncertain() || busy() || !ready() || !shownModels().length) return
+    if (!text.trim() || sending() || loadingConversation() || uncertain() || busy() || !ready() || !shownModels().length) return
     const fileIDs = fileSelectionReady() ? selectedFiles() : []
     const attachments = fileIDs.map((id) => files().find((item) => item.id === id)).filter((item): item is FileItem => !!item).map((item) => ({ id: item.id, name: item.name }))
     if (fileIDs.length !== attachments.length || fileIDs.some((id) => { const item = files().find((file) => file.id === id); return (item?.parse_status ?? item?.status) !== "ready" || item?.truncated === true })) { setError("关联文件尚未完成解析或已被删除，请重新选择后发送。"); return }
@@ -609,6 +632,7 @@ export default function Chat() {
     try {
       await remove("/sessions/" + item.id)
       if (selected() === item.id) fresh()
+      draftsBySession.delete(item.id)
       await refresh()
     } catch (error) {
       app.notify((error as Error).message, "error")
@@ -907,8 +931,8 @@ export default function Chat() {
         </Show>
         <div class="messages-scroll" ref={scroll} onPointerDown={() => { selectingText = true }} onPointerUp={() => { requestAnimationFrame(() => { selectingText = false }) }} onPointerCancel={() => { selectingText = false }} onScroll={() => { followOutput = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 96; if (followOutput) setReplyJump(false) }}>
           <Show
-            when={messages().length || pendingPrompt() || awaitingReply()}
-            fallback={<div class="chat-welcome"><strong>你好，我是你的智能研判助手</strong><p>可以从一个问题开始，重要结论请结合原始资料核验。</p></div>}
+            when={!loadingConversation() && (messages().length || pendingPrompt() || awaitingReply())}
+            fallback={loadingConversation() ? <div class="loading" role="status"><Spinner /><span>正在加载对话…</span></div> : <div class="chat-welcome"><strong>你好，我是你的智能研判助手</strong><p>可以从一个问题开始，重要结论请结合原始资料核验。</p></div>}
           >
             <div class="messages">
               <Index each={shownMessages()}>
@@ -1100,7 +1124,7 @@ export default function Chat() {
                     aria-label="发送消息"
                     title="发送消息"
                     busy={sending()}
-                    disabled={!draft().trim() || uncertain() || !ready() || !shownModels().length}
+                    disabled={!draft().trim() || loadingConversation() || uncertain() || !ready() || !shownModels().length}
                     onClick={() => void send()}
                   />
                 }
