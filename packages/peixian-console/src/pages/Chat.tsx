@@ -21,6 +21,17 @@ import { pluginIcon } from "../dialogue-icons"
 import uploadIcon from "../assets/images/chat/upload-icon.png"
 import type { AnalysisClue, AnalysisResult, CapabilityItem, FileItem, Message, Model, Plugin, Run, RunEvent, RunEvidence, Session, Skill, SkillDraft } from "../types"
 
+const pluginPrompts: Record<string, string> = {
+  地点周边警情列表: "请使用周边警情插件帮我查询经度【116.9355】、纬度【34.721】、半径【800米】范围内的警情信息",
+  地点周边人员抓拍统计: "请使用周边抓拍插件帮我查询【位置坐标/已选择位置】在【开始时间】至【结束时间】期间【半径】米范围内的抓拍记录",
+  人员跨小区活动汇总: "请使用跨小区来源插件帮我查询人员【人员编号】在【开始时间】至【结束时间】期间的跨小区来源记录",
+  人员夜间抓拍记录: "请使用夜间来源插件帮我查询人员【人员编号】在【开始时间】至【结束时间】期间的夜间来源记录",
+  人员基础档案与最近十条抓拍: "请使用档案及最近抓拍插件帮我查询人员【人员编号】的基础档案信息和最近抓拍记录",
+  人员指定时段轨迹明细: "请使用单人轨迹插件帮我查询人员【姓名/人员编号】在【开始时间】至【结束时间】期间的轨迹记录",
+  人员预警类型概览: "请使用预警概况插件帮我查询人员【人员编号】的预警类型概况",
+  人员近七天预警记录: "请使用固定近七天明细插件帮我查询人员【人员编号】固定近七天窗口内的预警来源明细",
+}
+
 export default function Chat() {
   const app = useConsole()
   const [sessions, setSessions] = createSignal<Session[]>([])
@@ -711,7 +722,14 @@ export default function Chat() {
     }
   }
   function toggleCapability(item: CapabilityItem) {
-    app.notify("插件/技能由模型统一调用，暂不支持手动选择。")
+    const prompt = item.kind === "plugin" ? pluginPrompts[displayName(item.name)] : undefined
+    if (!prompt) {
+      app.notify("该能力暂无使用引导，请直接描述您的需求。")
+      return
+    }
+    setDraft(prompt)
+    setPicker(undefined)
+    queueMicrotask(() => textarea?.focus())
   }
   function chooseSlashCapability(item: CapabilityItem) {
     toggleCapability(item)
@@ -1157,7 +1175,7 @@ export default function Chat() {
         {(type) => (
           <Modal
             title={type() === "files" ? "关联文件" : "能力选择"}
-             text={type() === "files" ? "仅可选择已完成解析且未截断的个人文件。" : "插件/技能由模型统一调用，暂不支持手动选择；个人 Skill 仍可编辑。"}
+             text={type() === "files" ? "仅可选择已完成解析且未截断的个人文件。" : "点击插件可填入使用引导，核对参数后发送；个人 Skill 仍可编辑。"}
             onClose={() => setPicker(undefined)}
           >
             <Show when={type() === "capabilities"}>
