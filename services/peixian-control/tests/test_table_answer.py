@@ -27,7 +27,15 @@ def test_profile_tables_and_source_binding():
     assert view['basic'][0]['source_run_id']=='run'
     assert view['basic'][0]['obtained_at']==result['generated_at']
     output=t.markdown(view)
-    assert all('### '+x in output for x in ['人员基本信息','基本结论','判断依据','下一步分析建议'])
+    assert all('### '+x in output for x in ['人员基本信息','基本结论','判断依据'])
+    assert '### 下一步分析建议' not in output
+    if view['suggestions']:
+        assert view.get('next_question') is not None
+        assert view['next_question']['custom'] is True
+        assert len(view['next_question']['options']) <= 3
+        assert [o['label'] for o in view['next_question']['options']] == [s['reply'] for s in view['suggestions']]
+    else:
+        assert view.get('next_question') is None
     assert '来源枚举X' in output
 
 
@@ -233,8 +241,11 @@ def test_platform_suggestions_outrank_model_and_dedupe():
     from control.theft_candidates import candidate_request_n
     assert candidate_request_n(view['suggestions'][0]['reply']) == 2
     output = t.markdown(view)
-    assert '回复「核验前2名」' in output
+    assert '### 下一步分析建议' not in output
     assert '| 建议 |' not in output
+    nq = view['next_question']
+    assert nq['options'][0]['label'] == view['suggestions'][0]['reply']
+    assert nq['options'][0]['send'] is True
 
 
 def test_platform_skips_closed_tools_and_per_person_enrich():
@@ -326,9 +337,32 @@ def test_model_query_reply_is_natural_phrase_not_label():
     assert '说明已取得的来源记录' in replies
     assert all(x['reply'] != x['text'] for x in view['suggestions'])
     output = t.markdown(view)
-    assert '1. 回复「' in output and '不会自动执行' in output
+    assert '### 下一步分析建议' not in output
+    nq = view['next_question']
+    assert [o['label'] for o in nq['options']] == [s['reply'] for s in view['suggestions']]
+    assert all(o['send'] is True for o in nq['options'])
 
 
 def test_clarify_reply_is_example():
     from control.theft_candidates import reply_clarify
     assert reply_clarify(['start', 'end', 'radius_m']) == '时间 2026-09-10 20:00 至 2026-09-10 23:00，半径 500 米'
+
+def test_next_question_clarify_send_false():
+    result, snap = fixture()
+    snap['native_tool_context'] = {
+        'confirmed': {}, 'task_id': 'task', 'scoring_requested': False,
+        'direction': 'case_to_person', 'candidate_set': [],
+    }
+    snap['table_answer_policy']['person_ref'] = None
+    snap['native_calls'] = {}
+    choose(snap, suggestions=[{'action': 'clarify_scope', 'fields': ['start', 'end', 'radius_m']}])
+    view = t.build({**result, 'records': [], 'claims': []}, snap)
+    nq = view['next_question']
+    assert nq is not None
+    assert nq['custom'] is True
+    assert len(nq['options']) <= 3
+    clarify = [o for o in nq['options'] if o['action'] == 'clarify_scope']
+    assert clarify and all(o['send'] is False for o in clarify)
+    assert [o['label'] for o in nq['options']] == [s['reply'] for s in view['suggestions']]
+    assert '### 下一步分析建议' not in t.markdown(view)
+

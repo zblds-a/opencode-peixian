@@ -241,6 +241,33 @@ def policy_person_hint(context):
     return bool((context.get('confirmed') or {}).get('person_identity'))
 
 
+
+def next_question(run_id, suggestions):
+    """Single-choice card payload for the console QuestionForm."""
+    if not suggestions:
+        return None
+    options = []
+    for item in suggestions:
+        reply = (item.get('reply') or item.get('text') or '').strip()
+        if not reply:
+            continue
+        options.append({
+            'label': reply,
+            'description': item.get('reason') or '',
+            'action': item.get('action') or 'query',
+            'send': item.get('action') != 'clarify_scope',
+        })
+    if not options:
+        return None
+    return {
+        'id': f'next-{run_id}',
+        'header': '下一步分析',
+        'question': '请选择下一步，选择后才会查询。',
+        'options': options,
+        'custom': True,
+    }
+
+
 def build(result, snapshot):
     policy = snapshot.get('table_answer_policy', {})
     if policy.get('version') not in SUPPORTED_POLICY:
@@ -410,6 +437,7 @@ def build(result, snapshot):
     return {'version': VERSION, 'run_id': result['run_id'], 'person_ref': policy.get('person_ref'),
         'status': 'partial' if missing else 'ready',
         'basic': basic, 'conclusions': conclusions, 'evidence': evidence, 'suggestions': suggestions,
+        'next_question': next_question(result['run_id'], suggestions),
         'missing': list(dict.fromkeys(missing)), 'preview_count': min(10, len(evidence)), 'total': len(evidence),
         'selection_status': 'accepted' if chosen else 'fallback',
         'source_runs': sorted({r['source_run_id'] for r in records}),
@@ -427,22 +455,6 @@ def escape(value):
 def table(headers, rows):
     return '\n'.join(['| ' + ' | '.join(headers) + ' |', '| ' + ' | '.join('---' for _ in headers) + ' |'] +
         ['| ' + ' | '.join(escape(v) for v in row) + ' |' for row in rows])
-
-
-def suggestion_list(items):
-    """Reply-first numbered list; nothing here is executed automatically."""
-    if not items:
-        return '可以继续描述想核对的问题，我不会自动发起查询。'
-    lines = []
-    for index, item in enumerate(items, 1):
-        reply = escape(item.get('reply') or item.get('text') or '')
-        reason = escape(item.get('reason') or '')
-        if item.get('action') == 'clarify_scope':
-            head = escape(item.get('text') or '补充查询条件')
-            lines.append(f'{index}. {head}，例如回复「{reply}」。{reason}。')
-        else:
-            lines.append(f'{index}. 回复「{reply}」：{reason}。')
-    return '\n'.join(lines) + '\n\n以上建议不会自动执行，你回复后才会查询。'
 
 
 def markdown(view):
@@ -514,7 +526,6 @@ def markdown(view):
         sections += [table(['警情编号', '处警时间', '最近直线距离', '时间差', '关系', '核验状态', '补证任务'], rows)]
         sections += [case_view.get('disclaimer') or '']
 
-    sections += ['### 下一步分析建议', suggestion_list(view['suggestions'])]
     output = '\n\n'.join(sections)
     sources = []
     for index, item in enumerate(view['evidence'], 1):
@@ -524,5 +535,5 @@ def markdown(view):
         sources.append(f'<details id="{anchor}"><summary>来源{index} · ' + escape(item['label']) + '</summary>\n\n' +
             table(['来源信息', '值'], [('记录编号', rid), ('执行编号', item['source_run_id']), ('快照', item['snapshot_id'])]) + '\n\n</details>')
     if sources:
-        output = output.replace('### 下一步分析建议', '<details><summary>查看来源编号与版本</summary>\n\n' + '\n\n'.join(sources) + '\n\n</details>\n\n### 下一步分析建议')
+        output = output + '\n\n<details><summary>查看来源编号与版本</summary>\n\n' + '\n\n'.join(sources) + '\n\n</details>'
     return output
