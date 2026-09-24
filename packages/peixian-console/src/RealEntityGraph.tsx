@@ -2,6 +2,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "so
 import { Portal } from "solid-js/web"
 import { api, ApiError } from "./api"
 import { GraphCanvas } from "./EntityGraph"
+import { dialogueIcons } from "./dialogue-icons"
 
 type GraphNode = { id: string; type: string; label: string; properties: Record<string, string | number | boolean | null>; evidence_refs?: { id: string; type: string; label: string }[] }
 type GraphEdge = { id: string; source: string; target: string; type: string; label: string; directed: boolean }
@@ -141,15 +142,14 @@ export default function RealEntityGraph(props: { sessionID?: string; runID?: str
     } catch (cause) { fail(cause) }
     finally { setWorking(false) }
   }
-  return <Show when={page()} fallback={<div class="entity-graph-panel" role="tabpanel" aria-label="实体关系图谱"><div class="graph-notice"><strong>暂无可信关系图谱</strong><p>{status()}</p></div><button class="graph-start" onClick={() => setRefresh((value) => value + 1)}>刷新图谱</button></div>}>
-    <div class="entity-graph-panel" role="tabpanel" aria-label="实体关系图谱">
-      <div class="graph-notice"><strong>{entry()?.title || "可信实体关系图谱"}</strong><p>{status() || "图中仅包含当前执行已批准的来源关系，不表示因果或风险判断。"} {page()?.meta.truncated ? "数据不完整，可继续加载或核对来源。" : ""}</p></div>
-      <div class="graph-controls"><label>类型筛选<select aria-label="筛选节点类型" value={filter()} onChange={(event) => setFilter(event.currentTarget.value)}><option value="all">全部</option><For each={[...new Set(page()?.nodes.map((node) => node.type) ?? [])]}>{(type) => <option value={type}>{type}</option>}</For></select></label><button onClick={() => setLarge(true)}>放大查看</button></div>
-      <GraphCanvas nodes={canvasNodes()} edges={edges()} selected={selected()} path={path()} onSelect={(id) => void selectNode(id)} />
-      <p class="graph-help">可拖动、滚轮缩放，点击节点核对脱敏详情与来源。</p>
+  return <Show when={page()} fallback={<div class="entity-graph-panel right-panel--graph" role="tabpanel" aria-label="实体关系图谱"><div class="graph-notice"><span class="graph-notice-icon" aria-hidden="true">i</span><div><strong>来源关系图</strong><p>{status()}</p></div></div><button class="graph-start" onClick={() => setRefresh((value) => value + 1)}>刷新图谱</button></div>}>
+    <div class="entity-graph-panel right-panel--graph" role="tabpanel" aria-label="实体关系图谱">
+      <div class="graph-notice"><span class="graph-notice-icon" aria-hidden="true">i</span><div><strong>来源关系图</strong><p>{status() || "图中仅包含当前执行已批准的来源关系，不表示因果或风险判断。"} {page()?.meta.truncated ? "数据不完整，可继续加载或核对来源。" : ""}</p></div></div>
+      <div class="graph-controls"><label><span class="graph-visually-hidden">类型筛选</span><select aria-label="筛选节点类型" value={filter()} onChange={(event) => setFilter(event.currentTarget.value)}><option value="all">全部</option><For each={[...new Set(page()?.nodes.map((node) => node.type) ?? [])]}>{(type) => <option value={type}>{type}</option>}</For></select></label><button onClick={() => setLarge(true)}>放大查看 <img src={dialogueIcons.zoomIn} alt=""/></button></div>
+      <div class="graph-canvas-card"><GraphCanvas nodes={canvasNodes()} edges={edges()} selected={selected()} path={path()} onSelect={(id) => void selectNode(id)} /><p class="graph-help">可拖动、滚轮缩放，点击节点核对脱敏详情与来源。</p></div>
       <Show when={page()?.meta.next_cursor}><button class="graph-start" disabled={working()} onClick={() => void loadMore()}>加载更多关系</button></Show>
       <Show when={selected()}><div class="graph-detail"><strong>{detail()?.label ?? nodes().find((node) => node.id === selected())?.label}</strong><small>{detail()?.type ?? "节点"} · 已核对来源</small><For each={Object.entries(detail()?.properties ?? {})}>{([key, value]) => <p>{key}：{String(value)}</p>}</For><small>来源记录 {detail()?.evidence_refs?.length ?? 0} 项</small><button disabled={working()} onClick={() => void expand()}>展开相邻关系</button></div></Show>
-      <div class="graph-path"><strong>来源路径分析</strong><label>起点<select aria-label="路径起点" value={source()} onChange={(event) => setSource(event.currentTarget.value)}><For each={page()?.nodes}>{(node) => <option value={node.id}>{node.label}</option>}</For></select></label><label>终点<select aria-label="路径终点" value={target()} onChange={(event) => setTarget(event.currentTarget.value)}><For each={page()?.nodes}>{(node) => <option value={node.id}>{node.label}</option>}</For></select></label><button disabled={working()} onClick={() => void findPath()}>高亮路径</button></div>
+      <div class="graph-path graph-path-card"><strong><img src={dialogueIcons.sectionEvidence} alt=""/>来源路径分析</strong><div class="graph-path-fields"><label>起点<select aria-label="路径起点" value={source()} onChange={(event) => setSource(event.currentTarget.value)}><For each={page()?.nodes}>{(node) => <option value={node.id}>{node.label}</option>}</For></select></label><label>终点<select aria-label="路径终点" value={target()} onChange={(event) => setTarget(event.currentTarget.value)}><For each={page()?.nodes}>{(node) => <option value={node.id}>{node.label}</option>}</For></select></label></div><button disabled={working()} onClick={() => void findPath()}>高亮路径</button></div>
       <Show when={large()}><Portal><div class="graph-overlay" role="dialog" aria-modal="true" aria-label="可信实体关系图谱大视图"><div><header><strong>{entry()?.title || "可信实体关系图谱"}</strong><button onClick={() => setLarge(false)} aria-label="关闭图谱大视图">关闭</button></header><GraphCanvas large nodes={canvasNodes()} edges={edges()} selected={selected()} path={path()} onSelect={(id) => void selectNode(id)} /><p>仅显示当前执行已批准的来源关系；不代表因果或风险判断。</p></div></div></Portal></Show>
     </div>
   </Show>

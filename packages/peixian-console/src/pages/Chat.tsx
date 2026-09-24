@@ -1,4 +1,5 @@
 import { createEffect, createMemo, createSignal, For, Index, onCleanup, Show } from "solid-js"
+import { Portal } from "solid-js/web"
 import { api, ApiError, list, patch, post, remove, safeMessage } from "../api"
 import { Button, Empty, ErrorLine, Field, Icon, Markdown, Modal, Spinner, Status } from "../components"
 import { useConsole } from "../context"
@@ -6,7 +7,7 @@ import BusinessConfirmations, { QuestionForm } from "../BusinessConfirmations"
 import { clarificationRequest, clarificationAnswer } from "../planner-question"
 import { nextQuestionRequest, nextQuestionAction, type NextQuestion } from "../next-question"
 import type { TrustedResult } from "../trusted-v2"
-import { ClueDrawer, CluePanel } from "../TrustedAnalysis"
+import { ClueDetailPanel, CluePanel } from "../TrustedAnalysis"
 import RealEntityGraph from "../RealEntityGraph"
 import SmoothMarkdown from "../SmoothMarkdown"
 import type { TrustedEvidence } from "../TrustedAnalysis"
@@ -16,6 +17,7 @@ import { displayName } from "../analysis-display"
 import { canObserve, canSend } from "../runtime-view"
 import { useResourceRefresh } from "../resource-refresh"
 import { chatAssets } from "../chat-assets"
+import { pluginIcon } from "../dialogue-icons"
 import type { AnalysisClue, AnalysisResult, CapabilityItem, FileItem, Message, Model, Plugin, Run, RunEvent, RunEvidence, Session, Skill, SkillDraft } from "../types"
 
 export default function Chat() {
@@ -62,6 +64,7 @@ export default function Chat() {
   const [insightTab, setInsightTab] = createSignal<"clues" | "graph">("clues")
   const [showHistory, setShowHistory] = createSignal(false)
   const [rename, setRename] = createSignal<Session>()
+  const [contextSession, setContextSession] = createSignal<{ session: Session; x: number; y: number }>()
   const [title, setTitle] = createSignal("")
   const [skillRequirement, setSkillRequirement] = createSignal("")
   const [draftTestText, setDraftTestText] = createSignal("")
@@ -123,7 +126,8 @@ export default function Chat() {
   })
   const graphRunID = createMemo(() => latestAnalysis()?.run_id ?? currentRun()?.id)
   const hasInsights = createMemo(() => Boolean(latestAnalysis()?.clues.length || latestAnalysis()?.diagram || latestAnalysis()?.run_id))
-  const sideMode = createMemo(() => loading() ? "empty" : hasInsights() ? (showClues() ? "insight" : "collapsed") : "plugins")
+  const sideMode = createMemo(() => loading() ? "empty" : selectedClue() ? "clue-detail" : hasInsights() ? (showClues() ? "insight" : "collapsed") : "plugins")
+  const rightMode = createMemo(() => sideMode() === "insight" ? insightTab() === "graph" ? "graph" : "clues" : sideMode())
   type ChatEntry = { message: Message; textParts: { part: Message["parts"][number]; id: string; afterTools: boolean }[]; toolParts: Message["parts"]; error?: Message["info"]["error"]; missingBody: boolean }
   const shownMessages = createMemo<ChatEntry[]>(() => messages().flatMap((message, index, all): ChatEntry[] => {
     if (message.info.role === "user") return [{ message, textParts: message.parts.filter((part) => part.type === "text" && part.text).map((part, partIndex) => ({ part, id: `${message.info.id}:${part.id ?? partIndex}`, afterTools: false })), toolParts: [], missingBody: false }]
@@ -163,6 +167,12 @@ export default function Chat() {
   createEffect(() => {
     if (slashQuery() === undefined && slashFilter()) setSlashFilter("")
   })
+  createEffect(() => {
+    if (!contextSession()) return
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape") setContextSession(undefined) }
+    window.addEventListener("keydown", close)
+    onCleanup(() => window.removeEventListener("keydown", close))
+  })
   const ready = createMemo(() => canSend(app.user().runtime))
   const available = createMemo(() => canObserve(app.user().runtime))
   function fetchMessages(id: string, detail = true): Promise<void> {
@@ -185,7 +195,15 @@ export default function Chat() {
         if (!current()) return
         setMessages((current) => data.map((message, index) => {
           const old = current[index]
-          return old?.info.id === message.info.id && JSON.stringify(old) === JSON.stringify(message) ? old : message
+          if (old?.info.id !== message.info.id) return message
+          if (JSON.stringify(old) === JSON.stringify(message)) return old
+          return {
+            ...message,
+            parts: message.parts.map((part, partIndex) => {
+              const previous = old.parts[partIndex]
+              return previous && JSON.stringify(previous) === JSON.stringify(part) ? previous : part
+            }),
+          }
         }))
         if (pendingPrompt()?.messageID && data.some((message) => message.info.id === pendingPrompt()?.messageID)) setPendingPrompt(undefined)
         if (!includeDetail) continue
@@ -559,13 +577,22 @@ export default function Chat() {
   }
   async function saveTitle(event: SubmitEvent) {
     event.preventDefault()
+    const session = rename()
+    const value = title().trim()
+    if (!session || !value) return
     try {
-      await patch("/sessions/" + rename()!.id, { title: title().trim() })
+      await patch("/sessions/" + session.id, { title: value })
+      setSessions((current) => current.map((item) => item.id === session.id ? { ...item, title: value } : item))
       setRename(undefined)
       await refresh()
     } catch (error) {
       app.notify((error as Error).message, "error")
     }
+  }
+  function openRename(item: Session) {
+    setContextSession(undefined)
+    setTitle(item.title)
+    setRename(item)
   }
   function toggle(id: string, type: "files" | "skills") {
     const setter = type === "files" ? setSelectedFiles : setSelectedSkills
@@ -759,17 +786,17 @@ export default function Chat() {
     }
   }
   const RelatedCapabilities = () => (
-    <aside class="related-capabilities">
-      <div class="related-capabilities-head"><div><strong>相关插件</strong><small>当前账号可用插件</small></div><span>{relatedPlugins().length}</span></div>
+    <div class="related-capabilities right-panel--plugins">
+      <div class="related-capabilities-head"><strong>相关插件</strong></div>
       <div class="related-capabilities-list">
         <For each={relatedPlugins()}>
-          {(item, index) => <button onClick={() => { const instruction = `请优先使用${item.name}协助核对`; setDraft((current) => current.includes(instruction) ? current : `${current.trim()}${current.trim() ? "\n" : ""}${instruction}`); textarea?.focus(); app.notify("已将插件需求填入问题；实际调用由研判服务判断。") }}><span class={"capability-icon tone-" + (index() % 5)}><Icon name="plugin" size={18} /></span><span><strong>{item.name}<em>v{item.version}</em></strong><small>{item.description}</small><i>插件工具</i></span><b>使用</b></button>}
+          {(item) => <article class="plugin-card"><img class="plugin-card-icon" src={pluginIcon(item.name)} alt="" /><div class="plugin-card-body"><div class="plugin-card-title"><strong>{item.name}</strong><small>v{String(item.version).replace(/^v/i, "")}</small></div><p>{item.description}</p><span>插件工具</span></div><button onClick={() => { const instruction = `请优先使用${item.name}协助核对`; setDraft((current) => current.includes(instruction) ? current : `${current.trim()}${current.trim() ? "\n" : ""}${instruction}`); textarea?.focus(); app.notify("已将插件需求填入问题；实际调用由研判服务判断。") }}>使用</button></article>}
         </For>
       </div>
-    </aside>
+    </div>
   )
   return (
-    <div class={"chat-layout side-mode-" + sideMode()}>
+    <div class={"chat-layout side-mode-" + sideMode() + " right-panel--" + rightMode()}>
       <aside class={"history-panel " + (showHistory() ? "visible" : "")}>
         <div class="history-head">
           <strong>研判记录</strong>
@@ -803,7 +830,11 @@ export default function Chat() {
               fallback={<p class="quiet">你的研判记录会保存在这里</p>}
             >
               {(item) => (
-                <div class={"history-item " + (selected() === item.id ? "selected" : "")}>
+                <div class={"history-item " + (selected() === item.id ? "selected" : "")} onContextMenu={(event) => {
+                  if (item.id.startsWith("mock-")) return
+                  event.preventDefault()
+                  setContextSession({ session: item, x: Math.min(event.clientX, window.innerWidth - 170), y: Math.min(event.clientY, window.innerHeight - 64) })
+                }}>
                   <button onClick={() => void choose(item.id)}>
                     <img class="chat-history-icon" src={chatAssets.conversationIcon} alt="" />
                     <span>{displayName(item.title) || "未命名对话"}</span>
@@ -812,10 +843,7 @@ export default function Chat() {
                     <button
                       class="icon-button"
                       aria-label="重命名对话"
-                      onClick={() => {
-                        setRename(item)
-                        setTitle(item.title)
-                      }}
+                      onClick={() => openRename(item)}
                     >
                       <Icon name="edit" size={14} />
                     </button>
@@ -829,6 +857,12 @@ export default function Chat() {
           </Show>
         </div>
       </aside>
+      <Show when={contextSession()}>{(value) => <Portal>
+        <div class="history-context-dismiss" onPointerDown={() => setContextSession(undefined)} />
+        <div class="history-context-menu" role="menu" aria-label="对话操作" style={{ left: `${value().x}px`, top: `${value().y}px` }}>
+          <button role="menuitem" onClick={() => openRename(value().session)}>重命名</button>
+        </div>
+      </Portal>}</Show>
       <section class="conversation">
         <button class="mobile-history-open" aria-label="显示研判记录" aria-expanded={showHistory()} onClick={() => setShowHistory(!showHistory())}>研判记录</button>
         <Show when={!ready()}>
@@ -850,7 +884,7 @@ export default function Chat() {
         <div class="messages-scroll" ref={scroll} onPointerDown={() => { selectingText = true }} onPointerUp={() => { selectingText = false }} onPointerCancel={() => { selectingText = false }} onScroll={() => { followOutput = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 96 }}>
           <Show
             when={messages().length || pendingPrompt() || awaitingReply()}
-            fallback={<div class="chat-welcome"><span class="welcome-icon"><img src={chatAssets.policeAvatar} alt="" /></span><h2>智能研判助手</h2><strong>你好，我是你的智能研判助手</strong><p>可以从一个问题开始；重要结论请结合原始资料核验。</p></div>}
+            fallback={<div class="chat-welcome"><strong>你好，我是你的智能研判助手</strong><p>可以从一个问题开始，重要结论请结合原始资料核验。</p></div>}
           >
             <div class="messages">
               <Index each={shownMessages()}>
@@ -859,7 +893,7 @@ export default function Chat() {
                   const attachments = () => message().attachments ?? sentAttachments()[message().info.id] ?? []
                   const textParts = () => entry().textParts
                   const toolParts = () => entry().toolParts
-                  const renderText = (item: { part: Message["parts"][number]; id: string }) => message().info.role === "assistant" && item.part.origin !== "controlled_answer" ? <div><SmoothMarkdown id={`${selected()}:${item.id}`} text={item.part.text ?? ""} live={busy() || Date.now() < animateUntil} cache={displayedText} onProgress={() => { if (scroll && followOutput && !selectingText && !selectionInConversation()) scroll.scrollTop = scroll.scrollHeight }} /></div> : <Markdown text={item.part.text ?? ""} />
+                  const renderText = (item: () => ChatEntry["textParts"][number]) => message().info.role === "assistant" && item().part.origin !== "controlled_answer" ? <div><SmoothMarkdown id={`${selected()}:${item().id}`} text={item().part.text ?? ""} live={busy() || Date.now() < animateUntil} cache={displayedText} pause={() => selectingText || selectionInConversation()} onProgress={() => { if (scroll && followOutput && !selectingText && !selectionInConversation()) scroll.scrollTop = scroll.scrollHeight }} /></div> : <Markdown text={item().part.text ?? ""} />
                   const traceComplete = () => {
                     const key = `${selected()}:${message().info.id}`
                     if (toolParts().length && toolParts().every((part, index) => ["completed", "succeeded"].includes(toolStatus(part, index, message().info.id)))) completedToolTraces.add(key)
@@ -875,7 +909,7 @@ export default function Chat() {
                       <Show when={message().info.role === "user" && attachments().length}>
                         <div class="message-attachments"><For each={attachments()}>{(file) => <span title={file.name}><Icon name="file" size={14} /><span>{file.name}</span></span>}</For></div>
                       </Show>
-                      <For each={textParts().filter((item) => !item.afterTools)}>{renderText}</For>
+                      <Index each={textParts().filter((item) => !item.afterTools)}>{renderText}</Index>
                       <Show when={entry().missingBody}><p class="message-no-body">本轮暂无可展示的 Markdown 正文；右侧线索仍可查看。</p></Show>
                       <Show when={toolParts().length}>
                         <details class="tool-trace">
@@ -941,7 +975,7 @@ export default function Chat() {
                           </div>
                         </details>
                       </Show>
-                      <For each={textParts().filter((item) => item.afterTools)}>{renderText}</For>
+                      <Index each={textParts().filter((item) => item.afterTools)}>{renderText}</Index>
                       <Show when={entry().error}>
                         <ErrorLine
                           message={
@@ -1053,7 +1087,7 @@ export default function Chat() {
         </div>
       </section>
       <Show when={sideMode() !== "empty"}>
-        <aside class={"insight-sidebar rail-" + sideMode()} aria-label="研判侧栏">
+        <aside class={"insight-sidebar rail-" + sideMode() + " right-panel--" + rightMode()} aria-label="研判侧栏">
           <Show when={sideMode() === "plugins"}><RelatedCapabilities /></Show>
           <Show when={sideMode() === "collapsed"}><button class="insight-reopen" onClick={() => setShowClues(true)} aria-label="展开研判侧栏" title="展开研判侧栏"><Icon name="star" size={17} /></button></Show>
           <Show when={sideMode() === "insight"}>
@@ -1062,9 +1096,9 @@ export default function Chat() {
               <CluePanel clues={latestAnalysis()?.clues ?? []} expanded={showClues()} onExpandedChange={setShowClues} onSelect={setSelectedClue} hideHeader />
             </Show>
           </Show>
+          <Show when={sideMode() === "clue-detail" && selectedClue()}>{(clue) => <ClueDetailPanel clue={clue()} onClose={() => setSelectedClue(undefined)} onReturn={clue().message_id ? () => { const id = clue().message_id; setSelectedClue(undefined); queueMicrotask(() => { const target = Array.from(document.querySelectorAll<HTMLElement>("[data-message-id]")).find((element) => element.dataset.messageId === id); target?.scrollIntoView({ block: "center" }); target?.focus() }) } : undefined} />}</Show>
         </aside>
       </Show>
-      <Show when={selectedClue()}>{(clue) => <ClueDrawer clue={clue()} onClose={() => setSelectedClue(undefined)} onReturn={clue().message_id ? ()=>{const id=clue().message_id;setSelectedClue(undefined);queueMicrotask(()=>{const target=Array.from(document.querySelectorAll<HTMLElement>('[data-message-id]')).find(el=>el.dataset.messageId===id);target?.scrollIntoView({block:"center"});target?.focus()})}:undefined} />}</Show>
       <Show when={picker()}>
         {(type) => (
           <Modal
@@ -1136,20 +1170,19 @@ export default function Chat() {
       <Show when={creator() === "edit" && skillDraft()}>{(value) => <Modal title="编辑 Skill" text={`来源：${creatorSource() === "conversation" ? "当前对话" : "需求描述"} · 状态：${draftStatusText(value().status)}`} wide onClose={() => setCreator(undefined)}><Show when={["preparing","generating"].includes(value().status)}><div class="runtime-banner"><Spinner/><span>系统正在生成草稿，完成后将自动刷新。</span></div></Show><div class="form-grid"><Field label="Skill 名称" required><input disabled={["preparing","generating"].includes(value().status)} value={value().name} onInput={(event) => setSkillDraft({ ...value(), name: event.currentTarget.value })} /></Field><Field label="使用场景"><input disabled={["preparing","generating"].includes(value().status)} value={value().description} onInput={(event) => setSkillDraft({ ...value(), description: event.currentTarget.value })} /></Field></div><Field label="Skill 内容（SKILL.md）" required><textarea disabled={["preparing","generating"].includes(value().status)} class="skill-editor" value={value().content} onInput={(event) => setSkillDraft({ ...value(), content: event.currentTarget.value })} /></Field><Field label="模型试运行输入"><input value={draftTestText()} onInput={(event) => setDraftTestText(event.currentTarget.value)} placeholder="填写合成测试输入；不会使用当前对话原文" /></Field><Show when={value().error}><ErrorLine message={value().error?.message}/></Show><div class="modal-actions"><Button disabled={!['ready','needs_review'].includes(value().status)} onClick={() => void testDraft("validation")}>结构检查</Button><Button disabled={value().status !== "ready"} onClick={() => void testDraft("model")}>模型试运行</Button><Button variant="primary" disabled={value().status !== "ready"} onClick={() => void saveDraft()}>保存到个人 Skill</Button></div></Modal>}</Show>
       <Show when={skillEditor()}>{(value) => <Modal title="编辑个人 Skill" text="个人 Skill 仅当前账号可见，可在能力选择弹窗中继续使用。" wide onClose={() => setSkillEditor(undefined)}><div class="form-grid"><Field label="Skill 名称" required><input value={value().name} onInput={(event) => setSkillEditor({ ...value(), name: event.currentTarget.value })} /></Field><Field label="使用场景"><input value={value().description ?? ""} onInput={(event) => setSkillEditor({ ...value(), description: event.currentTarget.value })} /></Field></div><Field label="Skill 内容（SKILL.md）" required><textarea class="skill-editor" value={value().content ?? ""} onInput={(event) => setSkillEditor({ ...value(), content: event.currentTarget.value })} /></Field><div class="modal-actions split"><Button variant="danger" onClick={() => void deletePersonalSkill()}>删除</Button><span /><Button onClick={() => void testPersonalSkill()}>测试运行</Button><Button variant="primary" onClick={() => void savePersonalSkill()}>保存</Button></div></Modal>}</Show>
       <Show when={rename()}>
-        <Modal title="重命名对话" onClose={() => setRename(undefined)}>
-          <form onSubmit={saveTitle}>
-            <Field label="对话名称">
-              <input
-                required
-                maxlength={100}
-                value={title()}
-                onInput={(event) => setTitle(event.currentTarget.value)}
-              />
-            </Field>
+        <Modal title="编辑对话名称" onClose={() => setRename(undefined)}>
+          <form class="rename-form" onSubmit={saveTitle}>
+            <input
+              aria-label="对话名称"
+              required
+              maxlength={100}
+              value={title()}
+              ref={(input) => requestAnimationFrame(() => { input.focus(); input.select() })}
+              onInput={(event) => setTitle(event.currentTarget.value)}
+            />
             <div class="modal-actions">
-              <Button type="submit" variant="primary">
-                保存名称
-              </Button>
+              <Button type="button" onClick={() => setRename(undefined)}>取消</Button>
+              <Button type="submit" variant="primary" disabled={!title().trim()}>确定</Button>
             </div>
           </form>
         </Modal>

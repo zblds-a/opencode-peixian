@@ -224,9 +224,9 @@ export default function App() {
                       <small class="police-brand-subtitle">沛县公安智能研判平台</small>
                     </span>
                   </a>
-                  <div class="space-label">
-                    {can("business.use") ? "个人工作空间" : "管理工作台"} <Icon name="lock" size={12} />
-                  </div>
+                  <Show when={!can("business.use")}>
+                    <div class="space-label">管理工作台 <Icon name="lock" size={12} /></div>
+                  </Show>
                   <nav aria-label="主导航">
                     <For each={visiblePages()}>
                       {(item) => (

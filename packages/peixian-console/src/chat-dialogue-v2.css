@@ -52,3 +52,128 @@
   .business-shell .chat-layout .composer-tools { flex-wrap: wrap; }
   .business-shell .chat-layout .model-choice { max-width: min(50%, 175px); }
 }
+
+/* Second-round dialogue layout. Every selector stays inside the user chat shell. */
+.business-shell .chat-layout .messages-scroll { position: relative; min-height: 0; }
+.business-shell .chat-layout .messages-scroll:has(.chat-welcome) { display: block; }
+.business-shell .chat-layout .chat-welcome { position: absolute; top: 46%; left: 50%; width: min(650px, calc(100% - 32px)); margin: 0; padding: 0; transform: translate(-50%, -50%); animation: none; text-align: center; }
+.business-shell .chat-layout .chat-welcome strong { color: #1b2738; font-size: clamp(24px, 1.55vw, 29px); font-weight: 700; line-height: 1.35; }
+.business-shell .chat-layout .chat-welcome p { margin-top: 9px; color: #66788f; font-size: 14px; font-weight: 400; line-height: 1.55; }
+.business-shell .chat-layout.right-panel--plugins,
+.business-shell .chat-layout.right-panel--clues,
+.business-shell .chat-layout.right-panel--clue-detail { grid-template-columns: 270px minmax(0, 1fr) 340px; }
+.business-shell .chat-layout.right-panel--graph { grid-template-columns: 270px minmax(0, 1fr) 400px; }
+.business-shell .chat-layout > .insight-sidebar { overflow-x: hidden; overflow-y: auto; background: #fbfdff; }
+.business-shell .chat-layout .insight-single-head { position: static; justify-content: space-between; min-height: 62px; padding: 16px 16px 12px; background: #fff; }
+.business-shell .chat-layout .insight-single-head strong { position: static; transform: none; color: #17243a; font-size: 21px; font-weight: 700; letter-spacing: 0; text-align: left; }
+.business-shell .chat-layout .insight-single-head > div { position: static; transform: none; }
+.business-shell .chat-layout .insight-single-head .insight-icon-button { width: 29px; height: 29px; }
+
+.business-shell .chat-layout .related-capabilities { height: 100%; }
+.business-shell .chat-layout .related-capabilities-head { min-height: 62px; padding: 16px 18px 12px; border-bottom: 1px solid #e4ecf5; background: #fff; }
+.business-shell .chat-layout .related-capabilities-head strong { color: #17243a; font-size: 21px; font-weight: 700; }
+.business-shell .chat-layout .related-capabilities-list { display: grid; gap: 8px; padding: 11px 12px 16px; }
+.business-shell .chat-layout .plugin-card { display: grid; grid-template-columns: 38px minmax(0, 1fr) 48px; align-items: start; gap: 9px; min-height: 85px; padding: 12px 10px; border: 1px solid #dce7f3; border-radius: 11px; background: #fff; box-shadow: 0 1px 3px #153d6b0b; }
+.business-shell .chat-layout .plugin-card-icon { width: 36px; height: 36px; object-fit: contain; }
+.business-shell .chat-layout .plugin-card-body { min-width: 0; }
+.business-shell .chat-layout .plugin-card-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px; }
+.business-shell .chat-layout .plugin-card-title strong { overflow: hidden; color: #17243a; font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.business-shell .chat-layout .plugin-card-title small { color: #8b9bb1; font-size: 10px; white-space: nowrap; }
+.business-shell .chat-layout .plugin-card-body p { display: -webkit-box; overflow: hidden; margin: 5px 0 3px; color: #75879f; font-size: 11px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.business-shell .chat-layout .plugin-card-body > span { color: #9aa9ba; font-size: 10px; }
+.business-shell .chat-layout .plugin-card > button { align-self: center; min-width: 44px; min-height: 28px; padding: 3px 7px; border: 1px solid #9fc2f2; border-radius: 6px; color: #1267d3; background: #fff; font-size: 11px; }
+.business-shell .chat-layout .plugin-card > button:hover { background: #eef6ff; }
+
+.business-shell .chat-layout .right-panel--clues .clue-list { display: grid; gap: 11px; padding: 12px; }
+.business-shell .chat-layout .right-panel--clues .clue-card { position: relative; display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 10px; min-height: 105px; padding: 14px 13px; border: 1px solid #e3eaf3; border-radius: 11px; background: #fff; box-shadow: 0 3px 9px #172e5412; }
+.business-shell .chat-layout .right-panel--clues .clue-card-icon { width: 40px; height: 40px; object-fit: contain; }
+.business-shell .chat-layout .right-panel--clues .clue-card-copy { min-width: 0; padding-right: 2px; }
+.business-shell .chat-layout .right-panel--clues .clue-card-copy > strong { color: #17243a; font-size: 15px; font-weight: 600; }
+.business-shell .chat-layout .right-panel--clues .clue-card-copy p { display: -webkit-box; overflow: hidden; margin: 6px 0 25px; color: #728096; font-size: 12px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.business-shell .chat-layout .right-panel--clues .clue-card-copy b { color: #1269c4; font-weight: 700; }
+.business-shell .chat-layout .right-panel--clues .clue-card-open { position: absolute; right: 12px; bottom: 11px; display: inline-flex; align-items: center; gap: 7px; min-height: 29px; padding: 4px 9px; border: 0; border-radius: 6px; color: #fff; background: #1267d3; font-size: 11px; }
+.business-shell .chat-layout .right-panel--clues .clue-card-open span { font-size: 20px; line-height: 12px; }
+.business-shell .chat-layout .clue-card--funds .clue-card-open { background: #f27c11; }
+.business-shell .chat-layout .clue-card--night .clue-card-open { background: #176ad6; }
+.business-shell .chat-layout .clue-card--person .clue-card-open { background: #af3d35; }
+.business-shell .chat-layout .clue-card--vehicle .clue-card-open { background: #149e78; }
+.business-shell .chat-layout .clue-card--place .clue-card-open { background: #5547bd; }
+.business-shell .chat-layout .clue-card--observation .clue-card-open { background: #ec691a; }
+
+.business-shell .chat-layout .clue-detail-panel { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.business-shell .chat-layout .clue-detail-head { display: flex; justify-content: space-between; align-items: center; min-height: 62px; padding: 14px 17px; border-bottom: 1px solid #e5edf5; background: #fff; }
+.business-shell .chat-layout .clue-detail-head h2 { margin: 0; color: #17243a; font-size: 21px; font-weight: 700; }
+.business-shell .chat-layout .clue-detail-head button { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid #d3e1f1; border-radius: 6px; color: #366792; background: #fff; }
+.business-shell .chat-layout .clue-detail-scroll { display: grid; align-content: start; gap: 12px; min-height: 0; padding: 12px; overflow-y: auto; }
+.business-shell .chat-layout .clue-detail-hero,
+.business-shell .chat-layout .clue-detail-section { padding: 15px; border: 1px solid #e2eaf4; border-radius: 11px; background: #fff; box-shadow: 0 2px 8px #153d6b0c; }
+.business-shell .chat-layout .clue-detail-hero { display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: start; gap: 9px; min-height: 100px; }
+.business-shell .chat-layout .clue-detail-hero > img { width: 40px; height: 40px; }
+.business-shell .chat-layout .clue-detail-hero h3 { margin: 0; color: #1b2738; font-size: 15px; }
+.business-shell .chat-layout .clue-detail-hero p { margin: 5px 0 0; color: #69798c; font-size: 12px; line-height: 1.5; }
+.business-shell .chat-layout .clue-detail-hero > button { grid-column: 2; justify-self: end; min-height: 29px; padding: 4px 9px; border: 0; border-radius: 6px; color: #fff; background: #176ad6; font-size: 11px; }
+.business-shell .chat-layout .clue-detail--funds .clue-detail-hero > button { background: #f27c11; }
+.business-shell .chat-layout .clue-detail--person .clue-detail-hero > button { background: #af3d35; }
+.business-shell .chat-layout .clue-detail--vehicle .clue-detail-hero > button { background: #149e78; }
+.business-shell .chat-layout .clue-detail--place .clue-detail-hero > button { background: #5547bd; }
+.business-shell .chat-layout .clue-detail-section h3 { display: flex; align-items: center; gap: 9px; margin: 0 0 11px; color: #1b2738; font-size: 16px; font-weight: 700; }
+.business-shell .chat-layout .clue-detail-section h3 img { width: 24px; height: 24px; object-fit: contain; }
+.business-shell .chat-layout .clue-detail-section h3 span { margin-left: auto; color: #176ad6; font-size: 13px; white-space: nowrap; }
+.business-shell .chat-layout .clue-detail-section > p,
+.business-shell .chat-layout .clue-detail-section li { color: #4d5e72; font-size: 12px; line-height: 1.7; }
+.business-shell .chat-layout .clue-detail-section ul { margin: 0; padding-left: 20px; }
+.business-shell .chat-layout .clue-detail-section li + li { margin-top: 8px; }
+.business-shell .chat-layout .clue-detail-evidence-list { display: grid; gap: 12px; }
+.business-shell .chat-layout .clue-detail-evidence-list article { display: flex; align-items: start; gap: 9px; min-width: 0; }
+.business-shell .chat-layout .clue-detail-evidence-list article > img { width: 20px; height: 20px; object-fit: contain; }
+.business-shell .chat-layout .clue-detail-evidence-list article > div { min-width: 0; flex: 1; }
+.business-shell .chat-layout .clue-detail-evidence-list strong { color: #3b4c61; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.business-shell .chat-layout .clue-detail-evidence-list p { margin: 4px 0 0; color: #77879a; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.business-shell .chat-layout .clue-detail-evidence-list time { display: block; margin-top: 3px; color: #98a6b7; font-size: 10px; text-align: right; }
+.business-shell .chat-layout .clue-detail-return { justify-self: start; border: 0; color: #1469c5; background: transparent; font-size: 12px; }
+
+.business-shell .chat-layout .entity-graph-panel { padding: 12px; }
+.business-shell .chat-layout .graph-notice { display: flex; gap: 9px; padding: 11px; border: 0; border-radius: 8px; background: #edf5ff; }
+.business-shell .chat-layout .graph-notice-icon { display: grid; flex: 0 0 20px; place-items: center; width: 20px; height: 20px; border-radius: 50%; color: #fff; background: #2174d5; font-size: 12px; font-weight: 700; }
+.business-shell .chat-layout .graph-notice strong { color: #1d5598; font-size: 12px; }
+.business-shell .chat-layout .graph-notice p { color: #687f9b; font-size: 10px; }
+.business-shell .chat-layout .graph-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.business-shell .chat-layout .graph-controls { align-items: center; margin: 11px 0; }
+.business-shell .chat-layout .graph-controls select { width: 120px; max-width: 100%; min-height: 32px; }
+.business-shell .chat-layout .graph-controls button { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; border: 0; color: #fff; background: #1166d5; }
+.business-shell .chat-layout .graph-controls button img { width: 16px; height: 16px; filter: brightness(0) invert(1); }
+.business-shell .chat-layout .graph-canvas-card { padding: 8px; border: 1px solid #d9e5f3; border-radius: 10px; background: #fff; }
+.business-shell .chat-layout .graph-canvas-card .entity-graph-canvas { height: clamp(300px, 39vh, 450px); border-color: #e4edf7; }
+.business-shell .chat-layout .graph-canvas-card .graph-help { margin: 9px 0 0; color: #8b9bb0; font-size: 10px; }
+.business-shell .chat-layout .graph-path-card { display: grid; grid-template-columns: 1fr; gap: 9px; margin-top: 12px; padding: 12px; }
+.business-shell .chat-layout .graph-path-card > strong { display: flex; align-items: center; gap: 7px; color: #193a62; font-size: 14px; }
+.business-shell .chat-layout .graph-path-card > strong img { width: 18px; height: 18px; }
+.business-shell .chat-layout .graph-path-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.business-shell .chat-layout .graph-path-fields label { min-width: 0; color: #74849b; font-size: 10px; }
+.business-shell .chat-layout .graph-path-fields select { width: 100%; max-width: none; min-height: 30px; }
+.business-shell .chat-layout .graph-path-card > button { width: 100%; min-height: 32px; border: 0; color: #fff; background: #1166d5; }
+
+.history-context-dismiss { position: fixed; z-index: 109; inset: 0; background: transparent; }
+.history-context-menu { position: fixed; z-index: 110; min-width: 148px; padding: 5px; border: 1px solid #d8e4f3; border-radius: 8px; background: #fff; box-shadow: 0 8px 24px #18385a25; }
+.history-context-menu button { width: 100%; padding: 8px 12px; border: 0; border-radius: 5px; color: #233950; background: transparent; font-size: 13px; text-align: left; }
+.history-context-menu button:hover { color: #1469c8; background: #edf5ff; }
+.business-shell .chat-layout .modal:has(.rename-form) { width: min(420px, calc(100vw - 30px)); padding: 24px; border: 0; border-radius: 16px; }
+.business-shell .chat-layout .modal:has(.rename-form)::backdrop { background: #061a32a3; }
+.business-shell .chat-layout .modal:has(.rename-form) .modal-head h2 { font-size: 16px; font-weight: 600; }
+.business-shell .chat-layout .rename-form > input { width: 100%; height: 37px; padding: 7px 10px; border: 1px solid #cbd8e7; border-radius: 5px; }
+.business-shell .chat-layout .rename-form .modal-actions { justify-content: flex-end; gap: 10px; margin-top: 24px; }
+.business-shell .chat-layout .rename-form .modal-actions button { min-width: 78px; min-height: 37px; border-radius: 8px; }
+
+@media (max-width: 1450px) {
+  .business-shell .chat-layout.right-panel--plugins,
+  .business-shell .chat-layout.right-panel--clues,
+  .business-shell .chat-layout.right-panel--clue-detail { grid-template-columns: 220px minmax(0, 1fr) 320px; }
+  .business-shell .chat-layout.right-panel--graph { grid-template-columns: 220px minmax(0, 1fr) 370px; }
+}
+@media (max-width: 1050px) {
+  .business-shell .chat-layout.right-panel--plugins,
+  .business-shell .chat-layout.right-panel--clues,
+  .business-shell .chat-layout.right-panel--clue-detail,
+  .business-shell .chat-layout.right-panel--graph { grid-template-columns: minmax(0, 1fr); }
+  .business-shell .chat-layout > .insight-sidebar { width: min(400px, 88vw); }
+}

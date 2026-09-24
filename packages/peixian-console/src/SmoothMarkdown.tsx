@@ -1,9 +1,9 @@
-import { createEffect, createSignal, onCleanup, Show, untrack } from "solid-js"
+import { createEffect, createSignal, onCleanup, untrack } from "solid-js"
 import { Markdown } from "./components"
 
 // The server publishes change notices and complete text snapshots, not replayable token deltas.
 // Preserve the displayed prefix across message refreshes so a remount cannot restart the reveal.
-export default function SmoothMarkdown(props: { text: string; live: boolean; cache: Map<string, number>; id: string; onProgress?: () => void }) {
+export default function SmoothMarkdown(props: { text: string; live: boolean; cache: Map<string, number>; id: string; onProgress?: () => void; pause?: () => boolean }) {
   const [count, setCount] = createSignal(props.cache.get(props.id) ?? (props.live ? 0 : Array.from(props.text).length))
   let frame = 0
   let target = props.text
@@ -29,6 +29,12 @@ export default function SmoothMarkdown(props: { text: string; live: boolean; cac
       const characters = Array.from(target)
       const pending = characters.length - count()
       if (pending <= 0) { frame = 0; return }
+      if (props.pause?.()) {
+        previous = now
+        fractional = 0
+        frame = requestAnimationFrame(tick)
+        return
+      }
       if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
         setCount(characters.length)
         props.cache.set(props.id, characters.length)
@@ -53,7 +59,5 @@ export default function SmoothMarkdown(props: { text: string; live: boolean; cac
     if (!frame && untrack(count) < characters.length) frame = requestAnimationFrame(tick)
   })
   onCleanup(() => cancelAnimationFrame(frame))
-  return <Show when={count() >= Array.from(props.text).length} fallback={<div class="smooth-message-text" aria-live="off"><Markdown text={Array.from(props.text).slice(0, count()).join("")} /></div>}>
-    <Markdown text={props.text} />
-  </Show>
+  return <div class="smooth-message-text" aria-live="off"><Markdown text={Array.from(props.text).slice(0, count()).join("")} /></div>
 }
