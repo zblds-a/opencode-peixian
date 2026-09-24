@@ -181,20 +181,35 @@ def reply_enrich(rank, name, kinds):
 
 
 def reply_clarify(fields):
+    """Example reply for missing scope fields; shown as 例如, not sent automatically."""
+    wanted = set(fields or [])
     parts = []
-    labels = {'start': '开始时间', 'end': '结束时间', 'radius_m': '半径', 'person_identity': '人员对象', 'lon': '经度', 'lat': '纬度'}
-    for key in fields or []:
-        if key == 'start':
-            parts.append('开始时间（例：2026-09-10 20:00）')
-        elif key == 'end':
-            parts.append('结束时间（例：2026-09-10 23:00）')
-        elif key == 'radius_m':
-            parts.append('半径（例：500米）')
-        elif key in labels:
-            parts.append(labels[key])
-    if not parts:
-        return '请补充事件窗口'
-    return '请补充' + '、'.join(parts)
+    if 'person_identity' in wanted:
+        parts.append('人员身份证号 3203XXXXXXXXXXXXXX')
+    if wanted & {'start', 'end'}:
+        parts.append('时间 2026-09-10 20:00 至 2026-09-10 23:00')
+    if 'radius_m' in wanted:
+        parts.append('半径 500 米')
+    if wanted & {'lon', 'lat'}:
+        parts.append('位置 经度 117.19、纬度 34.73')
+    return '，'.join(parts) or '时间 2026-09-10 20:00 至 2026-09-10 23:00'
+
+
+QUERY_REPLIES = {
+    'night': ('查询{who}夜间活动记录', '看{who}在夜间是否有活动'),
+    'community': ('查询{who}跨小区记录', '看{who}是否在多个小区之间活动'),
+    'warning_detail': ('查询{who}预警概况', '核对{who}有无预警记录'),
+    'warning_logs': ('查询{who}预警明细', '核对{who}的逐条预警'),
+    'profile': ('查询{who}档案', '核对{who}的基本信息和最近抓拍'),
+    'tracks': ('查询{who}轨迹', '查看{who}在时间窗口内的行动轨迹'),
+    'incidents': ('以轨迹点查询周边警情', '用已有轨迹点查周边警情，逐案核验候选案件'),
+    'captures': ('查询周边抓拍', '找出案发点附近出现过的关联人员'),
+}
+
+
+def reply_query(kind, who='此人'):
+    reply, purpose = QUERY_REPLIES.get(kind, ('进一步核对该项资料', '补齐尚未取得的资料'))
+    return reply.format(who=who), purpose.format(who=who)
 
 
 def reply_query_incidents():

@@ -167,12 +167,12 @@ def platform_suggestions(context, records, ranking, case_view, allowed_tools=Non
         missing = [k for k in ('start', 'end', 'radius_m') if k not in confirmed]
         has_captures = any(r.get('module') == 'captures' for r in records)
         if missing and not has_captures and not _already_clarifying(context, chosen, missing):
-            add('补充' + '、'.join(labels[k] for k in missing), '由案到人查询周边抓拍需要明确事件窗口',
+            add('补充' + '、'.join(labels[k] for k in missing), '查周边抓拍前需要确定事件窗口',
                 '由你补充后再决定是否查询', fields=missing, reply=candidates.reply_clarify(missing))
         if ranking and ranking.get('items') and not context.get('candidate_set'):
             n = min(3, len(ranking['items']))
             text = '核验该候选人' if n == 1 else f'核验前{n}名'
-            add(text, '已有抓拍初排，可授权深度评分', '需你确认人数（1至5名）',
+            add(text, '对初排靠前的人逐个补查夜间、跨小区、预警和档案，再做六维排序（人数可改为1至5名）', '需你确认人数（1至5名）',
                 action='authorize_candidates', reply=candidates.reply_authorize_n(n))
         elif context.get('candidate_set'):
             enrich_jobs = []
@@ -194,7 +194,7 @@ def platform_suggestions(context, records, ranking, case_view, allowed_tools=Non
                 who = f'第{rank}名' + (f'（{name}）' if name else '')
                 kind_labels = [candidates.ENRICH_KIND_LABELS[k] for k in missing_kinds]
                 add(f'为{who}补查' + '、'.join(kind_labels),
-                    '已授权核验候选人，可按人补齐评分维度',
+                    '补齐该候选人的评分维度',
                     '需你选择；仍须通过调用前核对',
                     action='query', kind=missing_kinds[0],
                     reply=candidates.reply_enrich(rank, name, missing_kinds))
@@ -214,25 +214,25 @@ def platform_suggestions(context, records, ranking, case_view, allowed_tools=Non
                         continue
                     who = f'第{rank}名' + (f'（{name}）' if name else '')
                     add(f'为覆盖不足的{who}补查' + '、'.join(candidates.ENRICH_KIND_LABELS[k] for k in missing_kinds),
-                        '可用维度不足3个，补齐后再排序',
+                        '可用维度不足3个，补齐后才能参与排序',
                         '需你选择；仍须通过调用前核对',
                         action='query', kind=missing_kinds[0],
                         reply=candidates.reply_enrich(rank, name, missing_kinds))
     elif direction == 'person_to_case':
         if 'person_identity' not in confirmed and not policy_person_hint(context):
             if not _already_clarifying(context, chosen, ['person_identity']):
-                add('补充人员对象', '由人到案需要先确认人员', '由你补充后再决定是否查询',
+                add('补充人员对象', '由人到案需要先确定核查的人员', '由你补充后再决定是否查询',
                     fields=['person_identity'], reply=candidates.reply_clarify(['person_identity']))
         missing = [k for k in ('start', 'end') if k not in confirmed]
         has_tracks = any(r.get('module') == 'tracks' for r in records)
         if missing and not has_tracks and not _already_clarifying(context, chosen, missing):
-            add('补充' + '、'.join(labels[k] for k in missing), '由人到案查询轨迹需要明确时间窗口',
+            add('补充' + '、'.join(labels[k] for k in missing), '查轨迹前需要确定时间窗口',
                 '由你补充后再决定是否查询', fields=missing, reply=candidates.reply_clarify(missing))
         if has_tracks and not any(r.get('module') == 'incidents' for r in records):
-            add('以轨迹点查询周边警情', '已有轨迹，可核验候选案件', '需你选择轨迹点来源',
+            add('以轨迹点查询周边警情', '用已有轨迹点查周边警情，逐案核验候选案件', '需你选择轨迹点来源',
                 action='query', kind='incidents', reply=candidates.reply_query_incidents())
         if case_view and case_view.get('items'):
-            add('核对处警记录原文', '候选案件均为待核验状态', '不自动认定涉案',
+            add('核对处警记录原文', '候选案件均为待核验，逐条对照处警时间和地点，不据此认定涉案', '不自动认定涉案',
                 action='inspect_sources', reply=candidates.reply_inspect_cases())
     return out[:3]
 
@@ -381,22 +381,24 @@ def build(result, snapshot):
         if reason and not refs:
             continue
         fields = []
+        who = '此人' if policy.get('person_ref') else '候选人'
         if action == 'inspect_sources':
             text, condition = '核对已有来源记录', '无需重新查询'
-            reply = '核对处警记录原文' if direction == 'person_to_case' else '核对已有来源记录'
+            reply, purpose = '说明已取得的来源记录', '不重新查询，逐条解读已经取得的资料'
         elif action == 'clarify_scope':
             fields = item.get('fields', [])
             if not isinstance(fields, list) or not fields or any(not isinstance(k, str) or k not in labels or k in confirmed for k in fields):
                 continue
             text, condition = '补充' + '、'.join(labels[k] for k in fields), '由你补充后再决定是否查询'
             from . import theft_candidates as _cand
-            reply = _cand.reply_clarify(fields)
+            reply, purpose = _cand.reply_clarify(fields), '查询前需要确定这些条件'
         elif action == 'query' and isinstance(kind, str) and kind in provider.CATALOG and 'peixian_query_' + kind in allowed and kind not in present:
             text, condition = '进一步核对' + provider.CATALOG[kind][0], '需你选择；对象、来源与范围仍需通过调用前核对'
-            reply = '以轨迹点查询周边警情' if kind == 'incidents' else f'进一步核对{provider.CATALOG[kind][0]}'
+            from . import theft_candidates as _cand
+            reply, purpose = _cand.reply_query(kind, who)
         else:
             continue
-        candidate = {'text': text, 'reason': '所选来源可进一步核对' if refs else '根据当前问题提出的可选下一步，并非已完成操作',
+        candidate = {'text': text, 'reason': purpose,
             'conditions': condition, 'source_ids': refs, 'origin': 'model_selection', 'action': action,
             'kind': kind if action == 'query' else None, 'fields': list(fields), 'reply': reply}
         key = suggestion_key(candidate)
@@ -425,6 +427,22 @@ def escape(value):
 def table(headers, rows):
     return '\n'.join(['| ' + ' | '.join(headers) + ' |', '| ' + ' | '.join('---' for _ in headers) + ' |'] +
         ['| ' + ' | '.join(escape(v) for v in row) + ' |' for row in rows])
+
+
+def suggestion_list(items):
+    """Reply-first numbered list; nothing here is executed automatically."""
+    if not items:
+        return '可以继续描述想核对的问题，我不会自动发起查询。'
+    lines = []
+    for index, item in enumerate(items, 1):
+        reply = escape(item.get('reply') or item.get('text') or '')
+        reason = escape(item.get('reason') or '')
+        if item.get('action') == 'clarify_scope':
+            head = escape(item.get('text') or '补充查询条件')
+            lines.append(f'{index}. {head}，例如回复「{reply}」。{reason}。')
+        else:
+            lines.append(f'{index}. 回复「{reply}」：{reason}。')
+    return '\n'.join(lines) + '\n\n以上建议不会自动执行，你回复后才会查询。'
 
 
 def markdown(view):
@@ -496,9 +514,7 @@ def markdown(view):
         sections += [table(['警情编号', '处警时间', '最近直线距离', '时间差', '关系', '核验状态', '补证任务'], rows)]
         sections += [case_view.get('disclaimer') or '']
 
-    sections += ['### 下一步分析建议', table(['建议', '提出原因', '需要补充的条件', '可直接回复'],
-        [(x['text'], x['reason'], x['conditions'], x.get('reply') or '') for x in view['suggestions']]
-        or [('暂未形成可用的模型建议', '可继续描述希望核对的问题', '不会自动发起查询', '')])]
+    sections += ['### 下一步分析建议', suggestion_list(view['suggestions'])]
     output = '\n\n'.join(sections)
     sources = []
     for index, item in enumerate(view['evidence'], 1):

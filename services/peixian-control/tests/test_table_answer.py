@@ -232,7 +232,9 @@ def test_platform_suggestions_outrank_model_and_dedupe():
     assert '核验前2名' in view['suggestions'][0]['text']
     from control.theft_candidates import candidate_request_n
     assert candidate_request_n(view['suggestions'][0]['reply']) == 2
-    assert '可直接回复' in t.markdown(view)
+    output = t.markdown(view)
+    assert '回复「核验前2名」' in output
+    assert '| 建议 |' not in output
 
 
 def test_platform_skips_closed_tools_and_per_person_enrich():
@@ -313,3 +315,20 @@ def test_semantic_dedup_keeps_platform_over_model():
     assert incidents[0]['origin'] == 'platform_direction'
     from control.theft_candidates import reply_query_incidents
     assert incidents[0]['reply'] == reply_query_incidents()
+
+
+def test_model_query_reply_is_natural_phrase_not_label():
+    result, snap = fixture()
+    choose(snap, suggestions=[{'action': 'query', 'kind': 'night'}, {'action': 'inspect_sources'}])
+    view = t.build(result, snap)
+    replies = [x['reply'] for x in view['suggestions']]
+    assert '查询此人夜间活动记录' in replies
+    assert '说明已取得的来源记录' in replies
+    assert all(x['reply'] != x['text'] for x in view['suggestions'])
+    output = t.markdown(view)
+    assert '1. 回复「' in output and '不会自动执行' in output
+
+
+def test_clarify_reply_is_example():
+    from control.theft_candidates import reply_clarify
+    assert reply_clarify(['start', 'end', 'radius_m']) == '时间 2026-09-10 20:00 至 2026-09-10 23:00，半径 500 米'
