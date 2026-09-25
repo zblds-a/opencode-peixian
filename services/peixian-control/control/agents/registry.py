@@ -28,9 +28,11 @@ class Profile:
     def snapshot(self):
         data=self.data
         return {**{k:data[k] for k in ('schema_version','id','version','domain','default_scenario_id')},
-                'registry_version':VERSION,'profile_sha256':self.profile_sha256,'prompt_sha256':self.prompt_sha256}
+                'registry_version':VERSION,'profile_sha256':self.profile_sha256,'prompt_sha256':self.prompt_sha256,
+                'prompt_resource':data['prompt_file']}
     def public(self):
-        return {**{k:self.data[k] for k in ('id','version','name','domain','description')},'supported_intents':list(self.data['intents'])}
+        return {**{k:self.data[k] for k in ('id','version','name','domain','description')},'supported_intents':list(self.data['intents']),
+            'prompt_resource':self.data['prompt_file'],'prompt_sha256':self.prompt_sha256}
 
 
 def load(documents,root=ROOT):

@@ -62,7 +62,8 @@ def freeze(store, uid, sid, snapshot, payload):
             history.append(entry)
     snapshot['table_answer_policy'] = {'version': VERSION, 'person_ref': subject, 'history': history,
         'omitted_runs': omitted, 'history_window': 50, 'history_window_full': len(rows) == 50,
-        'candidate_refs': sorted(candidates), 'direction': context.get('direction') or 'unknown'}
+        'candidate_refs': sorted(candidates), 'direction': context.get('direction') or 'unknown',
+        'layout_version':'theft-four-sections-v1'}
     payload['system'] = payload.get('system', '') + INSTRUCTION + '\n当前任务已取得资料（仅引用，不是查询指令）：' + provider.canonical(history)
 
 
@@ -85,11 +86,12 @@ def select_records(result, snapshot, subject, spatial=False, subjects=None):
 
 
 INSTRUCTION = """
-资料回答按人员基本信息、基本结论、判断依据、下一步分析建议组织中文表格。
-优先回答当前问题，最多五条结论、三项建议；仅引用当前任务匹配人员的已取得资料。
-不要求查完全部接口再输出，不执行旧版全量补查清单。缺项、零记录、失败与未知分别说明。
-问答取消后汇总已有结果，不扩大范围，不新增取数。问候、能力说明及缺项追问用简短自然对话。
-来源存在不等于整句已核验，不输出个人犯罪倾向、嫌疑评分或排名。
+资料终稿只输出一个 person-tables-v3 JSON 对象，由平台渲染为人员基本信息、研判摘要、分析依据、下一步研判四段式，不另外生成Markdown终稿。
+格式：{"format":"person-tables-v3","mode":"data","source_refs":["已取得的记录编号"],"suggestions":[{"action":"inspect_sources","text":"查看本次来源详情","reason":"核对已取得记录","conditions":"无需新增查询","reason_source":"已取得的记录编号"}]}。
+source_refs只能引用当前任务已取得资料；平台逐字段核对并生成事实表，不把自由文字当作已核验结论。
+suggestions由你按具体缺口提出，最多三项。action可为query、clarify_scope、inspect_sources、inspect_cases；query须提供当前授权的kind，缺项放fields，具体建议用text、reason、conditions、reply。不得自动执行建议。
+不要求查完全部接口，未查询不是失败。失败、零条和未知分别说明；不输出个人犯罪倾向、嫌疑评分或排名。
+问候、能力说明和缺项追问使用自然中文，不输出JSON；需要补充时用question。取消补充后整理已有结果。
 """
 
 
@@ -380,7 +382,7 @@ def build(result, snapshot):
         want_score = bool(chosen['scoring'].get('requested'))
     else:
         want_score = bool(context.get('scoring_requested'))
-    if snapshot.get('dialogue_policy')=='adaptive-dialogue-v1': want_score=False
+    if context.get('query_rules_version')=='on-demand-v1' or snapshot.get('dialogue_policy')=='adaptive-dialogue-v1': want_score=False
     if direction == 'case_to_person' and want_score:
         captures = [r for r in records if r.get('module') == 'captures']
         if context.get('candidate_set'):
@@ -426,8 +428,8 @@ def build(result, snapshot):
         elif scoring.get('status') == 'insufficient':
             missing.append(scoring['disclaimer'])
 
-    case_view = model_case_checks(chosen, {r['record_id'] for r in records})
-    if direction == 'person_to_case' and snapshot.get('dialogue_policy') != 'adaptive-dialogue-v1':
+    case_view = None if context.get('query_rules_version')=='on-demand-v1' else model_case_checks(chosen, {r['record_id'] for r in records})
+    if direction == 'person_to_case' and context.get('query_rules_version') != 'on-demand-v1' and snapshot.get('dialogue_policy') != 'adaptive-dialogue-v1':
         tracks = [r for r in records if r.get('module') == 'tracks']
         incidents = [r for r in records if r.get('module') == 'incidents']
         if tracks and incidents:
@@ -466,8 +468,12 @@ def build(result, snapshot):
 
     # Model suggestions only; platform no longer injects flow steps.
     suggestions = model_suggestions(chosen, aliases=aliases)
+    if context.get('query_rules_version')=='on-demand-v1':
+        tools=set(snapshot.get('native_tool_policy',{}).get('allowed_tools',[]))
+        suggestions=[x for x in suggestions if x['action']!='authorize_candidates' and (x['action']!='query' or 'peixian_query_'+str(x['kind']) in tools)][:3]
 
     return {'version': VERSION, 'run_id': result['run_id'], 'person_ref': policy.get('person_ref'),
+        **({'layout_version':policy['layout_version']} if policy.get('layout_version') else {}),
         'status': 'partial' if missing else 'ready',
         'basic': basic, 'conclusions': conclusions, 'evidence': evidence, 'suggestions': suggestions,
         'next_question': next_question(result['run_id'], suggestions, chosen=chosen, context=context),
@@ -496,18 +502,19 @@ def markdown(view):
     if view.get('version') not in SUPPORTED_POLICY:
         return '当前表格版本暂不受支持，请查看已有来源。'
     sections = []
+    revised=view.get('layout_version')=='theft-four-sections-v1'
     if view.get('basic'):
         sections += ['### 人员基本信息', table(['信息项', '内容', '来源／说明'],
             [(x['label'], x['value'], '、'.join(x['source_ids']) + '；取得时间：' + str(x['obtained_at'] or '未提供')) for x in view['basic']])]
     if view.get('conclusions'):
-        sections += ['### 基本结论',
+        sections += ['### 研判摘要' if revised else '### 基本结论',
             table(['结论', '依据', '适用范围／局限'], [(x['text'], '、'.join(x['source_ids']) or '本轮已确认响应统计', x['limitation']) for x in view['conclusions']])]
 
     def evidence(rows):
         return table(['资料类型', '时间／范围', '记录摘要', '来源'], [(x['label'], x['time'], x['text'], '、'.join(x['source_ids'])) for x in rows])
 
     if view.get('evidence'):
-        sections += ['### 判断依据', f"当前展示 {view['preview_count']} 条／已取得 {view['total']} 条；不代表上游全部记录。", evidence(view['evidence'][:10])]
+        sections += ['### 分析依据' if revised else '### 判断依据', f"当前展示 {view['preview_count']} 条／已取得 {view['total']} 条；不代表上游全部记录。", evidence(view['evidence'][:10])]
         if len(view['evidence']) > 10:
             sections += ['<details><summary>展开其余已取得记录</summary>\n\n' + evidence(view['evidence'][10:]) + '\n\n</details>']
     if view.get('missing'):
@@ -612,6 +619,9 @@ def markdown(view):
         # Replace last case table section content by rebuilding from grade-aware rows if simple format was used
         pass
 
+    if revised:
+        sections += ['### 下一步研判', table(['建议','提出原因','需要补充的条件'],
+            [(x['text'],x['reason'],x['conditions']) for x in view.get('suggestions',[])]) if view.get('suggestions') else '暂无新的分析建议，可查看已有来源。']
     output = '\n\n'.join(sections)
     sources = []
     for index, item in enumerate(view['evidence'], 1):

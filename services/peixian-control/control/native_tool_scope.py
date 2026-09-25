@@ -56,7 +56,7 @@ def infer_direction(confirmed, refs, text, prior=None):
     return 'unknown'
 
 
-def freeze_context(store,uid,sid,data,adaptive=False):
+def freeze_context(store,uid,sid,data):
     """Freeze explicit user conditions with a stable session task identity."""
     text=data['text']
     parsed=slots(text,data.get('scope'))
@@ -97,54 +97,27 @@ def freeze_context(store,uid,sid,data,adaptive=False):
         prior_constraints=''
     constraints=(prior_constraints+' '+text)[-12000:]
     direction=infer_direction(confirmed, refs, text, prior)
-    want_score=False if adaptive else scoring_requested(text, prior, direction)
-    from .theft_candidates import candidate_request_n, stage1_from_task, authorize, build_enrichment_plan, task_person_modules
-    request_n=candidate_request_n(text)
-    candidate_set=[] if adaptive or changed_object else copy.deepcopy((prior or {}).get('candidate_set') or [])
-    if request_n and want_score and direction == 'case_to_person':
-        ranked=stage1_from_task(store, uid, sid, task_id)
-        if ranked.get('items'):
-            candidate_set=authorize(ranked['items'], request_n)
-    enrichment=None
-    if candidate_set and direction == 'case_to_person' and want_score:
-        present=task_person_modules(store, uid, sid, task_id)
-        enrichment=build_enrichment_plan(candidate_set, present_by_person=present)
-    # Person-to-case full coverage: scoring on by default once identity+time confirmed
-    if not adaptive and direction == 'person_to_case' and 'person_identity' in confirmed and {'start','end'} <= set(confirmed):
-        if SCORING_NEGATE.search(text or ''):
-            want_score = False
-        else:
-            want_score = True
-    person_plan=None
-    center_set=[] if adaptive or changed_object else copy.deepcopy((prior or {}).get('center_set') or [])
-    if not adaptive and direction == 'person_to_case' and 'person_identity' in confirmed and {'start','end'} <= set(confirmed):
-        from . import person_case_flow as pcf
-        radius = confirmed.get('radius_m') or pcf.DEFAULT_RADIUS_M
-        provisional = {
-            'task_id': task_id, 'confirmed': confirmed, 'center_set': center_set,
-        }
-        person_plan = pcf.build_person_case_plan(store, uid, sid, provisional, radius_m=radius)
-        if person_plan and person_plan.get('center_set'):
-            center_set = person_plan['center_set']
     stop_phrase='不再追问，请基于已取得资料直接作答。'
     stop_followup=bool((prior or {}).get('stop_followup')) or (text.strip() == stop_phrase) or ('不再追问' in text and '直接作答' in text)
     capture_conditions={} if changed_object else copy.deepcopy((prior or {}).get('capture_conditions',{}))
-    if adaptive and re.search(r'抓拍',text):
+    if re.search(r'抓拍',text):
         capture_conditions.update({k:current[k] for k in ('start','end','radius_m') if k in current})
     return {'version':'native-tool-context-v1','task_id':task_id,
         'scope_version':prior['scope_version']+1 if prior else 1,
         'confirmed':confirmed,'source_refs':refs,
-        'dialogue_policy':'adaptive-dialogue-v1' if adaptive else None,
+        'query_rules_version':'on-demand-v1',
+        'capture_scope_version':'capture-purpose-v1',
+        'source_selection':'explicit',
         'capture_conditions':capture_conditions,
         'capture_position_confirmed':bool((prior or {}).get('capture_position_confirmed')) and not changed_object,
         'current_text':text,'constraints_text':constraints,'user_conditions':current,
-        'scoring_requested':want_score,
+        'scoring_requested':False,
         'direction':direction,
-        'candidate_request_n':request_n,
-        'candidate_set':candidate_set,
-        'enrichment_plan':enrichment,
-        'person_case_plan':person_plan,
-        'center_set':center_set,
+        'candidate_request_n':None,
+        'candidate_set':[],
+        'enrichment_plan':None,
+        'person_case_plan':None,
+        'center_set':[],
         'stop_followup':stop_followup}
 
 
@@ -174,7 +147,7 @@ def canonical_field(key, value):
 def resolve_arguments(kind, args, context):
     if not isinstance(args,dict): error('native_tool_invalid','资料工具参数必须是对象。',422)
     resolved=copy.deepcopy(args)
-    confirmed=context.get('capture_conditions',{}) if kind=='captures' and context.get('dialogue_policy')=='adaptive-dialogue-v1' else context['confirmed']
+    confirmed=context.get('capture_conditions',{}) if kind=='captures' and (context.get('capture_scope_version')=='capture-purpose-v1' or context.get('dialogue_policy')=='adaptive-dialogue-v1') else context['confirmed']
     # Only fill existing task-bound conditions, never new objects or inferred times.
     reusable=set()
     if kind in adapter.PERSON and not context['source_refs']: reusable.add('person_identity')
@@ -199,7 +172,7 @@ def arguments(kind,args,context):
     if set(args)-supported:
         error('native_tool_invalid','查询参数包含未开放的条件。',422)
     args=resolve_arguments(kind,args,context)
-    if kind=='captures' and context.get('dialogue_policy')=='adaptive-dialogue-v1':
+    if kind=='captures' and (context.get('capture_scope_version')=='capture-purpose-v1' or context.get('dialogue_policy')=='adaptive-dialogue-v1'):
         conditions=context.get('capture_conditions',{})
         absent={k:FIELD_NAMES[k]+'需针对抓拍查询明确' for k in ('start','end','radius_m') if k not in conditions or (k in args and canonical_field(k,args[k])!=canonical_field(k,conditions[k]))}
         if absent:error('scope_missing','请补充抓拍查询的指定条件。',409,absent)
@@ -310,7 +283,7 @@ def model_context(context):
 person_identity 可使用已确认身份或该任务来源中的人员引用；已选来源的坐标由平台读取。
 没有记录不等于没有发生；不得自动扩大范围、自动翻页或重试未知调用。
 用户取消补充时停止对应查询，基于成功资料给出阶段回答，不把取消解释为全部资料失败。
-资料类回答包含人员基本信息、基本结论、判断依据、下一步分析建议；来源事实与模型说明区分。
+资料类回答包含人员基本信息、研判摘要、分析依据、下一步研判；来源事实与模型说明区分。
 建议最多三项，只建议必要且可用的下一步，不自动执行。不作个人犯罪倾向、嫌疑评分或排名。
 周边警情仅支持空间及分页条件，额外时间或类别条件不能静默丢弃，处警时间不代表案发时间。
 """ + ('用户已要求停止追问，直接整理已有资料。' if context.get('stop_followup') else '') + '\n' + adapter.canonical(payload)

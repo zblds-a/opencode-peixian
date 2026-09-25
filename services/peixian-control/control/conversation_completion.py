@@ -2,7 +2,7 @@
 from . import business_runs as runs
 from .store import now
 
-VERSION = 'adaptive-dialogue-v1'
+VERSION = 'clarification-completion-v1'
 
 def dismissed(part):
     state = part.get('state') or {}
@@ -12,7 +12,8 @@ def finish_dismissed(store, row, messages):
     with store.tx() as db:
         current = dict(db.execute('SELECT * FROM business_runs WHERE id=?', (row['id'],)).fetchone())
         snapshot = store.decrypt(current['request_ciphertext'])
-        if snapshot.get('dialogue_policy') != VERSION or current['status'] in runs.TERMINAL or current['cancel_requested']:
+        compatible = snapshot.get('clarification_completion_version') == VERSION or snapshot.get('dialogue_policy') == 'adaptive-dialogue-v1'
+        if not compatible or current['status'] in runs.TERMINAL or current['cancel_requested']:
             return False
         selected = [m for m in messages if m.get('info', {}).get('role') == 'assistant' and m.get('info', {}).get('parentID') == current['message_id']]
         if not selected or selected[-1]['info'].get('error'):

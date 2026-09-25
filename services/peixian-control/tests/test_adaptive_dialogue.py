@@ -20,7 +20,7 @@ def setup_run(provider,monkeypatch):
     state.reserve(u,r['id'],1,op,'tracks');state.dispatch(u,r['id'],1,op,'tracks')
     state.complete(u,r['id'],1,op,'tracks','completed',response('tracks'));state.finish(u,r['id'],1,op)
     snap=s.decrypt(s.one('SELECT request_ciphertext FROM business_runs WHERE id=?',(r['id'],))['request_ciphertext'])
-    snap['dialogue_policy']=VERSION
+    snap['clarification_completion_version']=VERSION
     snap.setdefault('payload',{}).setdefault('tools',{})['question']=True
     snap['native_pending_questions']={'q':{'kind':'captures','status':'rejected'}}
     from control.answer_delivery import freeze,record
@@ -48,7 +48,7 @@ def test_cancel_preserves_sources_and_is_idempotent(provider,monkeypatch):
 def test_no_false_completion(provider,monkeypatch,case):
     s,u,r,snap=setup_run(provider,monkeypatch);m=messages(r)
     if case=='unknown':snap['native_calls']['call-one']['status']='unknown'
-    if case=='legacy':snap.pop('dialogue_policy')
+    if case=='legacy':snap.pop('clarification_completion_version')
     if case=='error':m[0]['info']['error']={'name':'ProviderError'}
     if case=='other_parent':m[0]['info']['parentID']='another-message'
     with s.tx() as db:
@@ -93,7 +93,7 @@ def test_context_does_not_request_all_tools():
 def test_capture_time_is_not_track_time():
     from control.native_tool_scope import resolve_arguments,arguments
     c={'confirmed':{'start':ARGS['start'],'end':ARGS['end'],'radius_m':500},'source_refs':[{'record_id':'r'}],
-       'dialogue_policy':VERSION,'capture_conditions':{}}
+       'capture_scope_version':'capture-purpose-v1','capture_conditions':{}}
     assert not resolve_arguments('captures',{},c)
     with pytest.raises(HTTPException) as exc:arguments('captures',{'start':ARGS['start'],'end':ARGS['end'],'radius_m':500},c)
     assert set(exc.value.detail['field_errors'])=={'start','end','radius_m'}
@@ -101,12 +101,13 @@ def test_capture_time_is_not_track_time():
     assert arguments('captures',{},c)['start']==ARGS['start']
 
 
-def test_native_binding_replaces_forced_full_plan():
+def test_native_binding_uses_profile_prompt():
     from control.agents.runtime import bind
-    class Profile:prompt='旧版打满八类接口'
-    p={}
-    bind(p,Profile(),None,[],native_dialogue=True)
-    assert '旧版打满八类接口' not in p['system']
+    from control.agents.registry import require
+    profile=require('theft-assistant');p={}
+    bind(p,profile,None,[])
+    assert profile.prompt in p['system']
+    assert profile.data['version']=='3.4.0'
     assert '不要求八项全查' in p['system']
 
 

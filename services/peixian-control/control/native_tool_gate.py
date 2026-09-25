@@ -129,7 +129,7 @@ def _prepare(store,uid,sid,message_id,call_id,tool,args,revision):
                 work_context['user_conditions']['person_identity']=checked_args['person_identity']
             from .native_tool_scope import resolve_arguments
             # Person-to-case: bind next stay-center source for location tools when none selected
-            if snapshot.get('dialogue_policy') != 'adaptive-dialogue-v1' and kind in ('incidents', 'captures') and not (work_context.get('source_refs') or []) and not (kind=='captures' and work_context.get('capture_position_confirmed')):
+            if work_context.get('source_selection') != 'explicit' and snapshot.get('dialogue_policy') != 'adaptive-dialogue-v1' and kind in ('incidents', 'captures') and not (work_context.get('source_refs') or []) and not (kind=='captures' and work_context.get('capture_position_confirmed')):
                 from . import person_case_flow as pcf
                 ref, _item = pcf.next_center_source(work_context, kind)
                 if ref:

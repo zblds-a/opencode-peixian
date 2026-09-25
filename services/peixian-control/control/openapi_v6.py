@@ -36,8 +36,9 @@ def extend_schemas(result):
     result['TaskCandidate']={'oneOf':[ref('TaskCandidateV1'),{'anyOf':[candidate_schema(p) for p in PROFILES.values()]}]}
     result['AgentPublic']=obj({k:STRING for k in ('id','name','version','domain','description')},('id','name','version','domain','description','supported_intents'))
     result['AgentPublic']['properties']['supported_intents']=array(STRING)
+    result['AgentPublic']['properties'].update({'prompt_resource':STRING,'prompt_sha256':STRING})
     result['AgentList']=obj({'items':array(ref('AgentPublic'))},('items',))
-    result['AgentIdentity']=obj({k:STRING for k in ('schema_version','registry_version','id','version','domain','profile_sha256','prompt_sha256','default_scenario_id')})
+    result['AgentIdentity']=obj({k:STRING for k in ('schema_version','registry_version','id','version','domain','profile_sha256','prompt_sha256','default_scenario_id','prompt_resource')})
     result['RunTask']=obj({'run_id':ID,'task_spec':nullable(ref('TaskSpec')),'agent_profile':nullable(ref('AgentIdentity')),'effective_system_prompt_sha256':nullable(STRING),'response':nullable(obj({'code':STRING,'message':STRING,'clarification_id':ID},('code','message')))},('run_id','task_spec','response'))
     result['TaskClarification']=obj({'schema':{'const':'peixian.task-clarification'},'version':{'const':'1.0'},'clarification_id':ID,'agent_id':ID,'field':{'const':'target_refs'},'question':STRING,'options':array(obj({'id':ID,'label':STRING},('id','label'))),'context_generation':{'type':'integer','minimum':1},'context_version':{'type':'integer','minimum':1},'status':{'enum':['pending','resolved','cancelled','expired']},'updated_at':dt},('schema','version','clarification_id','agent_id','field','question','options','context_generation','context_version','status','updated_at'))
     result['ClarificationCancelBody']=obj({'context_generation':{'type':'integer','minimum':1},'context_version':{'type':'integer','minimum':1},'client_request_id':{'type':'string','minLength':1,'maxLength':128}},('context_generation','context_version','client_request_id'))
