@@ -1,0 +1,46 @@
+{
+  "source_commit": "bc2a75ed5dc420cac51e37cfac821928913eff71",
+  "branch": "codex/theft-prompt-entry",
+  "workspace": "/root/PeiXianDB/theft-prompt-entry",
+  "control_image": "peixian-control:theft-prompt-3.4.0-20260925",
+  "control_image_id": "sha256:2f6545e5dc5dfd6551f867cc744eebefb141d797d5419a28380f8e605f24ec58",
+  "agent_version": "3.4.0",
+  "prompt_resource": "theft_prompt.md",
+  "prompt_sha256": "d431c0280ead23ebdf0966d67ccfb37960ab36d31753ea89f767ef257f65d3b5",
+  "static": {
+    "count": 879,
+    "digest": "0115bc4c7f0a79a5bbe1555447c727a53ddeaaebcdac7a734e4e68aee6e4e887"
+  },
+  "schema_migration": false,
+  "model_user_requests": 4,
+  "provider_calls": 2,
+  "browser": "not_executed_tool_initialization_failed",
+  "targeted_tests": {
+    "passed": 74,
+    "skipped": 23
+  },
+  "legacy_suite": {
+    "passed": 60,
+    "failed": 31,
+    "same_failures_on_unchanged_baseline": true
+  },
+  "history": {
+    "run_results": {
+      "baseline_rows": 219,
+      "changed_or_missing": 0
+    },
+    "business_runs": {
+      "baseline_rows": 328,
+      "changed_or_missing": 0
+    },
+    "skills": {
+      "baseline_rows": 22,
+      "changed_or_missing": 0
+    },
+    "templates": {
+      "baseline_rows": 7,
+      "changed_or_missing": 0
+    }
+  },
+  "github_pushed": false
+}

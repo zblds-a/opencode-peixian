@@ -1,0 +1,56 @@
+{
+  "account": "alignment-a",
+  "cases": [
+    {
+      "case": "greeting",
+      "client_request_id": "02da8c72-58e9-414f-a2b8-37c7f3eb9306",
+      "status": "completed",
+      "http_status": 202,
+      "accepted": true,
+      "run_id": "2cefd28a3e1a453f90b62205d28fbe14",
+      "message_id": "msg_b7211cc19e434ef1a5eee9a1f4661210",
+      "phase": "completed",
+      "result_http": 200,
+      "query_count": 0,
+      "record_count": 0,
+      "modules": [],
+      "layout_version": null,
+      "suggestion_count": 0,
+      "selection_status": null,
+      "no_score": true,
+      "bound_conclusions": true,
+      "four_headings": false,
+      "no_json_leak": true,
+      "report_http": 200
+    },
+    {
+      "case": "profile",
+      "client_request_id": "ee685620-934a-4564-8cdd-6f776bb8ea18",
+      "status": "completed",
+      "http_status": 202,
+      "accepted": true,
+      "run_id": "31925e558c4448c0acb09bc287adb8b5",
+      "message_id": "msg_e3c2092f994743ceba67b1934f7288fd",
+      "phase": "completed",
+      "result_http": 200,
+      "query_count": 1,
+      "record_count": 1,
+      "modules": [
+        "profile"
+      ],
+      "layout_version": "theft-four-sections-v1",
+      "suggestion_count": 1,
+      "selection_status": "accepted",
+      "no_score": true,
+      "bound_conclusions": true,
+      "four_headings": true,
+      "no_json_leak": true,
+      "report_http": 200
+    }
+  ],
+  "user_requests": 2,
+  "mock_only": true,
+  "agent_version": "3.4.0",
+  "prompt_sha256": "d431c0280ead23ebdf0966d67ccfb37960ab36d31753ea89f767ef257f65d3b5",
+  "session_id": "ses_f270428f3ffebzCNAnELQQzDgV"
+}
