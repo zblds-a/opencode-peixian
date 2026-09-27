@@ -22,7 +22,10 @@ CLARIFIABLE = frozenset({
     'unsupported_scope',
     'page_unconfirmed',
     'identity_unconfirmed', 'identity_parameter_invalid',
+    'time_range_limit',
 })
+MAX_QUERY_DAYS = 31
+RECENT_WINDOWS = (7, 15, 31)
 
 FIELD_HEADERS = {
     'person_identity': '核对对象',
@@ -151,6 +154,23 @@ def capture_time_presets(anchor):
     return _label_options(pairs)
 
 
+def recent_time_presets(now=None):
+    """Windows ending now; none exceeds the single-query span limit."""
+    end = (now or datetime.now()).replace(microsecond=0)
+    pairs = []
+    for days in RECENT_WINDOWS:
+        start = (end - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+        stop = end.strftime('%Y-%m-%d %H:%M:%S')
+        pairs.append((f'近{days}天（{start} 至 {stop}）', {'start': start, 'end': stop}))
+    return _label_options(pairs)
+
+
+def check_window(start, end):
+    left, right = (datetime.strptime(str(v).replace('T', ' '), '%Y-%m-%d %H:%M:%S') for v in (start, end))
+    if not 0 < (right - left).total_seconds() <= MAX_QUERY_DAYS * 86400:
+        error('clarification_invalid', f'开始时间须早于结束时间，且单次时间跨度不超过 {MAX_QUERY_DAYS} 天，请缩短或指定区间。', 422)
+
+
 def _field_question(field, options=None, custom=True, question=None):
     return {
         'field': field,
@@ -216,6 +236,17 @@ def build(kind, code, field_errors, context, store, uid, sid):
         values.update(radius_values)
         questions.append(_field_question('radius_m', options=radius_options, custom=True))
         fields = ['start', 'end', 'radius_m']
+    elif code == 'time_range_limit':
+        time_options, time_values = recent_time_presets()
+        values.update(time_values)
+        questions.append(_field_question(
+            'time_window',
+            options=time_options,
+            custom=True,
+            question=f'单次查询时间跨度上限 {MAX_QUERY_DAYS} 天，请缩短或指定区间；自行填写时需同时给出开始与结束时间，格式为 YYYY-MM-DD HH:mm:ss。',
+        ))
+        questions[-1]['header'] = '时间窗口'
+        fields = ['start', 'end']
     elif code == 'page_unconfirmed':
         questions.append(_field_question(
             'page',
@@ -440,6 +471,10 @@ def apply_reply(spec, answers, context, store=None, uid=None, sid=None):
     unexpected = set(updates) - allowed - {'supported_scope'}
     if unexpected:
         error('clarification_invalid', '回答包含本次未询问的字段。', 422)
+    if {'start', 'end'} & updates.keys():
+        window = {**(context.get('confirmed') or {}), **updates}
+        if {'start', 'end'} <= window.keys():
+            check_window(window['start'], window['end'])
 
     next_context = copy.deepcopy(context)
     confirmed = next_context.setdefault('confirmed', {})

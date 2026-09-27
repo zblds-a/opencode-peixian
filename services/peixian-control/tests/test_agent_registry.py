@@ -12,7 +12,7 @@ def test_immutable_identity_and_prompt():
         changed=profile.data;changed['name']='changed';assert profile.data['name']!='changed'
         with pytest.raises(FrozenInstanceError):profile.prompt='changed'
         public=profile.public()
-        assert set(public)=={'id','name','version','domain','description','supported_intents'}
+        assert set(public)=={'id','name','version','domain','description','supported_intents','prompt_resource','prompt_sha256'}
     legacy=registry.ROOT.parent.parent/'gambling_agent_prompt.md'
     assert registry.require('gambling-assistant').prompt==legacy.read_text()
 

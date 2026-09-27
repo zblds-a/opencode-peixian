@@ -1,4 +1,4 @@
-import { toolTraceStatus } from "../tool-trace-status"
+import { toolFailureMessage, toolPartStatus, toolTraceStatus } from "../tool-trace-status"
 import { createEffect, createMemo, createSignal, For, Index, onCleanup, Show } from "solid-js"
 import { api, ApiError, list, patch, post, remove, safeMessage } from "../api"
 import { Button, Empty, ErrorLine, Field, Icon, Markdown, Modal, Spinner, Status } from "../components"
@@ -796,7 +796,7 @@ export default function Chat() {
                                   <summary>
                                     <Icon name={(part.execution?.status ?? part.state?.status) === "completed" ? "check" : "clock"} size={14} />
                                     <span>{safeMessage(part.execution?.capability_name || part.execution?.name || part.state?.title || part.tool, "处理业务资料")}</span>
-                                    <Status value={part.execution?.status ?? part.state?.status} />
+                                    <Status value={toolPartStatus(part)} />
                                   </summary>
                                   <div class="tool-trace-detail">
                                   <For
@@ -828,7 +828,7 @@ export default function Chat() {
                                     )}
                                   </For>
                                   <Show when={part.state?.error}>
-                                    <ErrorLine message={part.state?.error} />
+                                    <ErrorLine message={toolFailureMessage(part)} />
                                   </Show>
                                   <Show when={part.execution?.input_summary}><p>{part.execution?.input_summary}</p></Show>
                                   <Show when={part.execution?.output_summary}><p>{part.execution?.output_summary}</p></Show>

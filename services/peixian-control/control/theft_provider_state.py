@@ -6,6 +6,7 @@ from .store import now,encode
 from .theft_provider_flow import availability,pid
 from shared.theft_provider import parse_response,ContractError,CATALOG
 from shared import theft_provider_v2 as v2
+DETERMINATE_FAILURES={'provider_rows_limit','provider_response_too_large'}
 class ProviderState(FactsState):
     def _load(self,db,uid,rid,revision):
         row=db.execute('SELECT * FROM business_runs WHERE id=? AND uid=?',(rid,uid)).fetchone()
@@ -94,8 +95,9 @@ class ProviderState(FactsState):
             if snap.get('native_current_call'):snap['native_calls'][key]['status']='dispatching'
             self._save(db,rid,snap)
 
-    def complete(self,uid,rid,revision,operation,module,status,response=None):
-        if status not in ('completed','unknown','cancelled'):reject('provider_invalid_status')
+    def complete(self,uid,rid,revision,operation,module,status,response=None,error_code=None):
+        if status not in ('completed','unknown','cancelled','rejected'):reject('provider_invalid_status')
+        if (status=='rejected')!=(error_code is not None) or (error_code is not None and error_code not in DETERMINATE_FAILURES):reject('provider_invalid_status')
         with self.store.tx() as db:
             row,snap,state=self._owned(db,uid,rid,revision,operation);self.authorize(db,row,snap,module)
             key=snap.get('native_current_call') or module
@@ -112,6 +114,9 @@ class ProviderState(FactsState):
                 except (ContractError,ValueError,TypeError,KeyError) as exc:
                     status='rejected'
                     value['error_code']='provider_business_error' if str(exc)=='provider_business_error' else 'provider_response_invalid'
+            elif status=='rejected':
+                # The supplier answered with a limit failure: dispatched, determinate, no records.
+                value.update(response_count=1,may_have_sent=True,error_code=error_code)
             value.update(status=status,completed=now())
             if snap.get('native_current_call'):
                 call=snap['native_calls'][key]

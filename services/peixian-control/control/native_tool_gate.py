@@ -251,7 +251,7 @@ def prepare(store,uid,sid,message_id,call_id,tool,args,revision):
         if store is not None and isinstance(call_id,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,160}',call_id):
             row=store.one('SELECT * FROM business_runs WHERE uid=? AND session_id=? AND message_id=?',(uid,sid,message_id))
             if row:
-                if detail['code'] in ('scope_missing','scope_parameter_invalid','source_selection_required','explicit_source_required','source_selection_limit','identity_unconfirmed') and row['status'] in ('queued','running') and row['revision']==revision and not row['cancel_requested']:
+                if detail['code'] in ('scope_missing','scope_parameter_invalid','source_selection_required','explicit_source_required','source_selection_limit','identity_unconfirmed','time_range_limit') and row['status'] in ('queued','running') and row['revision']==revision and not row['cancel_requested']:
                     with store.tx() as db:
                         latest=db.execute('SELECT * FROM business_runs WHERE id=?',(row['id'],)).fetchone()
                         snapshot=store.decrypt(latest['request_ciphertext']);context=snapshot.get('native_tool_context') or {}

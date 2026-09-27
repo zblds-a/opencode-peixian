@@ -37,15 +37,15 @@ def sentence(kind,f,version=None):
     if kind=='incidents':return f"警情引用 {f.get('cjbh','未提供')}；处警时间 {f.get('cjsj','未提供')}；来源地址 {f.get('bzdzmc') or f.get('cjxz') or f.get('address','未提供')}。"
     if kind=='captures':
         count=f.get('capture_count','未提供')
-        return f"{f.get('target_name','对象未提供')}（{f.get('target_id_card','未提供')}）：来源范围内抓拍汇总 {count} 次，不等于到访次数。"
+        return f"{f.get('target_name','对象未提供')}（{f.get('target_id_card','未提供')}）：来源范围内抓拍汇总 {count} 次。"
     if kind in ('warnings','warning_detail'):
         types=f.get('warningTypes','未提供')
         count=f.get('warningCount','未提供')
         return f"{f.get('personName','对象未提供')}（{f.get('idCard','未提供')}）：来源预警类型 {types}；预警类型数量 {count}；最新触发时间 {f.get('latestTime','未提供')}。"
     if kind=='night':return f"来源夜间观测时间 {f.get('captureTime','未提供')}；来源地点 {f.get('location','未提供')}。"
     if kind=='community':return f"来源时间范围 {f.get('timeRangeStart','未提供')} 至 {f.get('timeRangeEnd','未提供')}；小区数量 {f.get('communityCount','未提供')}；来源描述 {f.get('trajectoryDesc','未提供')}。"
-    if kind=='profile':return f"本次取得来源档案及 {len(f.get('captures',[]))} 条最近抓拍；不代表完整轨迹。"
-    return f"来源预警类型 {f.get('warningType','未提供')}；来源近7天规则触发 {f.get('count','未提供')} 次，不等于独立事件数。"
+    if kind=='profile':return f"本次取得来源档案及 {len(f.get('captures',[]))} 条最近抓拍。"
+    return f"来源预警类型 {f.get('warningType','未提供')}；来源近7天规则触发 {f.get('count','未提供')} 次。"
 
 def project(row,snapshot):
     if snapshot.get('provider_history'):

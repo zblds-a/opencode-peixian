@@ -11,6 +11,12 @@ def freeze(snapshot, rid):
                                   'segments': [], 'calls': [], 'final': False}
 
 
+def zero_text(query):
+    if isinstance(query.get('start'), str) and isinstance(query.get('end'), str):
+        return '查询时段 ' + html.escape(query['start']) + ' 至 ' + html.escape(query['end']) + ' 返回 0 条。'
+    return '返回 0 条。'
+
+
 def record(snapshot, row, call_id):
     delivery = snapshot.get('answer_delivery')
     if not delivery or delivery.get('final') or call_id in delivery['calls']:
@@ -40,7 +46,10 @@ def record(snapshot, row, call_id):
     text = '### ' + label + '\n\n'
     text += '\n\n'.join(html.escape(c['summary']) for c in selected)
     if not selected:
-        text += '本次返回零条记录；不代表其他时间或范围内没有发生。'
+        text += zero_text(call['frozen'].get('query') or {})
+    gaps = [s for s in public.get('segments') or [] if isinstance(s, dict) and s.get('status') != 'ok']
+    if gaps:
+        text += '\n\n未核验时段：' + '；'.join(html.escape(str(s.get('start')) + ' 至 ' + str(s.get('end'))) for s in gaps) + '。'
     text += '\n\n当前展示 ' + str(len(selected)) + ' 条／本次取得 ' + str(len(result['records'])) + ' 条。'
     sequence = len(delivery['segments']) + 1
     delivery['segments'].append({'sequence': sequence, 'content_revision': 1,

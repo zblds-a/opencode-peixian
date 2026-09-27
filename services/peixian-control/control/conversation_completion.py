@@ -32,7 +32,7 @@ def finish_dismissed(store, row, messages):
         delivery = snapshot.get('answer_delivery')
         if delivery and not delivery.get('final'):
             sequence = len(delivery['segments']) + 1
-            text = '已停止需要补充条件的查询，已取得资料仍然保留。\n\n' + result['answer']['summary']
+            text = result['answer']['summary']
             delivery['segments'].append({'sequence': sequence, 'content_revision': 1,
                 'part_id': 'part_completion_' + current['id'], 'operation': 'append',
                 'origin': 'controlled_source', 'visibility': 'user', 'display_kind': 'source_answer',

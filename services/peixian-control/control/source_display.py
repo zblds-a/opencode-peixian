@@ -36,7 +36,7 @@ def complete(view):
         related = [g for g in gaps if g['category'] == category]
         if not related:
             continue
-        text = {'source_missing': '先补齐未取得的资料，再核对相关问题；当前缺少记录不表示没有发生。',
+        text = {'source_missing': '先补齐未取得的资料，再核对相关问题。',
                 'verification_pending': '请先核对未完成步骤和对应来源，暂不采用未核对内容形成结论。',
                 'scope_limit': '如需扩大时间或对象范围，请先确认资料接口支持；当前结论仅适用于已注明范围。'}[category]
         recommendations.append({'id': 'next-' + category, 'type': 'manual_review' if category == 'verification_pending' else 'request_information',
@@ -93,7 +93,7 @@ def describe(kind, title, headline, rows, window, limitations):
         add(f'原始记录涉及 {len(vehicles)} 个去重车辆标识；记录关联不表示同乘。',refs)
     elif kind=='trajectory' and times:
         nights=[ref for at,ref in times if at.hour>=22 or at.hour<6]
-        add(f'北京时间22:00至次日06:00口径内有 {len(nights)} 条记录；不能据此认定活动性质。',[ref for _,ref in times])
+        add(f'北京时间22:00至次日06:00口径内有 {len(nights)} 条记录。',[ref for _,ref in times])
     for text in limitations[:1]:add(text,[],'limitation')
     details=details[:4]
     summary='观察范围：'+window+'。'+headline

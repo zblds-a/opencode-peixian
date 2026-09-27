@@ -111,7 +111,7 @@ def freeze_context(store,uid,sid,data):
         'capture_conditions':capture_conditions,
         'capture_position_confirmed':bool((prior or {}).get('capture_position_confirmed')) and not changed_object,
         'current_text':text,'constraints_text':constraints,'user_conditions':current,
-        'scoring_requested':False,
+        'scoring_requested':scoring_requested(text,prior,direction),
         'direction':direction,
         'candidate_request_n':None,
         'candidate_set':[],
@@ -142,6 +142,28 @@ def canonical_field(key, value):
         return value
     except (ValueError,InvalidOperation,OverflowError):
         error('scope_parameter_invalid','参数格式无效，尚未查询；请仅补充提示字段。',422,{key:FIELD_NAMES.get(key,key)+'格式不符合接口合同'})
+
+
+MAX_QUERY_DAYS=31
+
+
+def time_window_span(start, end):
+    try:
+        left,right=(datetime.strptime(str(v).replace('T',' '),'%Y-%m-%d %H:%M:%S') for v in (start,end))
+    except ValueError:
+        return None
+    return right-left
+
+
+def check_time_window(start, end):
+    span=time_window_span(start,end)
+    if span is None:
+        return
+    if span.total_seconds()<=0 or span.total_seconds()>MAX_QUERY_DAYS*86400:
+        from fastapi import HTTPException
+        raise HTTPException(409,{'code':'time_range_limit',
+            'message':f'开始时间须早于结束时间，且单次时间跨度不超过 {MAX_QUERY_DAYS} 天；尚未访问资料接口。',
+            'field_errors':{'start':'超出接口限制','end':'超出接口限制'},'limits':{'max_days':MAX_QUERY_DAYS}})
 
 
 def resolve_arguments(kind, args, context):
@@ -186,6 +208,8 @@ def arguments(kind,args,context):
         error('scope_missing','查询条件不完整，未访问资料接口；只补充列出的字段，不重试或猜测权限。',409,{k:FIELD_NAMES[k]+'尚未明确' for k in sorted(required-set(args))})
     if kind=='captures' and len(context['source_refs'])!=1 and not (context.get('capture_position_confirmed') and {'lon','lat'} <= context.get('confirmed',{}).keys()):
         error('source_selection_required','周边抓拍必须先选择一个明确的位置来源。',409)
+    if kind in adapter.TIMED:
+        check_time_window(args['start'],args['end'])
     # Accept model values into confirmed so later turns see them as known.
     confirmed=context.setdefault('confirmed',{})
     user_conditions=context.setdefault('user_conditions',{})
@@ -194,7 +218,8 @@ def arguments(kind,args,context):
             continue
         confirmed[key]=copy.deepcopy(value)
         user_conditions[key]=copy.deepcopy(value)
-    query={key:copy.deepcopy(value) for key,value in args.items() if key!='person_identity'}
+    applicable=({'lon','lat','radius_m'} if kind in ('incidents','captures') else set())|({'start','end'} if kind in adapter.TIMED else set())|({'page','page_size'} if kind in adapter.PAGED else set())
+    query={key:copy.deepcopy(value) for key,value in args.items() if key in applicable}
     if kind=='captures' and not context['source_refs'] and context.get('capture_position_confirmed'):
         query.update({k:canonical_field(k,context['confirmed'][k]) for k in ('lon','lat')})
     return query
@@ -279,11 +304,12 @@ def model_context(context):
 已取得资料足够时直接回答；普通问候、解释、表格调整不取数。
 沿用同一任务已确认且用途适用的人员、时间和位置；不要反复确认同一条件。
 人员或地点不明确、多个候选时，用 question 只问缺项，不默认取第一项，不自动遍历所有位置。
-已取得位置是候选，不代表用户已选择。抓拍时间与半径需用途明确，轨迹时间不自动变成抓拍时间。
+已取得位置只是候选，需用户明确选择。抓拍时间与半径需用途明确，轨迹时间不自动变成抓拍时间。
 person_identity 可使用已确认身份或该任务来源中的人员引用；已选来源的坐标由平台读取。
-没有记录不等于没有发生；不得自动扩大范围、自动翻页或重试未知调用。
+零记录只写查询时段和 0 条；不得自动扩大范围、自动翻页或重试未知调用。单次时间跨度不超过 31 天。
+答复不写免责声明或「不等于/不证明/不代表/仅作参考」类句子。
 用户取消补充时停止对应查询，基于成功资料给出阶段回答，不把取消解释为全部资料失败。
 资料类回答包含人员基本信息、研判摘要、分析依据、下一步研判；来源事实与模型说明区分。
 建议最多三项，只建议必要且可用的下一步，不自动执行。不作个人犯罪倾向、嫌疑评分或排名。
-周边警情仅支持空间及分页条件，额外时间或类别条件不能静默丢弃，处警时间不代表案发时间。
+周边警情仅支持空间及分页条件；用户要求的时间或类别条件无法传给接口时，在答复中写明未按该条件筛选。时间线中区分处警时间与案发时间。
 """ + ('用户已要求停止追问，直接整理已有资料。' if context.get('stop_followup') else '') + '\n' + adapter.canonical(payload)

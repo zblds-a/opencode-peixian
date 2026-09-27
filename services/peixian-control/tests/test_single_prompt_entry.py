@@ -18,7 +18,7 @@ def test_one_prompt_and_version():
     from control.agents.runtime import bind, freeze
     profile=require('theft-assistant');payload={};snapshot={}
     bind(payload,profile,None,[]);freeze(snapshot,payload,profile)
-    assert profile.data['version']=='3.4.0'
+    assert profile.data['version']=='3.6.0'
     assert snapshot['agent_profile']['prompt_resource']=='theft_prompt.md'
     assert snapshot['agent_profile']['prompt_sha256']==hashlib.sha256(profile.prompt.encode()).hexdigest()
     assert snapshot['effective_system_prompt_sha256']==hashlib.sha256(payload['system'].encode()).hexdigest()
@@ -38,7 +38,7 @@ def test_new_context_never_inherits_full_plan(provider,monkeypatch):
     assert context['confirmed']['person_identity']==c['confirmed']['person_identity']
     assert context['capture_conditions']==c['capture_conditions']
     assert context['source_selection']=='explicit'
-    assert context['scoring_requested'] is False
+    assert context['scoring_requested'] is True
     assert context['person_case_plan'] is None and context['enrichment_plan'] is None
     assert context['center_set']==[] and context['candidate_set']==[]
     assert 'dialogue_policy' not in context
@@ -117,7 +117,7 @@ def test_real_admission_freezes_unique_prompt_and_replay(provider,monkeypatch):
     row=s.one('SELECT * FROM business_runs WHERE id=?',(accepted['run_id'],));snapshot=s.decrypt(row['request_ciphertext'])
     assert snapshot['query_rules_version']=='on-demand-v1' and 'dialogue_policy' not in snapshot
     assert snapshot['clarification_completion_version']=='clarification-completion-v1'
-    assert snapshot['agent_profile']['version']=='3.4.0'
+    assert snapshot['agent_profile']['version']=='3.6.0'
     assert require('theft-assistant').prompt in snapshot['payload']['system']
     assert snapshot['native_calls']=={}
     assert snapshot['table_answer_policy']['layout_version']=='theft-four-sections-v1'

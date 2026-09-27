@@ -7,7 +7,7 @@ from control import theft_candidates as c
 
 
 def test_scoring_defaults_off_for_case_to_person():
-    assert scope.scoring_requested('查周边抓拍', None, 'case_to_person') is False
+    assert scope.scoring_requested('查周边抓拍', None, 'case_to_person') is True
     assert scope.scoring_requested('请做可疑度评分', None, 'case_to_person') is True
     assert scope.scoring_requested('不要评分，只要档案', None, 'case_to_person') is False
 
@@ -103,7 +103,7 @@ def test_model_suggestions_and_next_question():
     assert view['next_question']['options'][0]['label'] == '查询此人夜间活动记录'
     assert view['case_checks'] and len(view['case_checks']['items']) == 1
     assert view['case_checks']['items'][0]['status'] == '已核对'
-    assert s.DISCLAIMER == '排序为辅助研判，需人工核验。'
+    assert s.DISCLAIMER == ''
 
 
 def test_authorize_allows_large_n():

@@ -27,6 +27,16 @@ def public_scope_fields(detail):
     return {key:labels[key]+'需要补充、核对或修正格式' for key in fields if key in labels}
 
 
+RELAY_FAILURES={'upstream_rows_limit','response_too_large'}
+
+
+class ProviderFailure(ValueError):
+    """Upstream answered with a determinate limit failure; the call is not unknown."""
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
 async def process(input):
     with tempfile.TemporaryDirectory(prefix='px-facts-') as temporary:
         child=await asyncio.create_subprocess_exec(os.environ.get('BUN_EXECUTABLE','/usr/local/bin/bun'),str(Path(__file__).with_name('facts_worker.mjs')),
@@ -41,6 +51,7 @@ async def process(input):
                     if len(raw)>2*1024*1024:raise ValueError('facts_output_limit')
                 await child.wait()
             value=json.loads(raw)
+            if value.get('ok') is not True and value.get('code') in RELAY_FAILURES:raise ProviderFailure(value['code'])
             if child.returncode or value.get('ok') is not True:raise ValueError('facts_execution_failed')
             return value['value']
         finally:

@@ -1,9 +1,9 @@
 {
   "schema_version": "agent-profile-v1",
   "id": "theft-assistant",
-  "version": "3.4.0",
+  "version": "3.6.0",
   "name": "盗窃研判助手",
-  "description": "通过自然语言按需选择已授权只读资料能力，支持由人到案、由案到人的资料核对、来源追溯和缺口说明。",
+  "description": "通过自然语言按需选择已授权只读资料能力，支持由人到案、由案到人的资料核对、来源追溯、评分研判和缺口说明。",
   "domain": "theft",
   "scenario_ids": [
     "DEMO-CASE-THEFT"

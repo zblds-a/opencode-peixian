@@ -48,4 +48,5 @@ async def invoke(request, cid):
             gate.require_egress()
         return await exchange(request.app.state.client, connection, payload)
     except ConnectionFailure as exc:
-        raise HTTPException(exc.status, str(exc)) from None
+        headers = {"X-Peixian-Failure": exc.code} if exc.code else None
+        raise HTTPException(exc.status, str(exc), headers=headers) from None

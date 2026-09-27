@@ -46,13 +46,31 @@ def binding(store,uid,kind,applied):
     return {'plugin_id':plugin_id,'plugin_version':plugin['version'],'tool_id':'peixian_query_'+kind,'connection_id':cid,'connection_revision':row['revision'],'contract_version':adapter.VERSION,'data_environment':'acceptance_real','limits':config['limits'],'coordinate_compatibility':config.get('coordinate_compatibility',{}),'binding_digest':adapter.digest({'manifest':plugin['manifest'],'connection':policy,'revision':row['revision'],'deployment':config})}
 
 
+LIMIT_FIELDS={'time_range_limit':('start','end'),'precise_time_required':('start','end'),'invalid_time':('start','end'),
+              'pagination_limit':('page','page_size'),'number_out_of_range':('lon','lat','radius_m')}
+
+
+def limit_values(limits):
+    return {'max_days':limits['max_duration_seconds']//86400,'max_radius_m':limits['max_radius_m'],
+            'max_page':limits['max_page'],'max_page_size':min(100,limits['max_rows'])}
+
+
+def contract_error(code,limits):
+    from fastapi import HTTPException
+    detail={'code':code,'message':'查询条件未满足资料接口合同，尚未访问资料接口。','field_errors':{k:'超出接口限制' for k in LIMIT_FIELDS.get(code,())}}
+    if code in ('time_range_limit','pagination_limit','number_out_of_range'):
+        wanted={'time_range_limit':('max_days',),'pagination_limit':('max_page','max_page_size'),'number_out_of_range':('max_radius_m',)}[code]
+        detail['limits']={k:v for k,v in limit_values(limits).items() if k in wanted}
+    raise HTTPException(422,detail)
+
+
 def freeze(store,uid,kind,query,identities,applied):
     value=binding(store,uid,kind,applied)
     try:
         normalized=adapter.normalize(kind,query,value['limits'])
         # Layer 4 removed: no approved_identity_hashes / approved_bbox gate.
         request=adapter.request_spec(kind,normalized,value['limits'],identities)
-    except adapter.ContractError as exc:error(str(exc),'查询条件未满足资料接口合同，请补充指定条件。',422)
+    except adapter.ContractError as exc:contract_error(str(exc),value['limits'])
     return {**value,'kind':kind,'version':adapter.VERSION,'query':normalized,'request':request,'identities':identities}
 
 

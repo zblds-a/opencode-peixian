@@ -47,7 +47,7 @@ def test_native_tool_one_confirmed_call(provider,monkeypatch):
     assert review['requested_values']['start']==ARGS['start']
     assert review['contract_defaults']=={'track_types':[0,1,2]}
     assert review['version']=='native-intent-context-v5'
-    assert review['scoring_requested'] is False
+    assert review['scoring_requested'] is True
     assert native_tool_gate.approve(store,uid,row['id'],'call-one',decision['digest'],{'verdict':'allow','reason_code':'aligned'},1)['allowed']
     state=ProviderState(store);op=state.begin(uid,row['id'],1)
     assert state.reserve(uid,row['id'],1,op,'tracks')

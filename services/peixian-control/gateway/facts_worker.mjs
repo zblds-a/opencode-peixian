@@ -5,6 +5,16 @@ const input=JSON.parse(Buffer.concat(chunks).toString('utf8'));
 const output=process.stdout.write.bind(process.stdout);
 process.stdout.write=()=>true;process.stderr.write=()=>true;
 for(const name of ['log','warn','error','info','debug'])console[name]=()=>{};
+// Only fixed relay failure codes leave the sandbox; plugin error text never does.
+const RELAY_FAILURES=new Set(['upstream_rows_limit','response_too_large']);
+let relayFailure=null;
+const baseFetch=globalThis.fetch;
+globalThis.fetch=async(...args)=>{
+ const response=await baseFetch(...args);
+ const code=response.headers.get('x-peixian-failure');
+ if(!response.ok&&RELAY_FAILURES.has(code))relayFailure=code;
+ return response;
+};
 try {
  let value;
  if(input.action==='compile') {
@@ -18,4 +28,4 @@ try {
   value=JSON.parse(await plugin.tool[input.tool].execute(input.args ?? {}));
  }
  output(JSON.stringify({ok:true,value}));
-} catch { output(JSON.stringify({ok:false}));process.exitCode=1; }
+} catch { output(JSON.stringify(relayFailure?{ok:false,code:relayFailure}:{ok:false}));process.exitCode=1; }

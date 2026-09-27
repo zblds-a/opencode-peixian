@@ -87,10 +87,11 @@ def select_records(result, snapshot, subject, spatial=False, subjects=None):
 
 INSTRUCTION = """
 资料终稿只输出一个 person-tables-v3 JSON 对象，由平台渲染为人员基本信息、研判摘要、分析依据、下一步研判四段式，不另外生成Markdown终稿。
-格式：{"format":"person-tables-v3","mode":"data","source_refs":["已取得的记录编号"],"suggestions":[{"action":"inspect_sources","text":"查看本次来源详情","reason":"核对已取得记录","conditions":"无需新增查询","reason_source":"已取得的记录编号"}]}。
+格式：{"format":"person-tables-v3","mode":"data","source_refs":["已取得的记录编号"],"scoring":{"requested":true},"suggestions":[{"action":"inspect_sources","text":"查看本次来源详情","reason":"核对已取得记录","conditions":"无需新增查询","reason_source":"已取得的记录编号"}]}。
+scoring仅当用户明确要求综合研判、嫌疑评估、评分或排序，且处于由人到案或由案到人工作流时才声明requested=true；其余场景省略该字段。评分与排名由平台按确定性规则计算并在终稿表格中呈现，你不得自行给出、修改分数或排序。
 source_refs只能引用当前任务已取得资料；平台逐字段核对并生成事实表，不把自由文字当作已核验结论。
 suggestions由你按具体缺口提出，最多三项。action可为query、clarify_scope、inspect_sources、inspect_cases；query须提供当前授权的kind，缺项放fields，具体建议用text、reason、conditions、reply。不得自动执行建议。
-不要求查完全部接口，未查询不是失败。失败、零条和未知分别说明；不输出个人犯罪倾向、嫌疑评分或排名。
+不要求查完全部接口，未查询不是失败。失败、零条和未知分别说明；不输出个人犯罪倾向，不下确定性罪责结论，评分相关表述用「可能性研判」措辞。
 问候、能力说明和缺项追问使用自然中文，不输出JSON；需要补充时用question。取消补充后整理已有结果。
 """
 
@@ -294,6 +295,20 @@ def next_question(run_id, suggestions, chosen=None, context=None):
 
 
 
+TRACK_SEGMENT_LABELS = {'too_many': '单段结果过多', 'failed': '查询失败', 'not_queried': '超出分段上限未查询'}
+
+
+def track_segment_gaps(snapshot):
+    gaps = []
+    for call in (snapshot.get('native_calls') or {}).values():
+        if call.get('status') != 'completed':
+            continue
+        for item in (call.get('public_response') or {}).get('segments') or []:
+            if isinstance(item, dict) and item.get('status') in TRACK_SEGMENT_LABELS:
+                gaps.append(f"{item.get('start')} 至 {item.get('end')}（{TRACK_SEGMENT_LABELS[item['status']]}）")
+    return gaps
+
+
 def build(result, snapshot):
     policy = snapshot.get('table_answer_policy', {})
     if policy.get('version') not in SUPPORTED_POLICY:
@@ -336,7 +351,7 @@ def build(result, snapshot):
     rank_map = {rid: i for i, rid in enumerate(selected)}
     approved.sort(key=lambda c: min((rank_map.get(r, 100000) for r in c.get('source_ids', [])), default=100001))
     conclusions = [{'text': c['statement'], 'source_ids': c['source_ids'], 'source_run_id': c['source_run_id'],
-                    'claim_id': c['claim_id'], 'limitation': '以来源记录为准。'} for c in approved[:5]]
+                    'claim_id': c['claim_id'], 'limitation': ''} for c in approved[:5]]
     basic = []
     dates = {result['run_id']: result.get('generated_at'), **{h['run_id']: h.get('generated_at') for h in history}}
     for r in records:
@@ -352,6 +367,7 @@ def build(result, snapshot):
             basic.append({'label': label, 'value': value, 'source_ids': [r['record_id']],
                           'source_run_id': r['source_run_id'], 'obtained_at': dates.get(r['source_run_id'])})
     missing = list(result.get('missing', []))
+    track_gaps = track_segment_gaps(snapshot)
     if policy.get('omitted_runs'):
         missing.append('历史上下文达到资源上限，部分执行未纳入本次整理；可指定来源另行解释。')
     if policy.get('history_window_full'):
@@ -382,7 +398,8 @@ def build(result, snapshot):
         want_score = bool(chosen['scoring'].get('requested'))
     else:
         want_score = bool(context.get('scoring_requested'))
-    if context.get('query_rules_version')=='on-demand-v1' or snapshot.get('dialogue_policy')=='adaptive-dialogue-v1': want_score=False
+    # Scoring allowed only in the two workflow directions (p2c/c2p); legacy adaptive policy stays off.
+    if snapshot.get('dialogue_policy')=='adaptive-dialogue-v1' or direction not in ('case_to_person','person_to_case'): want_score=False
     if direction == 'case_to_person' and want_score:
         captures = [r for r in records if r.get('module') == 'captures']
         if context.get('candidate_set'):
@@ -405,11 +422,11 @@ def build(result, snapshot):
             top = ranking['items'][0]
             title = ranking.get('title') or ('初步关注排序' if ranking.get('stage') == 'stage1' else '嫌疑人可能性排序')
             conclusions = [{
-                'text': f"{title}首位有效得分率 {top.get('rate')}%，{top.get('band') or ''}。建议人工核验。",
+                'text': f"{title}首位有效得分率 {top.get('rate')}%，{top.get('band') or ''}。",
                 'source_ids': top.get('source_ids') or [],
                 'source_run_id': result['run_id'],
                 'claim_id': 'platform-ranking',
-                'limitation': ranking.get('disclaimer') or theft_scoring.DISCLAIMER,
+                'limitation': '',
             }] + conclusions
         elif ranking and ranking.get('status') == 'empty':
             missing.append('尚无可用的抓拍候选人可供排序。')
@@ -419,14 +436,14 @@ def build(result, snapshot):
         scoring = theft_scoring.compute(person_records, include_d5=True)
         if scoring.get('status') == 'ready':
             conclusions = [{
-                'text': f"有效得分率 {scoring['rate']}%（{scoring['earned']} / {scoring['available_max']}），{scoring['band']}。建议人工复核。",
+                'text': f"有效得分率 {scoring['rate']}%（{scoring['earned']} / {scoring['available_max']}），{scoring['band']}。",
                 'source_ids': sorted({sid for d in scoring['dimensions'] for sid in d.get('source_ids', [])}),
                 'source_run_id': result['run_id'],
                 'claim_id': 'platform-scoring',
-                'limitation': scoring['disclaimer'],
+                'limitation': '',
             }] + conclusions
         elif scoring.get('status') == 'insufficient':
-            missing.append(scoring['disclaimer'])
+            pass
 
     case_view = None if context.get('query_rules_version')=='on-demand-v1' else model_case_checks(chosen, {r['record_id'] for r in records})
     if direction == 'person_to_case' and context.get('query_rules_version') != 'on-demand-v1' and snapshot.get('dialogue_policy') != 'adaptive-dialogue-v1':
@@ -451,14 +468,14 @@ def build(result, snapshot):
             scoring = theft_scoring.compute(person_records, include_d5=True)
             if scoring.get('status') == 'ready':
                 conclusions = [{
-                    'text': f"关联可疑度（辅助）有效得分率 {scoring['rate']}%（{scoring['earned']} / {scoring['available_max']}），{scoring['band']}。不构成犯罪认定。",
+                    'text': f"关联可疑度（辅助）有效得分率 {scoring['rate']}%（{scoring['earned']} / {scoring['available_max']}），{scoring['band']}。",
                     'source_ids': sorted({sid for d in scoring['dimensions'] for sid in d.get('source_ids', [])}),
                     'source_run_id': result['run_id'],
                     'claim_id': 'platform-scoring',
-                    'limitation': scoring['disclaimer'],
+                    'limitation': '',
                 }] + conclusions
             elif scoring.get('status') == 'insufficient':
-                missing.append(scoring['disclaimer'])
+                pass
 
     coverage = None
     plan = context.get('person_case_plan')
@@ -482,6 +499,7 @@ def build(result, snapshot):
         'source_runs': sorted({r['source_run_id'] for r in records}),
         'scoring': scoring, 'ranking': ranking, 'case_checks': case_view,
         'coverage': coverage,
+        'track_gaps': track_gaps,
         'direction': direction,
         'case_type': chosen.get('case_type') if isinstance(chosen.get('case_type'), str) else None}
 
@@ -508,17 +526,17 @@ def markdown(view):
             [(x['label'], x['value'], '、'.join(x['source_ids']) + '；取得时间：' + str(x['obtained_at'] or '未提供')) for x in view['basic']])]
     if view.get('conclusions'):
         sections += ['### 研判摘要' if revised else '### 基本结论',
-            table(['结论', '依据', '适用范围／局限'], [(x['text'], '、'.join(x['source_ids']) or '本轮已确认响应统计', x['limitation']) for x in view['conclusions']])]
+            table(['结论', '依据'], [(x['text'], '、'.join(x['source_ids']) or '本轮已确认响应统计') for x in view['conclusions']])]
 
     def evidence(rows):
         return table(['资料类型', '时间／范围', '记录摘要', '来源'], [(x['label'], x['time'], x['text'], '、'.join(x['source_ids'])) for x in rows])
 
     if view.get('evidence'):
-        sections += ['### 分析依据' if revised else '### 判断依据', f"当前展示 {view['preview_count']} 条／已取得 {view['total']} 条；不代表上游全部记录。", evidence(view['evidence'][:10])]
+        sections += ['### 分析依据' if revised else '### 判断依据', evidence(view['evidence'][:10])]
         if len(view['evidence']) > 10:
             sections += ['<details><summary>展开其余已取得记录</summary>\n\n' + evidence(view['evidence'][10:]) + '\n\n</details>']
-    if view.get('missing'):
-        sections += ['资料缺口：' + '；'.join(escape(x) for x in view['missing'])]
+    if view.get('track_gaps'):
+        sections += ['轨迹未核验时段：' + '；'.join(escape(x) for x in view['track_gaps']) + '。其余时段轨迹已取得。']
 
     ranking = view.get('ranking')
     if ranking and ranking.get('items'):
@@ -546,7 +564,6 @@ def markdown(view):
             sections += [
                 f"覆盖不足：{(item.get('name') or '') + '／' + (item.get('person_ref') or '')}；缺：{gaps}"
             ]
-        sections += [ranking.get('disclaimer') or theft_scoring.DISCLAIMER]
 
     scoring = view.get('scoring')
     if scoring:
@@ -555,11 +572,10 @@ def markdown(view):
         for d in scoring.get('dimensions', []):
             score = '—' if d['status'] != 'available' else f"{d['score']} / {d['max']}"
             status = '可用' if d['status'] == 'available' else '不可用'
-            rows.append((d['label'], score, status, d.get('evidence') or '', '、'.join(d.get('source_ids') or []) or '无', d.get('limitation') or ''))
-        sections += [table(['维度', '得分／满分', '状态', '依据', '来源', '局限'], rows)]
+            rows.append((d['label'], score, status, d.get('evidence') or '', '、'.join(d.get('source_ids') or []) or '无'))
+        sections += [table(['维度', '得分／满分', '状态', '依据', '来源'], rows)]
         if scoring.get('status') == 'ready':
             sections += [f"有效得分率 {scoring['rate']}%（{scoring['earned']} / {scoring['available_max']}），{scoring['band']}。"]
-        sections += [scoring.get('disclaimer') or theft_scoring.DISCLAIMER]
 
     case_view = view.get('case_checks')
     if case_view and case_view.get('items'):
@@ -603,7 +619,6 @@ def markdown(view):
                 ['警情编号', '处警时间', '最近直线距离', '时间差', '物品／编号', '时间联系', '行为联系', '比较结论', '关系', '核验状态', '补证任务'],
                 rows,
             )]
-        sections += [case_view.get('disclaimer') or '']
 
 
     coverage = view.get('coverage')
@@ -624,12 +639,17 @@ def markdown(view):
             [(x['text'],x['reason'],x['conditions']) for x in view.get('suggestions',[])]) if view.get('suggestions') else '暂无新的分析建议，可查看已有来源。']
     output = '\n\n'.join(sections)
     sources = []
+    links = {}
     for index, item in enumerate(view['evidence'], 1):
         rid = item['source_ids'][0]
         anchor = 'source-' + re.sub('[^a-zA-Z0-9-]', '', view.get('run_id', 'result')) + '-' + str(index)
-        output = output.replace(escape(rid), f'[来源{index}](#{anchor})')
+        links.setdefault(escape(rid), f'[来源{index}](#{anchor})')
         sources.append(f'<details id="{anchor}"><summary>来源{index} · ' + escape(item['label']) + '</summary>\n\n' +
             table(['来源信息', '值'], [('记录编号', rid), ('执行编号', item['source_run_id']), ('快照', item['snapshot_id'])]) + '\n\n</details>')
+    if links:
+        # Record ids share prefixes (":1" vs ":10"); match longest first and never stop mid-number.
+        pattern = re.compile('(?:' + '|'.join(re.escape(k) for k in sorted(links, key=len, reverse=True)) + ')(?![0-9])')
+        output = pattern.sub(lambda m: links[m.group(0)], output)
     if sources:
         output = output + '\n\n<details><summary>查看来源编号与版本</summary>\n\n' + '\n\n'.join(sources) + '\n\n</details>'
     return output

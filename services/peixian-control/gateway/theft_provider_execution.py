@@ -1,7 +1,9 @@
 """Provider operation uses Gateway code, Control receipts and the egress gate."""
 import asyncio
 import contextlib
+import copy
 import json
+from datetime import datetime, timedelta
 
 import httpx
 from fastapi import HTTPException
@@ -9,8 +11,93 @@ from fastapi import HTTPException
 from .plugin_test import specification
 
 from shared import native_intent_review
+from shared import theft_provider_v2
 
 REVIEW_PROMPT = native_intent_review.PROMPT
+FAILURE_CODES = {'upstream_rows_limit': 'provider_rows_limit', 'response_too_large': 'provider_response_too_large'}
+TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
+TRACK_SEGMENT = timedelta(days=3)
+TRACK_MIN_SEGMENT = timedelta(days=1)
+TRACK_MAX_CALLS = 20
+TRACK_MAX_CONSECUTIVE_FAILURES = 3
+
+
+class TrackRowsLimit(ValueError):
+    code = 'upstream_rows_limit'
+
+
+def track_windows(start, end, size=TRACK_SEGMENT):
+    left, right = datetime.strptime(start, TIME_FORMAT), datetime.strptime(end, TIME_FORMAT)
+    windows = []
+    while left < right:
+        stop = min(left + size, right)
+        windows.append((left, stop))
+        left = stop
+    return windows
+
+
+def track_request(plan, left, right):
+    low = datetime.strptime(plan['query']['start'], TIME_FORMAT)
+    high = datetime.strptime(plan['query']['end'], TIME_FORMAT)
+    if not low <= left < right <= high:
+        raise ValueError('track_segment_outside_window')
+    request = copy.deepcopy(plan['request'])
+    request['json'].update(beginTime=left.strftime(TIME_FORMAT), endTime=right.strftime(TIME_FORMAT))
+    return request
+
+
+def track_points(response):
+    if not isinstance(response, dict) or response.get('code') != 200:
+        return None
+    data = response.get('data')
+    if not isinstance(data, dict) or not isinstance(data.get('points'), list):
+        return None
+    return data['points']
+
+
+async def collect_tracks(plan, invoke):
+    """Split one frozen track window into sub-windows; never widen the frozen window."""
+    row_limit = plan['limits']['max_rows']
+    pending = track_windows(plan['query']['start'], plan['query']['end'])
+    segments, points, seen = [], [], set()
+    base, calls, failures = None, 0, 0
+    while pending:
+        left, right = pending.pop(0)
+        if calls >= TRACK_MAX_CALLS or failures >= TRACK_MAX_CONSECUTIVE_FAILURES:
+            segments.append((left, right, 'not_queried'))
+            continue
+        calls += 1
+        found = None
+        try:
+            response = await invoke(track_request(plan, left, right))
+            found = track_points(response)
+            status = 'failed' if found is None else 'too_many' if len(found) > row_limit else 'ok'
+        except (ValueError, httpx.HTTPError, TimeoutError) as exc:
+            status = 'too_many' if getattr(exc, 'code', None) == 'upstream_rows_limit' else 'failed'
+        if status == 'too_many' and right - left > TRACK_MIN_SEGMENT:
+            middle = left + timedelta(seconds=int((right - left).total_seconds()) // 2)
+            pending[:0] = [(left, middle), (middle, right)]
+            continue
+        failures = failures + 1 if status == 'failed' else 0
+        if status == 'ok':
+            base = base or response
+            for point in found:
+                key = theft_provider_v2.canonical(point)
+                if key not in seen:
+                    seen.add(key)
+                    points.append(point)
+        segments.append((left, right, status))
+    segments.sort()
+    if base is None:
+        if segments and all(s[2] in ('too_many', 'not_queried') for s in segments):
+            raise TrackRowsLimit()
+        raise ValueError('track_segments_failed')
+    points.sort(key=lambda p: str(p.get('captureTime', '')) if isinstance(p, dict) else '')
+    merged = copy.deepcopy(base)
+    merged['data'] = {**merged['data'], 'points': points, 'segments': [
+        {'start': a.strftime(TIME_FORMAT), 'end': b.strftime(TIME_FORMAT), 'status': status}
+        for a, b, status in segments]}
+    return merged
 
 
 async def execute(request, app, value, rpc, parent, process, *, native=False):
@@ -37,25 +124,37 @@ async def execute(request, app, value, rpc, parent, process, *, native=False):
                 await call('complete', module=kind, status='cancelled')
                 raise asyncio.CancelledError()
             await call('dispatch', module=kind)
-            task = asyncio.create_task(process({**spec, 'action':'invoke',
-                'tool':plan['tool_id'], 'args':{'request':plan['request']}}))
+
+            async def invoke(provider_request):
+                task = asyncio.create_task(process({**spec, 'action':'invoke',
+                    'tool':plan['tool_id'], 'args':{'request':provider_request}}))
+                try:
+                    while not task.done():
+                        done, _ = await asyncio.wait({task}, timeout=0.5)
+                        if done:
+                            break
+                        gate.require_egress()
+                        await call('authorize', module=kind)
+                        if await request.is_disconnected():
+                            raise asyncio.CancelledError()
+                    return await task
+                finally:
+                    if not task.done():
+                        task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+
             try:
-                while not task.done():
-                    done, _ = await asyncio.wait({task}, timeout=0.5)
-                    if done:
-                        break
-                    gate.require_egress()
-                    await call('authorize', module=kind)
-                    if await request.is_disconnected():
-                        raise asyncio.CancelledError()
-                response = await task
+                if kind == 'tracks' and plan.get('version') == theft_provider_v2.VERSION and isinstance(plan['request'].get('json'), dict):
+                    response = await collect_tracks(plan, invoke)
+                else:
+                    response = await invoke(plan['request'])
                 await call('complete', module=kind, status='completed', response=response)
-            except (ValueError, httpx.HTTPError, TimeoutError):
-                await call('complete', module=kind, status='unknown')
-            finally:
-                if not task.done():
-                    task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
+            except (ValueError, httpx.HTTPError, TimeoutError) as exc:
+                code = FAILURE_CODES.get(getattr(exc, 'code', None))
+                if code:
+                    await call('complete', module=kind, status='rejected', error_code=code)
+                else:
+                    await call('complete', module=kind, status='unknown')
         key = value['call_id'] if native else kind
         item = (await call('read'))['state']['modules'].get(key, {})
         if item.get('status') != 'completed':

@@ -163,9 +163,32 @@ def request_spec(kind, value, limits, identities):
     return {'connection_group':group,'method':method,'path':path,('json' if method=='POST' else 'query'):body}
 
 
+TRACK_SEGMENT_STATUSES = ('ok', 'too_many', 'failed', 'not_queried')
+MAX_TRACK_POINTS = 2000
+
+
+def track_segments(value, q):
+    """Segments must tile the frozen window exactly, in order, without gaps or overlap."""
+    if not isinstance(value,list) or not value:raise ContractError('track_segments_contract')
+    result=[];cursor=q['start']
+    for item in value:
+        if (not isinstance(item,dict) or set(item)!={'start','end','status'} or item['status'] not in TRACK_SEGMENT_STATUSES
+                or any(not isinstance(item[k],str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}',item[k]) for k in ('start','end'))
+                or item['start']!=cursor or not item['start']<item['end']):
+            raise ContractError('track_segments_contract')
+        cursor=item['end'];result.append(dict(item))
+    if cursor!=q['end']:raise ContractError('track_segments_contract')
+    return result
+
+
 def parse_response(kind, query, payload, limits, identities, *, received_at=None):
     q=normalize(kind,query,limits)
-    if len(canonical(payload).encode())>limits['max_response_bytes']:raise ContractError('response_size_limit')
+    segments=None
+    missing=[]
+    size_limit=limits['max_response_bytes']
+    parts=payload.get('data',{}).get('segments') if kind=='tracks' and isinstance(payload,dict) and isinstance(payload.get('data'),dict) else None
+    if isinstance(parts,list):size_limit*=max(1,sum(1 for s in parts if isinstance(s,dict) and s.get('status')=='ok'))
+    if len(canonical(payload).encode())>size_limit:raise ContractError('response_size_limit')
     if not isinstance(payload,dict) or type(payload.get('code')) is not int or payload['code']!=200:
         raise ContractError('provider_business_error')
     expected=person_id(identities.get(q['person_ref'])) if kind in PERSON else None
@@ -190,6 +213,10 @@ def parse_response(kind, query, payload, limits, identities, *, received_at=None
     elif kind=='tracks':
         if not isinstance(data,dict) or data.get('targetIdCard')!=expected or not isinstance(data.get('points'),list):raise ContractError('track_contract')
         rows,total,coverage,has_more=data['points'],None,'unknown',None
+        if 'segments' in data:
+            segments=track_segments(data['segments'],q)
+            coverage='complete' if all(s['status']=='ok' for s in segments) else 'partial'
+            if coverage=='partial':missing.append('track_segments_unverified')
     elif kind=='warning_logs':
         if not isinstance(data,list):raise ContractError('warning_logs_contract')
         rows,total,coverage,has_more=data,None,'source_window',None
@@ -198,8 +225,9 @@ def parse_response(kind, query, payload, limits, identities, *, received_at=None
         if data and kind=='warning_detail' and data.get('idCard')!=expected:raise ContractError('subject_mismatch')
         if data and kind=='profile' and (not isinstance(data.get('person'),dict) or data['person'].get('sfz')!=expected or not isinstance(data.get('captures'),list) or len(data['captures'])>10):raise ContractError('profile_contract')
         rows=[] if data is None else [data];total=None;coverage='source_window' if kind=='profile' else 'single_object';has_more=False
-    if len(rows)>limits['max_rows']:raise ContractError('response_rows_limit')
-    snapshot='response-'+uuid.uuid4().hex;records=[];missing=[]
+    row_limit=limits.get('max_track_points',MAX_TRACK_POINTS) if segments is not None else limits['max_rows']
+    if len(rows)>row_limit:raise ContractError('response_rows_limit')
+    snapshot='response-'+uuid.uuid4().hex;records=[]
     def details(value):
         if isinstance(value,dict):
             if 'detailJson' in value:
@@ -224,7 +252,9 @@ def parse_response(kind, query, payload, limits, identities, *, received_at=None
             if field in fields and (type(fields[field]) is not int or fields[field]<0):raise ContractError('invalid_count')
         details(fields)
         records.append({'source_ref':snapshot+':'+str(i+1),'source_index':i+1,'fields':fields})
-    return {'version':VERSION,'kind':kind,'query':q,'response_snapshot_id':snapshot,'supplier_snapshot_id':None,'received_at':received_at or datetime.now(timezone.utc).isoformat(),'response_digest':digest(payload),'records':records,'returned_count':len(rows),'valid_count':len(records),'unusable_count':0,'total':total,'coverage':coverage,'has_more':has_more,'missing':sorted(set(missing)),'limitations':[LIMITATIONS[kind]],'coordinate_status':'unconfirmed'}
+    result={'version':VERSION,'kind':kind,'query':q,'response_snapshot_id':snapshot,'supplier_snapshot_id':None,'received_at':received_at or datetime.now(timezone.utc).isoformat(),'response_digest':digest(payload),'records':records,'returned_count':len(rows),'valid_count':len(records),'unusable_count':0,'total':total,'coverage':coverage,'has_more':has_more,'missing':sorted(set(missing)),'limitations':[LIMITATIONS[kind]],'coordinate_status':'unconfirmed'}
+    if segments is not None:result['segments']=segments
+    return result
 
 
 def public_result(result, key, scope):

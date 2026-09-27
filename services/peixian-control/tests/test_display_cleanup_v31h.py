@@ -45,7 +45,7 @@ def test_model_context_mentions_stop_followup():
         'stop_followup': True,
     })
     assert '停止追问' in text
-    assert '不要再调用 question' in text
+    assert '直接整理已有资料' in text
 
 
 def test_markdown_omits_empty_basic_and_placeholders():
@@ -64,7 +64,7 @@ def test_markdown_omits_empty_basic_and_placeholders():
     assert '暂无可确认结论' not in md
     assert '判断依据' not in md
     assert '当前展示 0 条' not in md
-    assert '预警类型数量表示来源预警类型数量' in md
+    assert '不是事件数或个人嫌疑评分' not in md
     assert 'warningCount' not in md
 
 

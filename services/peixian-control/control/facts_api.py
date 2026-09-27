@@ -65,6 +65,7 @@ def register(app):
         if action=='authorize':engine.check(*args,data.get('module'));return {'ok':True}
         if action=='reserve':return {'reserved':engine.reserve(*args,data.get('module'))}
         if action=='dispatch' and engine is provider_state:engine.dispatch(*args,data.get('module'));return {'ok':True}
+        if action=='complete' and engine is provider_state:return {'status':engine.complete(*args,data.get('module'),data.get('status'),data.get('response'),data.get('error_code'))}
         if action=='complete':return {'status':engine.complete(*args,data.get('module'),data.get('status'),data.get('response'))}
         if action=='read':engine.check(*args);return engine.read(*args[:3])
         if action=='table':engine.save_table(*args,data.get('table'));return {'ok':True}

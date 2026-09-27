@@ -13,9 +13,10 @@ FORBIDDEN_HEADERS = {"host", "connection", "content-length", "transfer-encoding"
 
 
 class ConnectionFailure(ValueError):
-    def __init__(self, message, status=400):
+    def __init__(self, message, status=400, code=None):
         super().__init__(message)
         self.status = status
+        self.code = code
 
 
 def safe_path(value, *, pattern=False):
@@ -133,6 +134,8 @@ async def exchange(client, connection, value):
                                      headers=headers, follow_redirects=False, timeout=connection["timeout_seconds"]) as response:
                 if 300 <= response.status_code < 400:
                     raise ConnectionFailure("服务返回了未允许的重定向", 502)
+                if response.status_code == 413:
+                    raise ConnectionFailure("服务结果超过单次返回上限", 413, "upstream_rows_limit")
                 if response.status_code >= 400:
                     raise ConnectionFailure("服务拒绝了本次请求，请检查配置或参数", 502)
                 media = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
@@ -144,7 +147,7 @@ async def exchange(client, connection, value):
                 async for chunk in response.aiter_bytes(chunk_size=16384):
                     raw.extend(chunk)
                     if len(raw) > connection["max_response_bytes"]:
-                        raise ConnectionFailure("服务响应超过配置的大小限制", 413)
+                        raise ConnectionFailure("服务响应超过配置的大小限制", 413, "response_too_large")
                 try:
                     result = json.loads(raw, parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
                 except (ValueError, UnicodeError, RecursionError):

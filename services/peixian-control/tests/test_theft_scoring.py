@@ -97,7 +97,7 @@ def test_reasons_and_next_checks_on_stage1():
     top = view['items'][0]
     assert top['reasons']
     assert top['next_checks']
-    assert '需人工核验' in view['disclaimer']
+    assert view['disclaimer'] == ''
     assert '合成' not in view['disclaimer']
     assert '仅供参考' not in view['disclaimer']
     assert '辅助参考' not in view['disclaimer']

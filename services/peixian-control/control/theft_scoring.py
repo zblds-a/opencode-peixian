@@ -17,7 +17,7 @@ LABELS = {
 }
 THEFT_TAG = re.compile(r'盗|窃|偷|前科|侵财|两抢|扒窃|入室|盗窃')
 PARTIAL_TAG = re.compile(r'夜间|预警|异常|重点|关注|流动|跨')
-DISCLAIMER = '排序为辅助研判，需人工核验。'
+DISCLAIMER = ''
 
 
 def _bucket(value, rules, default=0):
@@ -111,7 +111,7 @@ def group_by_person(records, snapshot=None):
 def score_d1(records):
     rows = _module_records(records, 'captures')
     if not rows:
-        return _dim('d1', 'unavailable', evidence='未取得周边抓拍汇总', limitation='缺失不计 0')
+        return _dim('d1', 'unavailable', evidence='未取得周边抓拍汇总')
     total = 0
     sources = []
     for r in rows:
@@ -120,15 +120,15 @@ def score_d1(records):
             total += count
             sources.append(r['record_id'])
     if not sources:
-        return _dim('d1', 'unavailable', evidence='抓拍记录缺少抓拍次数', limitation='缺失不计 0')
+        return _dim('d1', 'unavailable', evidence='抓拍记录缺少抓拍次数')
     score = _bucket(total, ((0, 0, 0), (1, 2, 5), (3, 5, 10), (6, 10, 18), (11, 10**9, 25)))
-    return _dim('d1', 'available', score, f'抓拍次数={total}', sources, '抓拍次数不等于到访次数')
+    return _dim('d1', 'available', score, f'抓拍次数={total}', sources)
 
 
 def score_d2(records):
     rows = _module_records(records, 'night')
     if not rows:
-        return _dim('d2', 'unavailable', evidence='未取得夜间来源记录', limitation='缺失不计 0')
+        return _dim('d2', 'unavailable', evidence='未取得夜间来源记录')
     sources = [r['record_id'] for r in rows]
     n = len(rows)
     score = _bucket(n, ((0, 0, 0), (1, 3, 8), (4, 10, 14), (11, 10**9, 20)))
@@ -138,7 +138,7 @@ def score_d2(records):
 def score_d3(records):
     rows = _module_records(records, 'community')
     if not rows:
-        return _dim('d3', 'unavailable', evidence='未取得跨小区来源记录', limitation='缺失不计 0')
+        return _dim('d3', 'unavailable', evidence='未取得跨小区来源记录')
     best = 0
     sources = []
     for r in rows:
@@ -156,7 +156,7 @@ def score_d3(records):
 def score_d4(records):
     rows = _module_records(records, 'warning_detail') or _module_records(records, 'warnings')
     if not rows:
-        return _dim('d4', 'unavailable', evidence='未取得预警概况', limitation='缺失不计 0')
+        return _dim('d4', 'unavailable', evidence='未取得预警概况')
     total = 0
     sources = []
     for r in rows:
@@ -165,9 +165,9 @@ def score_d4(records):
             total = max(total, count)
             sources.append(r['record_id'])
     if not sources:
-        return _dim('d4', 'unavailable', evidence='预警记录缺少预警类型数量', limitation='缺失不计 0')
+        return _dim('d4', 'unavailable', evidence='预警记录缺少预警类型数量')
     score = _bucket(total, ((0, 0, 0), (1, 2, 8), (3, 5, 14), (6, 10**9, 20)))
-    return _dim('d4', 'available', score, f'预警类型数量={total}', sources, '预警类型数量不是事件次数；未使用来源扣分')
+    return _dim('d4', 'available', score, f'预警类型数量={total}', sources)
 
 
 def score_d5(records):
@@ -179,7 +179,7 @@ def score_d5(records):
             missing.append('轨迹')
         if not incidents:
             missing.append('警情')
-        return _dim('d5', 'unavailable', evidence='缺少' + '与'.join(missing), limitation='坐标未兼容确认，仅作参考')
+        return _dim('d5', 'unavailable', evidence='缺少' + '与'.join(missing))
     best_space = None
     best_time = None
     sources = []
@@ -198,7 +198,7 @@ def score_d5(records):
                 if best_time is None or delta < best_time[0]:
                     best_time = (delta, tr['record_id'], inc['record_id'])
     if best_space is None and best_time is None:
-        return _dim('d5', 'unavailable', evidence='轨迹或警情缺少可比较的坐标/时间', limitation='坐标未兼容确认，仅作参考')
+        return _dim('d5', 'unavailable', evidence='轨迹或警情缺少可比较的坐标/时间')
     space_score = None
     time_score = None
     parts = []
@@ -229,17 +229,16 @@ def score_d5(records):
         parts.append(f'最近时间差约{hours:.1f}小时→时间{time_score}分')
     if space_score is None or time_score is None:
         return _dim('d5', 'unavailable', evidence='；'.join(parts) or '时空子维度不完整',
-                    source_ids=sorted(set(sources)), limitation='空间与时间子维度均需可计算；坐标未兼容确认')
+                    source_ids=sorted(set(sources)))
     score = space_score + time_score
-    return _dim('d5', 'available', score, '；'.join(parts), sorted(set(sources)),
-                '基于直线距离的粗略估算，非路网距离；不表示到达现场')
+    return _dim('d5', 'available', score, '；'.join(parts), sorted(set(sources)))
 
 
 def score_d6(records):
     captures = _module_records(records, 'captures')
     profiles = _module_records(records, 'profile')
     if not captures and not profiles:
-        return _dim('d6', 'unavailable', evidence='未取得抓拍标签或档案', limitation='缺失不计 0')
+        return _dim('d6', 'unavailable', evidence='未取得抓拍标签或档案')
     tags = []
     sources = []
     for r in captures:
@@ -260,8 +259,7 @@ def score_d6(records):
                 elif isinstance(value, list):
                     tags.extend(str(x) for x in value if x)
     if not tags:
-        return _dim('d6', 'available', 0, '无标签或标签为空', sorted(set(sources)) or [r['record_id'] for r in captures + profiles],
-                    '标签是来源行为描述，非已确认前科；未使用来源扣分')
+        return _dim('d6', 'available', 0, '无标签或标签为空', sorted(set(sources)) or [r['record_id'] for r in captures + profiles])
     text = '、'.join(tags)
     if THEFT_TAG.search(text):
         score, note = 8, '标签与侵财/盗窃类表述高度关联'
@@ -269,8 +267,7 @@ def score_d6(records):
         score, note = 5, '标签与警情类别存在部分关联'
     else:
         score, note = 2, '标签与警情类别无明显关联'
-    return _dim('d6', 'available', score, f'{note}；标签={text[:120]}', sorted(set(sources)),
-                '标签是来源行为描述，非已确认前科；未使用来源扣分')
+    return _dim('d6', 'available', score, f'{note}；标签={text[:120]}', sorted(set(sources)))
 
 
 def band(rate):
@@ -387,7 +384,7 @@ def compute(records, include_d5=True):
     if include_d5:
         dims.append(score_d5(records))
     else:
-        dims.append(_dim('d5', 'unavailable', evidence='初排阶段不计时空耦合', limitation='仅由人到案深度核验时计算'))
+        dims.append(_dim('d5', 'unavailable', evidence='初排阶段不计时空耦合'))
     dims.append(score_d6(records))
     available = [d for d in dims if d['status'] == 'available']
     if len(available) < 3:
@@ -400,7 +397,7 @@ def compute(records, include_d5=True):
             'available_max': None,
             'rate': None,
             'band': None,
-            'disclaimer': '数据覆盖不足，分值参考意义有限。' + DISCLAIMER,
+            'disclaimer': '',
         }
     earned = sum(d['score'] for d in available)
     available_max = sum(d['max'] for d in available)
@@ -618,5 +615,5 @@ def case_checks(track_records, incident_records):
         'version': VERSION,
         'status': 'ready' if rows else 'empty',
         'items': rows,
-        'disclaimer': '候选案件状态为待核验；时空接近不等于涉案认定，需人工核验。',
+        'disclaimer': '',
     }

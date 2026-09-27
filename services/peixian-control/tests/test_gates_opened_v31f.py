@@ -4,7 +4,7 @@ from control import provider_contracts
 
 
 def test_disclaimer_wording():
-    assert scoring.DISCLAIMER == '排序为辅助研判，需人工核验。'
+    assert scoring.DISCLAIMER == ''
     for banned in ('合成', 'Mock', '仅供参考', '辅助参考', '不构成犯罪认定'):
         assert banned not in scoring.DISCLAIMER
 

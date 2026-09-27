@@ -126,14 +126,14 @@ def test_scoring_uses_server_flag():
     snap['native_tool_context']['direction']='person_to_case'
     choose(snap,source_refs=['run:call:snapshot:1'],scoring={'requested':True})
     view=t.build(result,snap)
-    assert view.get('scoring') is None
-    snap['native_tool_context']['scoring_requested']=True
-    choose(snap,source_refs=['run:call:snapshot:1'],scoring={'requested':False})
-    view=t.build(result,snap)
     assert view['scoring']['status']=='ready'
     output=t.markdown(view)
     assert '### 可疑度评分' in output
-    assert '需人工核验' in output
+    assert '需人工核验' not in output
+    snap['native_tool_context']['scoring_requested']=True
+    choose(snap,source_refs=['run:call:snapshot:1'],scoring={'requested':False})
+    view=t.build(result,snap)
+    assert view.get('scoring') is None
 
 
 def test_case_to_person_stage1_ranking_table():
@@ -474,8 +474,7 @@ def test_forbidden_wording_absent_in_ranking_markdown():
     choose(snap, source_refs=['run:call:a'])
     view = t.build(result, snap)
     output = t.markdown(view)
-    for banned in ('合成', 'Mock', 'mock', '测试范围', '验收范围', '仅供参考', '辅助参考'):
+    for banned in ('合成', 'Mock', 'mock', '测试范围', '验收范围', '仅供参考', '辅助参考', '需人工核验', '辅助研判', '当前展示', '资料缺口'):
         assert banned not in output, banned
-    assert '需人工核验' in output
     assert '主要依据' in output
     assert '建议核验' in output
