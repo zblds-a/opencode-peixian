@@ -108,9 +108,18 @@ def group_by_person(records, snapshot=None):
     return groups
 
 
-def score_d1(records):
+EMPTY_EVIDENCE = '已查询，无记录'
+
+
+def _queried(queried, *modules):
+    return bool(queried) and any(m in queried for m in modules)
+
+
+def score_d1(records, queried=None):
     rows = _module_records(records, 'captures')
     if not rows:
+        if _queried(queried, 'captures'):
+            return _dim('d1', 'available', 0, '抓拍次数=0；' + EMPTY_EVIDENCE)
         return _dim('d1', 'unavailable', evidence='未取得周边抓拍汇总')
     total = 0
     sources = []
@@ -125,9 +134,11 @@ def score_d1(records):
     return _dim('d1', 'available', score, f'抓拍次数={total}', sources)
 
 
-def score_d2(records):
+def score_d2(records, queried=None):
     rows = _module_records(records, 'night')
     if not rows:
+        if _queried(queried, 'night'):
+            return _dim('d2', 'available', 0, '夜间记录数=0；' + EMPTY_EVIDENCE, limitation='来源夜间规则为23:00至次日05:00')
         return _dim('d2', 'unavailable', evidence='未取得夜间来源记录')
     sources = [r['record_id'] for r in rows]
     n = len(rows)
@@ -135,9 +146,11 @@ def score_d2(records):
     return _dim('d2', 'available', score, f'夜间记录数={n}', sources, '来源夜间规则为23:00至次日05:00')
 
 
-def score_d3(records):
+def score_d3(records, queried=None):
     rows = _module_records(records, 'community')
     if not rows:
+        if _queried(queried, 'community'):
+            return _dim('d3', 'available', 0, '跨小区数=0；' + EMPTY_EVIDENCE, limitation='来源规则为7至19小时窗口跨4个及以上小区')
         return _dim('d3', 'unavailable', evidence='未取得跨小区来源记录')
     best = 0
     sources = []
@@ -153,9 +166,11 @@ def score_d3(records):
     return _dim('d3', 'available', score, f'跨小区数={best}', sources, '来源规则为7至19小时窗口跨4个及以上小区')
 
 
-def score_d4(records):
+def score_d4(records, queried=None):
     rows = _module_records(records, 'warning_detail') or _module_records(records, 'warnings')
     if not rows:
+        if _queried(queried, 'warning_detail', 'warnings'):
+            return _dim('d4', 'available', 0, '预警类型数量=0；' + EMPTY_EVIDENCE)
         return _dim('d4', 'unavailable', evidence='未取得预警概况')
     total = 0
     sources = []
@@ -170,15 +185,18 @@ def score_d4(records):
     return _dim('d4', 'available', score, f'预警类型数量={total}', sources)
 
 
-def score_d5(records):
+def score_d5(records, queried=None):
     tracks = _module_records(records, 'tracks')
     incidents = _module_records(records, 'incidents')
     if not tracks or not incidents:
         missing = []
-        if not tracks:
+        if not tracks and not _queried(queried, 'tracks'):
             missing.append('轨迹')
-        if not incidents:
+        if not incidents and not _queried(queried, 'incidents'):
             missing.append('警情')
+        if not missing:
+            empty = [label for label, rows in (('轨迹', tracks), ('周边警情', incidents)) if not rows]
+            return _dim('d5', 'available', 0, '、'.join(empty) + EMPTY_EVIDENCE + '，无可比较的时空联系')
         return _dim('d5', 'unavailable', evidence='缺少' + '与'.join(missing))
     best_space = None
     best_time = None
@@ -234,10 +252,12 @@ def score_d5(records):
     return _dim('d5', 'available', score, '；'.join(parts), sorted(set(sources)))
 
 
-def score_d6(records):
+def score_d6(records, queried=None):
     captures = _module_records(records, 'captures')
     profiles = _module_records(records, 'profile')
     if not captures and not profiles:
+        if _queried(queried, 'captures', 'profile'):
+            return _dim('d6', 'available', 0, '无标签；' + EMPTY_EVIDENCE)
         return _dim('d6', 'unavailable', evidence='未取得抓拍标签或档案')
     tags = []
     sources = []
@@ -378,14 +398,19 @@ def reasons_and_checks(view, records=None, stage='六维'):
     return reasons[:2], next_checks[:2]
 
 
-def compute(records, include_d5=True):
-    """Score one person's records only. Do not mix subjects."""
-    dims = [score_d1(records), score_d2(records), score_d3(records), score_d4(records)]
+def compute(records, include_d5=True, queried=None):
+    """Score one person's records only. Do not mix subjects.
+
+    queried lists modules whose query completed for this person; a completed
+    query with no rows scores 0 instead of dropping out of the denominator.
+    """
+    queried = frozenset(queried or ())
+    dims = [score_d1(records, queried), score_d2(records, queried), score_d3(records, queried), score_d4(records, queried)]
     if include_d5:
-        dims.append(score_d5(records))
+        dims.append(score_d5(records, queried))
     else:
         dims.append(_dim('d5', 'unavailable', evidence='初排阶段不计时空耦合'))
-    dims.append(score_d6(records))
+    dims.append(score_d6(records, queried))
     available = [d for d in dims if d['status'] == 'available']
     if len(available) < 3:
         return {
@@ -472,14 +497,14 @@ def stage1_rank(capture_records):
     }
 
 
-def rank(records_by_person, include_d5=True):
+def rank(records_by_person, include_d5=True, queried_by_person=None):
     """Full six-dimension ranking for an authorized candidate set."""
     items = []
     insufficient = []
     for person_ref, rows in (records_by_person or {}).items():
         if not person_ref:
             continue
-        view = compute(rows, include_d5=include_d5)
+        view = compute(rows, include_d5=include_d5, queried=(queried_by_person or {}).get(person_ref))
         name = None
         for r in rows:
             fields = r.get('fields') or {}

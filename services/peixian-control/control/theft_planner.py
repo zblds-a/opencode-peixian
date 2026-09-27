@@ -65,6 +65,23 @@ def slots(text,explicit=None):
                 v=int(d)
             if field in ('page','page_size'):v=int(v)
             values[field]=v
+    if not {'lon','lat'} & values.keys():
+        pairs={}
+        for m in re.finditer(r'(?:坐标|经纬度|位置)\s*(?:为|是|[:：=])?\s*[（(]?\s*(-?\d{1,3}\.\d+)\s*[,，、/\s]\s*(-?\d{1,3}\.\d+)',text):
+            a,b=m.group(1),m.group(2)
+            if 70<=float(b)<=140 and 0<=float(a)<=60:a,b=b,a
+            if 70<=float(a)<=140 and 0<=float(b)<=60:pairs[(a,b)]=True
+        if len(pairs)>1:error('scope_ambiguous','本轮存在多个范围值，请明确一个人员或查询范围。',422)
+        if pairs:values['lon'],values['lat']=next(iter(pairs))
+    if 'radius_m' not in values:
+        radii=set()
+        for m in re.finditer(r'(?:方圆|范围)?\s*(\d+(?:\.\d+)?)\s*(公里|千米|米)\s*(?:以内|之内|内|范围|半径)',text):
+            from decimal import Decimal
+            d=Decimal(m.group(1))*(1000 if m.group(2) in ('公里','千米') else 1)
+            if d!=int(d):error('radius_invalid','半径必须为整数米。',422)
+            radii.add(int(d))
+        if len(radii)>1:error('scope_ambiguous','本轮存在多个范围值，请明确一个人员或查询范围。',422)
+        if radii:values['radius_m']=radii.pop()
     labeled=re.findall(r'(开始时间|结束时间)\s*[:：=]?\s*(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})',text)
     if labeled:
         if len({field for field,_ in labeled})!=len(labeled):error('time_scope_ambiguous','同一时间字段不能填写多个值。',422)

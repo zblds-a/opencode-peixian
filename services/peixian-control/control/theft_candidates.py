@@ -92,33 +92,50 @@ def find_capture_person(store, uid, sid, context, person_ref):
     task_id = (context or {}).get('task_id')
     if not task_id:
         return None
-    for record in task_capture_records(store, uid, sid, task_id):
-        try:
-            identity = None
-            fields = record.get('fields') or {}
-            for name in ('target_id_card', 'targetIdCard', 'idCard'):
-                if name in fields:
-                    identity = adapter.person_id(fields[name])
-                    break
-            if not identity:
-                continue
-            ref = adapter.person_ref(identity, store.worker_key.encode(), uid + '/' + sid)
-            if not hmac.compare_digest(ref, person_ref):
-                continue
-            return {
-                'version': VERSION,
-                'rank': None,
-                'person_ref': person_ref,
-                'name': fields.get('target_name') or fields.get('name'),
-                'run_id': record.get('source_run_id') or record.get('run_id'),
-                'record_id': record.get('record_id'),
-                'snapshot_id': record.get('snapshot_id'),
-                'result_digest': record.get('result_digest'),
-                'source_ids': [record.get('record_id')],
-                'identity': identity,
-            }
-        except Exception:
+    # Read raw provider rows from the run snapshots: public results carry only
+    # scoped references, and the current run has no run_results row yet.
+    key = store.worker_key.encode()
+    scope = uid + '/' + sid
+    rows = store.rows(
+        "SELECT id, request_ciphertext FROM business_runs WHERE uid=? AND session_id=? ORDER BY rowid DESC LIMIT 50",
+        (uid, sid),
+    )
+    for row in rows:
+        snapshot = store.decrypt(row['request_ciphertext'])
+        if (snapshot.get('native_tool_context') or {}).get('task_id') != task_id:
             continue
+        modules = (snapshot.get('provider_state') or {}).get('modules') or {}
+        for call_id, call in (snapshot.get('native_calls') or {}).items():
+            if call.get('status') != 'completed' or (call.get('frozen') or {}).get('kind') != 'captures':
+                continue
+            entry = modules.get(call_id) or {}
+            if entry.get('status') != 'completed':
+                continue
+            raw = entry.get('response') or {}
+            for item in raw.get('records') or []:
+                fields = item.get('fields') or {}
+                names = [n for n in ('target_id_card', 'targetIdCard', 'idCard') if n in fields]
+                if len(names) != 1:
+                    continue
+                try:
+                    identity = adapter.person_id(fields[names[0]])
+                except adapter.ContractError:
+                    continue
+                if not hmac.compare_digest(adapter.person_ref(identity, key, scope), person_ref):
+                    continue
+                record_id = row['id'] + ':' + call_id + ':' + str(item.get('source_ref', ''))
+                return {
+                    'version': VERSION,
+                    'rank': None,
+                    'person_ref': person_ref,
+                    'name': fields.get('target_name') or fields.get('name'),
+                    'run_id': row['id'],
+                    'record_id': record_id,
+                    'snapshot_id': raw.get('response_snapshot_id'),
+                    'result_digest': None,
+                    'source_ids': [record_id],
+                    'identity': identity,
+                }
     return None
 
 

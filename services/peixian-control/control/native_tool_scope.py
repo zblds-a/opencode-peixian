@@ -100,8 +100,10 @@ def freeze_context(store,uid,sid,data):
     stop_phrase='不再追问，请基于已取得资料直接作答。'
     stop_followup=bool((prior or {}).get('stop_followup')) or (text.strip() == stop_phrase) or ('不再追问' in text and '直接作答' in text)
     capture_conditions={} if changed_object else copy.deepcopy((prior or {}).get('capture_conditions',{}))
+    explicit_capture_position=False
     if re.search(r'抓拍',text):
         capture_conditions.update({k:current[k] for k in ('start','end','radius_m') if k in current})
+        explicit_capture_position={'lon','lat'}<=current.keys() and not refs
     return {'version':'native-tool-context-v1','task_id':task_id,
         'scope_version':prior['scope_version']+1 if prior else 1,
         'confirmed':confirmed,'source_refs':refs,
@@ -109,7 +111,7 @@ def freeze_context(store,uid,sid,data):
         'capture_scope_version':'capture-purpose-v1',
         'source_selection':'explicit',
         'capture_conditions':capture_conditions,
-        'capture_position_confirmed':bool((prior or {}).get('capture_position_confirmed')) and not changed_object,
+        'capture_position_confirmed':explicit_capture_position or (bool((prior or {}).get('capture_position_confirmed')) and not changed_object),
         'current_text':text,'constraints_text':constraints,'user_conditions':current,
         'scoring_requested':scoring_requested(text,prior,direction),
         'direction':direction,

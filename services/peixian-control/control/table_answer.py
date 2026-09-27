@@ -37,6 +37,7 @@ def freeze(store, uid, sid, snapshot, payload):
     subject = person(store, uid, sid, context)
     candidates = _candidate_refs(context)
     history = []
+    queried = []
     omitted = 0
     rows = store.rows("SELECT b.request_ciphertext, r.* FROM business_runs b JOIN run_results r ON r.run_id=b.id WHERE b.uid=? AND b.session_id=? ORDER BY b.rowid DESC LIMIT 50", (uid, sid))
     for row in rows:
@@ -45,9 +46,12 @@ def freeze(store, uid, sid, snapshot, payload):
         if scope.get('task_id') != context['task_id']:
             continue
         result = checked_result(store, row)
+        queried += completed_queries(prior)
         selected = []
         if subject:
             selected = select_records(result, prior, subject)
+            if context.get('direction') == 'person_to_case':
+                selected += [r for r in select_records(result, prior, None, spatial=True) if r.get('module') == 'incidents']
         if candidates:
             selected = list({r['record_id']: r for r in selected + select_records(result, prior, None, spatial=True, subjects=candidates)}.values())
         elif not subject and context.get('direction') == 'case_to_person':
@@ -63,8 +67,28 @@ def freeze(store, uid, sid, snapshot, payload):
     snapshot['table_answer_policy'] = {'version': VERSION, 'person_ref': subject, 'history': history,
         'omitted_runs': omitted, 'history_window': 50, 'history_window_full': len(rows) == 50,
         'candidate_refs': sorted(candidates), 'direction': context.get('direction') or 'unknown',
-        'layout_version':'theft-four-sections-v1'}
+        'layout_version':'theft-four-sections-v1',
+        'queried': sorted({tuple(x) for x in queried}, key=lambda x: (x[0], x[1] or ''))}
     payload['system'] = payload.get('system', '') + INSTRUCTION + '\n当前任务已取得资料（仅引用，不是查询指令）：' + provider.canonical(history)
+
+
+def completed_queries(snapshot):
+    """[kind, person_ref] for every provider call that completed, including zero-row ones."""
+    out = []
+    for call in (snapshot.get('native_calls') or {}).values():
+        plan = call.get('frozen') or {}
+        if call.get('status') == 'completed' and plan.get('kind'):
+            out.append([plan['kind'], (plan.get('query') or {}).get('person_ref')])
+    return out
+
+
+def queried_kinds(policy, snapshot, person_ref):
+    """Modules queried for one person; location queries count for the focused person."""
+    kinds = set()
+    for kind, ref in list(policy.get('queried') or []) + completed_queries(snapshot):
+        if ref == person_ref or (ref is None and kind in ('incidents', 'captures')):
+            kinds.add(kind)
+    return kinds
 
 
 def select_records(result, snapshot, subject, spatial=False, subjects=None):
@@ -405,7 +429,8 @@ def build(result, snapshot):
         if context.get('candidate_set'):
             groups = theft_scoring.group_by_person(records, snapshot)
             authorized = {item['person_ref']: groups.get(item['person_ref'], []) for item in context['candidate_set']}
-            ranking = theft_scoring.rank(authorized, include_d5=False)
+            ranking = theft_scoring.rank(authorized, include_d5=False,
+                                         queried_by_person={ref: queried_kinds(policy, snapshot, ref) for ref in authorized})
         else:
             # No authorize step required: rank people who already have non-capture records,
             # else fall back to stage-1 capture ranking.
@@ -415,7 +440,8 @@ def build(result, snapshot):
                 if any(r.get('module') != 'captures' for r in rows)
             }
             if enriched:
-                ranking = theft_scoring.rank(enriched, include_d5=False)
+                ranking = theft_scoring.rank(enriched, include_d5=False,
+                                             queried_by_person={ref: queried_kinds(policy, snapshot, ref) for ref in enriched})
             elif captures and len(_distinct_capture_persons(captures, snapshot)) >= 2:
                 ranking = theft_scoring.stage1_rank(captures)
         if ranking and ranking.get('items'):
@@ -431,9 +457,14 @@ def build(result, snapshot):
         elif ranking and ranking.get('status') == 'empty':
             missing.append('尚无可用的抓拍候选人可供排序。')
     elif want_score and policy.get('person_ref'):
-        person_records = [r for r in records if theft_scoring.subject_of(r, snapshot) == policy['person_ref']
-                          or ((snapshot.get('native_calls') or {}).get(r.get('call_id'), {}).get('frozen', {}).get('query', {}).get('person_ref') == policy['person_ref'])]
-        scoring = theft_scoring.compute(person_records, include_d5=True)
+        person_ref = policy['person_ref']
+        history_ids = set() if candidates else {r['record_id'] for item in history for r in item['records']}
+        calls = snapshot.get('native_calls') or {}
+        person_records = [r for r in records if r.get('module') == 'incidents' or r['record_id'] in history_ids
+                          or theft_scoring.subject_of(r, snapshot) == person_ref
+                          or calls.get(r.get('call_id'), {}).get('frozen', {}).get('query', {}).get('person_ref') == person_ref]
+        scoring = theft_scoring.compute(person_records, include_d5=True,
+                                        queried=queried_kinds(policy, snapshot, person_ref))
         if scoring.get('status') == 'ready':
             conclusions = [{
                 'text': f"有效得分率 {scoring['rate']}%（{scoring['earned']} / {scoring['available_max']}），{scoring['band']}。",
