@@ -1,4 +1,5 @@
 import { createEffect, createMemo, createSignal, For, Index, onCleanup, Show } from "solid-js"
+import { toolFailureMessage, toolPartStatus } from "../tool-trace-status"
 import { Portal } from "solid-js/web"
 import { api, ApiError, list, patch, post, remove, safeMessage } from "../api"
 import { Button, Empty, ErrorLine, Field, Icon, Markdown, Modal, Spinner, Status } from "../components"
@@ -119,9 +120,9 @@ export default function Chat() {
   }
   function toolStatus(part: Message["parts"][number], index: number, messageID: string) {
     const key = `${selected()}:${messageID}:${part.id ?? part.call_id ?? part.step_id ?? index}`
-    const status = part.execution?.status ?? part.state?.status ?? "running"
+    const status = toolPartStatus(part) ?? "running"
     const previous = toolStatuses.get(key)
-    const stable = previous && ["completed", "succeeded", "failed", "cancelled"].includes(previous) ? previous : status
+    const stable = previous && ["completed", "succeeded", "failed", "cancelled", "not_executed", "rows_limit"].includes(previous) ? previous : status
     toolStatuses.set(key, stable)
     return stable
   }
@@ -1026,7 +1027,7 @@ export default function Chat() {
                                     )}
                                   </For>
                                   <Show when={part.state?.error}>
-                                    <ErrorLine message={part.state?.error} />
+                                    <ErrorLine message={toolFailureMessage(part)} />
                                   </Show>
                                   <Show when={part.execution?.input_summary}><p>{part.execution?.input_summary}</p></Show>
                                   <Show when={part.execution?.output_summary}><p>{part.execution?.output_summary}</p></Show>

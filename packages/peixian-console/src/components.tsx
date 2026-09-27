@@ -145,6 +145,8 @@ const statuses: Record<string, [string, string]> = {
   paused: ["已暂停", "muted"],
   disabled: ["已停用", "muted"],
   failed: ["处理失败", "bad"],
+  not_executed: ["未执行（条件不符）", "warn"],
+  rows_limit: ["结果过多", "warn"],
   denied: ["已拒绝", "bad"],
   error: ["异常", "bad"],
   partial: ["部分可用", "warn"],
