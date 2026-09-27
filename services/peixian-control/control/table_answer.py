@@ -56,6 +56,8 @@ def freeze(store, uid, sid, snapshot, payload):
             selected = list({r['record_id']: r for r in selected + select_records(result, prior, None, spatial=True, subjects=candidates)}.values())
         elif not subject and context.get('direction') == 'case_to_person':
             selected = select_records(result, prior, None, spatial=True)
+            selected = select_records(result, prior, None, spatial=True,
+                                      subjects=_distinct_capture_persons(selected, prior) or None)
         if selected:
             ids = {r['record_id'] for r in selected}
             entry = {'run_id': result['run_id'], 'generated_at': result.get('generated_at'),
@@ -345,6 +347,9 @@ def build(result, snapshot):
     candidates = _candidate_refs(context)
     records = select_records(result, snapshot, policy.get('person_ref'), spatial=True,
                              subjects=candidates or None)
+    if not candidates and not policy.get('person_ref') and context.get('direction') == 'case_to_person':
+        records = select_records(result, snapshot, None, spatial=True,
+                                 subjects=_distinct_capture_persons(records, snapshot) or None)
     current_ids = {r['record_id'] for r in records}
     eligible_calls = {r.get('call_id') for r in records} | {
         k for k, v in snapshot.get('native_calls', {}).items()

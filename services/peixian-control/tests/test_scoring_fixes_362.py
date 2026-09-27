@@ -86,6 +86,24 @@ def test_queried_kinds_scopes_person_calls_and_counts_location_calls():
     assert table_answer.queried_kinds(policy, snapshot, 'person-a') == {'community', 'incidents', 'warning_detail'}
 
 
+def test_case_to_person_keeps_enrichment_of_capture_persons_only():
+    snapshot = {'native_calls': {
+        'c1': {'status': 'completed', 'frozen': {'kind': 'captures', 'query': {}}},
+        'c2': {'status': 'completed', 'frozen': {'kind': 'tracks', 'query': {'person_ref': 'person-a'}}},
+        'c3': {'status': 'completed', 'frozen': {'kind': 'night', 'query': {'person_ref': 'person-z'}}},
+    }}
+    result = {'records': [
+        {'record_id': 'r1', 'call_id': 'c1', 'module': 'captures', 'fields': {'target_id_card': 'person-a', 'capture_count': 9}},
+        {'record_id': 'r2', 'call_id': 'c2', 'module': 'tracks', 'fields': {}},
+        {'record_id': 'r3', 'call_id': 'c3', 'module': 'night', 'fields': {}},
+    ]}
+    spatial = table_answer.select_records(result, snapshot, None, spatial=True)
+    assert [r['record_id'] for r in spatial] == ['r1']
+    refs = table_answer._distinct_capture_persons(spatial, snapshot)
+    kept = table_answer.select_records(result, snapshot, None, spatial=True, subjects=refs)
+    assert [r['record_id'] for r in kept] == ['r1', 'r2']
+
+
 def test_slots_reads_coordinate_pair_and_radius_within():
     text = 'CASE-2025-001 龙城小区入室盗窃，坐标 116.9355, 34.721。查案发点 500 米内 2026-08-31 03:20:08 至 2026-09-16 03:20:08 的抓拍人员'
     values = slots(text)
