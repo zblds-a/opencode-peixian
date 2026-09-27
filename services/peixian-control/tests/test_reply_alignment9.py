@@ -45,6 +45,7 @@ def test_verified_increment_before_terminal_and_replay(provider,monkeypatch):
     s,uid,row=finished_source(provider,monkeypatch)
     first=answer_delivery.read(s,row)
     assert first['items'] and first['final'] is False
+    assert all('当前展示' not in item['text'] for item in first['items'])
     assert '990000200001010014' not in json.dumps(first)
     assert answer_delivery.read(s,row,1)['items']==[]
     messages=answer_delivery.attach(s,uid,'ses_multi',[])
