@@ -45,7 +45,7 @@ def track_messages(store,row,values,receipt):
         # Native runs can use earlier authorized tools after provider_plan moves
         # to a later call. Frozen authorization still bounds every observed tool.
         permitted_tools=set(native.get('allowed_tools',[])) & set(tools)
-        permitted_tools|={name for name in ('question','skill') if snapshot.get('payload',{}).get('tools',{}).get(name) is True}
+        permitted_tools|={name for name in ('question','skill','peixian_load_personal_skill') if snapshot.get('payload',{}).get('tools',{}).get(name) is True}
 
     for message in selected:
         info=message.get('info',{})

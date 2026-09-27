@@ -163,7 +163,7 @@ async def execute(request, app, value, rpc, parent, process, *, native=False):
             detail=public({'code':code},'provider_complete',value.get('call_id'))
             if item.get('response_count'):detail['dispatch_status']='dispatched'
             raise HTTPException(409, detail)
-        return item['response']
+        return theft_provider_v2.model_view(item['response']) if native else item['response']
     finally:
         with contextlib.suppress(httpx.HTTPError, HTTPException):
             await call('finish')
@@ -203,7 +203,7 @@ async def _execute_native(request, app, value, rpc, parent, process):
         message_id=parent, call_id=value['call_id'], tool=value['tool'],
         args=value['args'])
     if prepared.get('cached'):
-        return prepared['response']
+        return theft_provider_v2.model_view(prepared['response'])
     if prepared.get('needs_question'):
         return {
             'status': 'needs_input',

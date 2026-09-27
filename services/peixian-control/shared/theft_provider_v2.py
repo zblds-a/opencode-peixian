@@ -282,3 +282,63 @@ def public_result(result, key, scope):
             return re.sub(r'https?://[^\s"<>]+','[来源地址已隐藏]',value)
         return value
     return clean(result)
+
+
+MODEL_VIEW_VERSION = 'theft-model-view-v1'
+MODEL_VIEW_MAX_BYTES = 32 * 1024
+MODEL_VIEW_RECORDS = 50
+MODEL_VIEW_NOTE = '完整明细与来源由平台以表格展示，请直接依据摘要整理，不要询问呈现方式；引用来源时可用 response_snapshot_id。'
+
+
+def _short(value, size=60):
+    return value[:size] if isinstance(value, str) else value
+
+
+def _track_view(public):
+    days, devices, night = {}, {}, 0
+    points = [r for r in public.get('records', []) if isinstance(r, dict) and isinstance(r.get('fields'), dict)]
+    for entry in points:
+        f = entry['fields']
+        at = f.get('captureTime') if isinstance(f.get('captureTime'), str) else ''
+        if len(at) >= 13:
+            days[at[:10]] = days.get(at[:10], 0) + 1
+            if at[11:13].isdigit() and (int(at[11:13]) >= 22 or int(at[11:13]) < 6):
+                night += 1
+        name = _short(f.get('deviceName') or f.get('deviceId') or '来源未提供设备')
+        slot = devices.setdefault(str(name), {'device': name, 'count': 0, 'first': at, 'last': at, 'source_ref': entry.get('source_ref')})
+        slot['count'] += 1
+        if at and (not slot['first'] or at < slot['first']): slot['first'] = at
+        if at > slot['last']: slot['last'] = at
+
+    def point(entry):
+        f = entry['fields']
+        return {'time': f.get('captureTime'), 'device': _short(f.get('deviceName') or f.get('deviceId')), 'source_ref': entry.get('source_ref')}
+    ranked = sorted(devices.values(), key=lambda d: (-d['count'], str(d['first'])))
+    return {'daily': [{'date': d, 'count': days[d]} for d in sorted(days)], 'night_count': night,
+            'first': point(points[0]) if points else None, 'last': point(points[-1]) if points else None,
+            'device_count': len(devices), 'top_devices': ranked[:10]}
+
+
+def model_view(public):
+    """Compact projection of an already public result for model input only.
+
+    Evidence, source cards and tables keep reading the full public_result.
+    """
+    if not isinstance(public, dict) or public.get('version') != VERSION:
+        return public
+    if public.get('kind') == 'tracks':
+        view = {k: copy.deepcopy(public.get(k)) for k in ('version', 'kind', 'query', 'response_snapshot_id', 'returned_count', 'coverage', 'missing')}
+        if 'segments' in public:
+            view['segments'] = copy.deepcopy(public['segments'])
+        view.update(_track_view(public), view=MODEL_VIEW_VERSION, note=MODEL_VIEW_NOTE)
+        return view
+    if len(canonical(public).encode()) <= MODEL_VIEW_MAX_BYTES:
+        return public
+    view = copy.deepcopy(public)
+    shown = min(MODEL_VIEW_RECORDS, len(view.get('records', [])))
+    while True:
+        view['records'] = copy.deepcopy(public.get('records', [])[:shown])
+        view.update(view=MODEL_VIEW_VERSION, records_in_view=shown, note=MODEL_VIEW_NOTE)
+        if shown <= 1 or len(canonical(view).encode()) <= MODEL_VIEW_MAX_BYTES:
+            return view
+        shown //= 2
