@@ -180,7 +180,12 @@ def project(store,row,snapshot):
         view = build_tables(result,snapshot)
         if view is not None:
             from .table_answer import markdown as table_markdown
-            view['markdown'] = table_markdown(view)
+            from .display_identity import mapping, reveal
+            identities = mapping(snapshot)
+            view['markdown'] = reveal(table_markdown(view), identities)
+            for option in (view.get('next_question') or {}).get('options') or []:
+                if isinstance(option, dict) and isinstance(option.get('label'), str):
+                    option['label'] = reveal(option['label'], identities)
             result['answer_view'] = view
         return result
     if snapshot.get('provider_plan'):

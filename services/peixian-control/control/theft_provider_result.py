@@ -34,7 +34,7 @@ def profile_sentence(f):
           f"性别 {person.get('gender') or '未提供'}；年龄 {str(age)+' 岁' if type(age) is int else '未提供'}")
     warning=f.get('warning') if isinstance(f.get('warning'),dict) else {}
     if type(warning.get('warningCount')) is int:
-        head+=f"；来源预警 {warning['warningCount']} 条"
+        head+=f"；来源预警类型 {warning['warningCount']} 个"
     captures=[c for c in f.get('captures') or [] if isinstance(c,dict)]
     if not captures:
         return head+'。来源未返回最近抓拍。'
