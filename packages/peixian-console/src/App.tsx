@@ -12,7 +12,7 @@ import Admin from "./pages/Admin"
 import FinalAdmin from "./pages/FinalAdmin"
 import { defaultPlatform, platformMetadata } from "./platform"
 import type { Platform } from "./platform"
-import { connectEvents, createChangeBus, parseChange, resources } from "./events"
+import { connectEvents, createChangeBus, parseChange, parseLive, resources } from "./events"
 import RuntimeStatus from "./RuntimeStatus"
 import loginStory from "./assets/peixian-login-left.webp"
 import loginSide from "./assets/peixian-login-right.webp"
@@ -139,6 +139,10 @@ export default function App() {
       onEvent: (event) => {
         const change = parseChange(event)
         if (change) changes.publish(change)
+        else {
+          const notice = parseLive(event)
+          if (notice) changes.publishLive(notice)
+        }
       },
     })
     onCleanup(() => controller.abort())
@@ -202,6 +206,7 @@ export default function App() {
                 refreshUser,
                 changed,
                 subscribe: changes.subscribe,
+                subscribeLive: changes.subscribeLive,
                 invalidate: (resources) => changes.publish({ resources }),
               }}
             >

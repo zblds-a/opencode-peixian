@@ -33,6 +33,58 @@ export function parseChange(event: ServerEvent): Change | undefined {
   }
 }
 
+export type AnswerSegmentNotice = {
+  type: "answer.segment"
+  session_id: string
+  run_id: string
+  message_id?: string
+  part_id: string
+  sequence: number
+  display_kind: "source_answer" | "final_answer"
+  final: boolean
+  index?: number
+  count?: number
+  text?: string
+  truncated?: boolean
+}
+export type RunProgressNotice = { type: "run.progress"; session_id: string; run_id: string; phase: string; label: string; status?: string }
+export type LiveNotice = AnswerSegmentNotice | RunProgressNotice
+
+const identifier = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(value)
+
+// Only pushed content from the controlled answer pipeline is accepted; anything else is ignored.
+export function parseLive(event: ServerEvent): LiveNotice | undefined {
+  if (event.event !== "change") return
+  try {
+    const data = JSON.parse(event.data)
+    if (!data || data.version !== "live-push-v1" || !identifier(data.session_id) || !identifier(data.run_id)) return
+    if (data.type === "run.progress") {
+      if (typeof data.phase !== "string" || typeof data.label !== "string" || data.label.length > 200) return
+      return { type: "run.progress", session_id: data.session_id, run_id: data.run_id, phase: data.phase, label: data.label, ...(typeof data.status === "string" ? { status: data.status } : {}) }
+    }
+    if (data.type !== "answer.segment") return
+    if (!identifier(data.part_id) || !Number.isInteger(data.sequence) || data.sequence < 1) return
+    if (data.display_kind !== "source_answer" && data.display_kind !== "final_answer") return
+    if (data.text !== undefined && typeof data.text !== "string") return
+    return {
+      type: "answer.segment",
+      session_id: data.session_id,
+      run_id: data.run_id,
+      ...(identifier(data.message_id) ? { message_id: data.message_id } : {}),
+      part_id: data.part_id,
+      sequence: data.sequence,
+      display_kind: data.display_kind,
+      final: data.final === true,
+      ...(Number.isInteger(data.index) ? { index: data.index } : {}),
+      ...(Number.isInteger(data.count) ? { count: data.count } : {}),
+      ...(typeof data.text === "string" ? { text: data.text } : {}),
+      ...(data.truncated === true ? { truncated: true } : {}),
+    }
+  } catch {
+    return
+  }
+}
+
 // Stream decoding preserves UTF-8 code points, CRLF boundaries and SSE multiline data.
 export async function readEvents(
   stream: ReadableStream<Uint8Array>,
@@ -175,7 +227,17 @@ export async function connectEvents(options: EventOptions) {
 
 export function createChangeBus() {
   const listeners = new Map<Resource, Set<(change: Change) => void>>()
+  const live = new Set<(notice: LiveNotice) => void>()
   return {
+    subscribeLive(callback: (notice: LiveNotice) => void) {
+      live.add(callback)
+      return () => {
+        live.delete(callback)
+      }
+    },
+    publishLive(notice: LiveNotice) {
+      for (const callback of [...live]) callback(notice)
+    },
     subscribe(resource: Resource, callback: (change: Change) => void) {
       const group = listeners.get(resource) ?? new Set()
       listeners.set(resource, group)

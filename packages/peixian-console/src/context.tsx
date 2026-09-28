@@ -1,7 +1,7 @@
 import { createContext, useContext } from "solid-js"
 import type { Accessor } from "solid-js"
 import type { Capability, User } from "./types"
-import type { Change, Resource } from "./events"
+import type { Change, LiveNotice, Resource } from "./events"
 export type ConsoleContext = {
   user: Accessor<User>
   capabilities: Accessor<Capability[]>
@@ -11,6 +11,7 @@ export type ConsoleContext = {
   invalidate: (resources: Resource[]) => void
   changed: Accessor<number>
   subscribe: (resource: Resource, callback: (change: Change) => void) => () => void
+  subscribeLive?: (callback: (notice: LiveNotice) => void) => () => void
 }
 export const Context = createContext<ConsoleContext>()
 export function useConsole() {
