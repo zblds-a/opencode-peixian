@@ -614,6 +614,7 @@ def test_prompt_requires_json_every_data_round():
     from pathlib import Path
     assert '每次答复（包括追问、对比、复核' in t.INSTRUCTION
     assert '只有本轮完全没有调用资料工具时' in t.INSTRUCTION
+    assert '查询条件不全时用question工具询问缺项' in t.INSTRUCTION
     assert '资料终稿只输出' not in t.INSTRUCTION
     prompt = (Path(t.__file__).parent / 'agents/profiles/theft_prompt.md').read_text(encoding='utf-8')
     assert '由你填进JSON对应字段，平台负责排版' in prompt and '不询问是否输出终稿' in prompt
