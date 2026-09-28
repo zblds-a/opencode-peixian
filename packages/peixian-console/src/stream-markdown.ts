@@ -3,7 +3,8 @@ import { marked } from "marked"
 export type StreamProjection = { text: string; pendingTable: boolean; pendingSource: boolean }
 
 // A cumulative snapshot may arrive in any packet boundaries. Keep the raw tail here;
-// only complete GFM table rows and complete source anchors cross into visible text.
+// Completed rows stay stable; the current row may expose safe cells while source
+// anchors remain buffered until their short labels and targets are complete.
 export class MarkdownStreamBuffer {
   private raw = ""
 
@@ -15,7 +16,7 @@ export class MarkdownStreamBuffer {
     const partial = lines.at(-1)?.endsWith("\n") ? "" : lines.pop() ?? ""
     let text = ""
     let header = ""
-    let table: { header: string; separator: string } | undefined
+    let table: { header: string; separator: string; sourceColumns: number[]; columns: number } | undefined
     let fence = ""
     let blocked = false
 
@@ -31,7 +32,8 @@ export class MarkdownStreamBuffer {
       if (header) {
         const candidate = marked.lexer(header + line).find((token) => token.type === "table")
         if (candidate?.type === "table") {
-          table = { header, separator: line }
+          const headings = splitTableCells(header.replace(/\r?\n$/, ""))
+          table = { header, separator: line, columns: headings.length, sourceColumns: headings.flatMap((heading, index) => /来源/.test(heading) ? [index] : []) }
           text += header + line
           header = ""
           return
@@ -55,9 +57,30 @@ export class MarkdownStreamBuffer {
       if (blocked) break
       accept(line)
     }
+    let draftTable = false
     if (finished && !interrupted && !blocked) {
       if (partial) accept(partial)
       if (header) text += header
+    } else if (table?.sourceColumns.length && !interrupted && !blocked && !fence && hasStructuralPipe(partial)) {
+      const currentTable = table
+      const cells = splitTableCells(partial)
+      if (cells.length <= currentTable.columns && currentTable.columns > 0) {
+        const visible = Array.from({ length: currentTable.columns }, (_, index) => {
+          const cell = cells[index] ?? ""
+          if (currentTable.sourceColumns.includes(index)) {
+            return [...cell.matchAll(/\[来源\d+\]\(#source-[A-Za-z0-9-]+\)/g)]
+              .map((match) => match[0]).join("、") || " "
+          }
+          const sourceStart = unfinishedSourceStart(cell)
+          return sourceStart < 0 ? cell : cell.slice(0, sourceStart)
+        })
+        const row = `| ${visible.join(" | ")} |\n`
+        const candidate = marked.lexer(currentTable.header + currentTable.separator + row).find((token) => token.type === "table")
+        if (candidate?.type === "table" && candidate.rows.length === 1) {
+          text += row
+          draftTable = true
+        }
+      }
     } else if (!header && !table && !fence && !blocked && !finished) {
       // A complete sentence can appear while the current line is still growing.
       // Holding the rest also prevents a table header from flashing as a paragraph.
@@ -72,10 +95,36 @@ export class MarkdownStreamBuffer {
     const sourceStart = unfinishedSourceStart(text)
     return {
       text: sourceStart < 0 ? text : text.slice(0, sourceStart),
-      pendingTable: !finished && (Boolean(header) || !fence && hasStructuralPipe(partial)),
+      pendingTable: !finished && (Boolean(header) || !draftTable && !fence && hasStructuralPipe(partial)),
       pendingSource: blocked || sourceStart >= 0 || unfinishedSourceStart(partial) >= 0,
     }
   }
+}
+
+// Split only structural pipes, leaving escaped pipes and inline code intact.
+function splitTableCells(line: string) {
+  const cells: string[] = []
+  let start = 0
+  let code = 0
+  for (let index = 0; index < line.length; index++) {
+    if (line[index] === "\\") { index++; continue }
+    if (line[index] === "`") {
+      let end = index + 1
+      while (line[end] === "`") end++
+      const width = end - index
+      if (!code) code = width
+      else if (code === width) code = 0
+      index = end - 1
+      continue
+    }
+    if (line[index] !== "|" || code) continue
+    cells.push(line.slice(start, index))
+    start = index + 1
+  }
+  cells.push(line.slice(start))
+  if (!cells[0].trim()) cells.shift()
+  if (cells.length > 1 && !cells.at(-1)?.trim()) cells.pop()
+  return cells
 }
 
 function hasStructuralPipe(text: string) {
