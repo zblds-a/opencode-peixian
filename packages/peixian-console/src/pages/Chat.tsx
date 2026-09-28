@@ -51,7 +51,9 @@ export default function Chat() {
   const [selectedPlugins, setSelectedPlugins] = createSignal<string[]>([])
   const [busy, setBusy] = createSignal(false)
   const [sending, setSending] = createSignal(false)
-  const [pendingPrompt, setPendingPrompt] = createSignal<{ text: string; attachments: { id: string; name: string }[]; messageID?: string }>()
+  const [pendingPrompt, setPendingPrompt] = createSignal<{ text: string; attachments: { id: string; name: string }[]; messageID?: string; questionAnswer?: boolean }>()
+  const questionAnswerKey = `peixian:question-answers:${app.user().id}`
+  const [questionAnswerIDs, setQuestionAnswerIDs] = createSignal((sessionStorage.getItem(questionAnswerKey) ?? "").split(",").filter(Boolean))
   const [replyJump, setReplyJump] = createSignal(false)
   const [messageSupport, setMessageSupport] = createSignal<{ version?: string; file_ids?: boolean; max_files?: number; requires_ready?: boolean; allows_truncated?: boolean }>()
   const [uploading, setUploading] = createSignal(false)
@@ -482,10 +484,10 @@ export default function Chat() {
     } catch (cause) { if (selected() === id) app.notify((cause as Error).message, "error") }
     finally { if (app.user().id === owner) setClearingScene(false) }
   }
-  async function send(textOverride?: string) {
+  async function send(textOverride?: string, questionAnswer = false) {
     const text = textOverride ?? draft()
     if (!text.trim() || sending() || loadingConversation() || uncertain() || busy() || !ready() || !shownModels().length) return
-    const fileIDs = fileSelectionReady() ? selectedFiles() : []
+    const fileIDs = !questionAnswer && fileSelectionReady() ? selectedFiles() : []
     const attachments = fileIDs.map((id) => files().find((item) => item.id === id)).filter((item): item is FileItem => !!item).map((item) => ({ id: item.id, name: item.name }))
     if (fileIDs.length !== attachments.length || fileIDs.some((id) => { const item = files().find((file) => file.id === id); return (item?.parse_status ?? item?.status) !== "ready" || item?.truncated === true })) { setError("关联文件尚未完成解析或已被删除，请重新选择后发送。"); return }
     const payload = {
@@ -502,7 +504,7 @@ export default function Chat() {
     const showJump = Boolean(scroll && scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight >= 96)
     if (showJump) setReplyJump(true)
     setSending(true)
-    setPendingPrompt({ text, attachments })
+    setPendingPrompt({ text, attachments, questionAnswer })
     setError("")
     let submitting = false
     let accepted = false
@@ -526,8 +528,12 @@ export default function Chat() {
       if (app.user().id !== uid) return
       if (result.accepted !== true) throw new ApiError("提交结果待确认，请核对历史记录。", 0, "unknown_submission")
       accepted = true
+      if (questionAnswer) {
+        setQuestionAnswerIDs((current) => [...new Set([...current, result.message_id])])
+        sessionStorage.setItem(questionAnswerKey, questionAnswerIDs().join(","))
+      }
       setSentAttachments((current) => ({ ...current, [result.message_id]: attachments }))
-      setPendingPrompt({ text, attachments, messageID: result.message_id })
+      setPendingPrompt({ text, attachments, messageID: result.message_id, questionAnswer })
       if (fileIDs.length) setSelectedFiles([])
       animatedRuns.add(result.run_id)
       setLatestRun(result.run_id)
@@ -565,7 +571,7 @@ export default function Chat() {
       }
       const reply=clarificationAnswer(question.missing,answers)
       if (selected()!==sid || currentRun()?.id!==run.id || currentRun()?.clarification?.id!==question.id) return
-      await send(reply)
+      await send(reply, true)
     } catch (cause) { if (selected()===sid) setError(safeMessage((cause as Error).message)) }
     finally { setQuestionBusy(false) }
   }
@@ -600,7 +606,7 @@ export default function Chat() {
     if (answers === undefined) {
       setNextQuestion(undefined)
       setDismissedNextRun(run.id)
-      await send(STOP_FOLLOWUP_TEXT)
+      await send(STOP_FOLLOWUP_TEXT, true)
       return
     }
     setNextQuestionBusy(true)
@@ -617,7 +623,7 @@ export default function Chat() {
       }
       setNextQuestion(undefined)
       setDismissedNextRun(run.id)
-      await send(action.send)
+      await send(action.send, true)
     } catch (cause) {
       if (selected() === sid) setError(safeMessage((cause as Error).message))
     } finally {
@@ -957,6 +963,7 @@ export default function Chat() {
               <Index each={shownMessages()}>
                 {(entry) => {
                   const message = () => entry().message
+                  const questionAnswer = () => message().info.role === "user" && questionAnswerIDs().includes(message().info.id)
                   const attachments = () => message().attachments ?? sentAttachments()[message().info.id] ?? []
                   const textParts = () => entry().textParts
                   const toolParts = () => entry().toolParts
@@ -967,12 +974,12 @@ export default function Chat() {
                     return completedToolTraces.has(key)
                   }
                   return (
-                  <article data-message-id={message().info.id} tabindex={-1} class={"message " + (message().info.role === "user" ? "user" : "assistant")}>
-                    <div class="message-avatar">
+                  <article data-message-id={message().info.id} tabindex={-1} class={"message " + (message().info.role === "user" ? "user" : "assistant") + (questionAnswer() ? " question-answer" : "")}>
+                    <Show when={!questionAnswer()}><div class="message-avatar">
                       <img src={message().info.role === "user" ? app.user().avatar ?? chatAssets.userFallbackAvatar : chatAssets.policeAvatar} alt="" />
-                    </div>
+                    </div></Show>
                     <div class="message-content">
-                      <div class="message-author">{message().info.role === "user" ? "你" : "智能助手"}</div>
+                      <div class="message-author">{questionAnswer() ? "已选答案" : message().info.role === "user" ? "你" : "智能助手"}</div>
                       <Show when={message().info.role === "user" && attachments().length}>
                         <div class="message-attachments"><For each={attachments()}>{(file) => <span title={file.name}><Icon name="file" size={14} /><span>{file.name}</span></span>}</For></div>
                       </Show>
@@ -1058,7 +1065,7 @@ export default function Chat() {
                 }}
               </Index>
               <Show when={pendingPrompt()?.messageID && messages().some((message) => message.info.id === pendingPrompt()?.messageID) ? undefined : pendingPrompt()}>
-                {(prompt) => <article class="message user pending-prompt"><div class="message-avatar"><img src={app.user().avatar ?? chatAssets.userFallbackAvatar} alt="" /></div><div class="message-content"><div class="message-author">你</div><Show when={prompt().attachments.length}><div class="message-attachments"><For each={prompt().attachments}>{(file) => <span title={file.name}><Icon name="file" size={14} /><span>{file.name}</span></span>}</For></div></Show><Markdown text={prompt().text} /></div></article>}
+                {(prompt) => <article class={"message user pending-prompt" + (prompt().questionAnswer ? " question-answer" : "")}><Show when={!prompt().questionAnswer}><div class="message-avatar"><img src={app.user().avatar ?? chatAssets.userFallbackAvatar} alt="" /></div></Show><div class="message-content"><div class="message-author">{prompt().questionAnswer ? "已选答案" : "你"}</div><Show when={prompt().attachments.length}><div class="message-attachments"><For each={prompt().attachments}>{(file) => <span title={file.name}><Icon name="file" size={14} /><span>{file.name}</span></span>}</For></div></Show><Markdown text={prompt().text} /></div></article>}
               </Show>
               <Show when={awaitingReply()}><div class="assistant-thinking" role="status"><span class="message-avatar"><img src={chatAssets.policeAvatar} alt="" /></span><span>智能助手正在思考…</span></div></Show>
             </div>
@@ -1126,7 +1133,6 @@ export default function Chat() {
               <div class="chat-upload-control">
                 <input ref={fileInput} type="file" accept=".xlsx,.pdf,.docx,.txt,.md,.csv" multiple hidden onChange={(event) => void uploadLocal(event.currentTarget.files)} />
                 <button type="button" disabled={!ready() || uploading()} title={fileSelectionReady() ? "上传文件到资料库并选择关联" : "上传到资料库；当前服务暂不支持随消息关联"} aria-label={uploading() ? "正在上传文件" : "上传文件到资料库"} onClick={() => fileInput.click()}><img src={uploadIcon} alt="" /><span>{uploading() ? "上传中…" : "文件"}</span></button>
-                <Show when={fileSelectionReady()}><button type="button" onClick={() => setPicker("files")}>选择文件{selectedFiles().length ? `（${selectedFiles().length}）` : ""}</button></Show>
               </div>
               <div class="model-choice">
                 <span class="model-dot" />
@@ -1164,7 +1170,7 @@ export default function Chat() {
           <Show when={sideMode() === "plugins"}><RelatedCapabilities /></Show>
           <Show when={sideMode() === "collapsed"}><button class="insight-reopen" onClick={() => setShowClues(true)} aria-label="展开研判侧栏" title="展开研判侧栏"><Icon name="star" size={17} /></button></Show>
           <Show when={sideMode() === "insight"}>
-            <div class="insight-single-head"><strong>{insightTab() === "clues" ? "智能发现线索" : "实体关系图谱"}</strong><div><button class="insight-icon-button" aria-label="切换侧栏内容" title="切换侧栏内容" onClick={() => setInsightTab(insightTab() === "clues" ? "graph" : "clues")}><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h15l-4-4M20 16H5l4 4" /></svg></button><button class="insight-icon-button" aria-label="收起侧栏" title="收起侧栏" onClick={() => setShowClues(false)}><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 15 7-7 7 7" /></svg></button></div></div>
+            <div class="insight-single-head"><strong>智能发现线索</strong><div><button class="insight-icon-button" aria-label="收起侧栏" title="收起侧栏" onClick={() => setShowClues(false)}><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 15 7-7 7 7" /></svg></button></div></div>
             <Show when={insightTab() === "clues"} fallback={<RealEntityGraph sessionID={selected()} runID={graphRunID()} runStatus={currentRun()?.id === graphRunID() ? currentRun()?.status : undefined} />}>
               <CluePanel clues={latestAnalysis()?.clues ?? []} expanded={showClues()} onExpandedChange={setShowClues} onSelect={setSelectedClue} hideHeader />
             </Show>
