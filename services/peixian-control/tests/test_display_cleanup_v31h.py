@@ -21,7 +21,7 @@ def test_next_question_respects_model_multiple_false():
             'header': '下一步分析',
             'question': '请选',
             'multiple': False,
-            'options': [{'label': '仅一项', 'description': 'd'}],
+            'options': [{'label': '仅一项', 'description': 'd', 'action': 'query'}],
         }
     }
     q = table_answer.next_question('run-2', [], chosen=chosen)

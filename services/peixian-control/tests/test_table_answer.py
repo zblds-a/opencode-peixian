@@ -478,3 +478,41 @@ def test_forbidden_wording_absent_in_ranking_markdown():
         assert banned not in output, banned
     assert '主要依据' in output
     assert '建议核验' in output
+
+
+def test_next_question_skips_non_query_suggestions():
+    for action in ('inspect_sources', 'inspect_cases'):
+        assert t.next_question('r', [{'reply': '查看来源', 'reason': 'x', 'action': action}]) is None
+
+
+def test_next_question_keeps_query_and_clarify_only():
+    q = t.next_question('r', [
+        {'reply': '查看本次来源明细', 'reason': 'x', 'action': 'inspect_sources'},
+        {'reply': '补查夜间活动', 'reason': 'x', 'action': 'query', 'kind': 'night'},
+        {'reply': '确认抓拍时段与半径', 'reason': 'x', 'action': 'clarify_scope'},
+    ])
+    assert [o['action'] for o in q['options']] == ['query', 'clarify_scope']
+    assert [o['send'] for o in q['options']] == [True, False]
+    assert [o['id'] for o in q['options']] == ['option-1', 'option-2']
+
+
+def test_next_question_caps_card_options():
+    q = t.next_question('r', [{'reply': f'补查{i}', 'reason': 'x', 'action': 'query'} for i in range(4)])
+    assert [o['label'] for o in q['options']] == ['补查0', '补查1']
+
+
+def test_model_next_question_filters_actions():
+    chosen = {'next_question': {'options': [
+        {'label': '查看来源', 'action': 'inspect_sources'},
+        {'label': '无动作'},
+        {'label': '确认半径', 'action': 'clarify_scope', 'send': True},
+    ]}}
+    q = t.next_question('r', [], chosen=chosen)
+    assert [(o['label'], o['send']) for o in q['options']] == [('确认半径', False)]
+    only_sources = {'next_question': {'options': [{'label': '查看来源', 'action': 'inspect_sources'}]}}
+    assert t.next_question('r', [], chosen=only_sources) is None
+
+
+def test_prompts_default_to_no_suggestions():
+    assert '"suggestions":[]' in t.INSTRUCTION
+    assert 'inspect_sources' not in t.INSTRUCTION

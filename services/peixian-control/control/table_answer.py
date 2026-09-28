@@ -122,10 +122,10 @@ def select_records(result, snapshot, subject, spatial=False, subjects=None):
 
 INSTRUCTION = """
 资料终稿只输出一个 person-tables-v3 JSON 对象，由平台渲染为人员基本信息、研判摘要、分析依据、下一步研判四段式，不另外生成Markdown终稿。
-格式：{"format":"person-tables-v3","mode":"data","source_refs":["已取得的记录编号"],"scoring":{"requested":true},"suggestions":[{"action":"inspect_sources","text":"查看本次来源详情","reason":"核对已取得记录","conditions":"无需新增查询","reason_source":"已取得的记录编号"}]}。
+格式：{"format":"person-tables-v3","mode":"data","source_refs":["已取得的记录编号"],"scoring":{"requested":true},"suggestions":[]}。
 scoring仅当用户明确要求综合研判、嫌疑评估、评分或排序，且处于由人到案或由案到人工作流时才声明requested=true；其余场景省略该字段。评分与排名由平台按确定性规则计算并在终稿表格中呈现，你不得自行给出、修改分数或排序。
 source_refs只能引用当前任务已取得资料；平台逐字段核对并生成事实表，不把自由文字当作已核验结论。
-suggestions由你按具体缺口提出，最多三项。action可为query、clarify_scope、inspect_sources、inspect_cases；query须提供当前授权的kind，缺项放fields，具体建议用text、reason、conditions、reply。不得自动执行建议。
+suggestions默认留空。已取得资料能回答当前问题时不提建议；只有存在影响结论的具体缺口，且补上它需要新的查询或需要用户确认时间、半径、人员等条件时才提出，一般一项，最多两项。action只用query或clarify_scope：query须提供当前授权的kind，缺项放fields；clarify_scope写明要确认的条件。具体建议用text、reason、conditions、reply，reason写清对应哪条结论或缺口。不要把「查看来源详情」「查看已有记录」「继续核实」「持续关注」这类不产生新资料的事项写成建议。不得自动执行建议。
 不要求查完全部接口，未查询不是失败。失败、零条和未知分别说明；不输出个人犯罪倾向，不下确定性罪责结论，评分相关表述用「可能性研判」措辞。
 问候、能力说明和缺项追问使用自然中文，不输出JSON；需要补充时用question。取消补充后整理已有结果。
 """
@@ -271,8 +271,16 @@ def model_case_checks(chosen, record_ids):
     }
 
 
+CARD_ACTIONS = ('query', 'clarify_scope')
+CARD_MAX_OPTIONS = 2
+
+
 def next_question(run_id, suggestions, chosen=None, context=None):
-    """Prefer model-authored next_question; else build options from suggestion replies."""
+    """Prefer model-authored next_question; else build options from suggestion replies.
+
+    Only options that fetch new data or confirm scope reach the card; other
+    suggestions stay in the answer table.
+    """
     context = context or {}
     if context.get('stop_followup'):
         return None
@@ -284,15 +292,16 @@ def next_question(run_id, suggestions, chosen=None, context=None):
             if not isinstance(opt, dict):
                 continue
             label = _clip(opt.get('label') or opt.get('reply') or opt.get('text') or '')
-            if not label:
+            action = opt.get('action')
+            if not label or action not in CARD_ACTIONS:
                 continue
             options.append({
                 'label': label,
                 'description': _clip(opt.get('description') or opt.get('reason') or '', 300),
-                'action': opt.get('action') if isinstance(opt.get('action'), str) else 'query',
-                'send': False if opt.get('send') is False else True,
+                'action': action,
+                'send': action != 'clarify_scope' and opt.get('send') is not False,
             })
-            if len(options) >= 8:
+            if len(options) >= CARD_MAX_OPTIONS:
                 break
         if options:
             for index, option in enumerate(options, 1):
@@ -309,15 +318,16 @@ def next_question(run_id, suggestions, chosen=None, context=None):
     options = []
     for item in suggestions or []:
         reply = (item.get('reply') or item.get('text') or '').strip()
-        if not reply:
+        action = item.get('action')
+        if not reply or action not in CARD_ACTIONS:
             continue
         options.append({
             'label': reply[:200],
             'description': item.get('reason') or '',
-            'action': item.get('action') or 'query',
-            'send': item.get('action') != 'clarify_scope',
+            'action': action,
+            'send': action != 'clarify_scope',
         })
-        if len(options) >= 5:
+        if len(options) >= CARD_MAX_OPTIONS:
             break
     if not options:
         return None

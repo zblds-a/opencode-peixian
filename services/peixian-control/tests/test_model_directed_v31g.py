@@ -64,7 +64,7 @@ def test_model_suggestions_and_next_question():
         'next_question': {
             'header': '下一步',
             'question': '选一项',
-            'options': [{'label': '查询此人夜间活动记录', 'description': '补维度', 'send': True}],
+            'options': [{'label': '查询此人夜间活动记录', 'description': '补维度', 'action': 'query', 'send': True}],
         },
         'case_checks': {
             'items': [{
