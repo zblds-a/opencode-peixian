@@ -7,7 +7,7 @@ export type RelationshipNode = {
   properties: Record<string, string | number | boolean | null>
   evidence_refs?: { id: string; type: string; label: string }[]
 }
-export type RelationshipEdge = { id: string; source: string; target: string; type: string; label: string; directed: boolean; weight?: number }
+export type RelationshipEdge = { id: string; source: string; target: string; type: string; label: string; directed: boolean; weight?: number; properties?: Record<string, string | number | boolean | null>; evidence_refs?: { id: string; type: string; label: string }[] }
 
 // Formal entity artwork can replace icon values without changing layout or interaction.
 const appearance = {
@@ -53,9 +53,12 @@ export default function RelationshipGraph(props: {
   let queue = Promise.resolve()
   const positions = new Map<string, { x: number; y: number }>()
   const [loadError, setLoadError] = createSignal(false)
+  const [ready, setReady] = createSignal(false)
   const [hovered, setHovered] = createSignal<string>()
+  const [hoveredEdge, setHoveredEdge] = createSignal<string>()
   const [pointer, setPointer] = createSignal({ x: 160, y: 90 })
   const nodeInfo = () => props.nodes.find((node) => node.id === hovered())
+  const edgeInfo = () => props.edges.find((edge) => edge.id === hoveredEdge())
   const degree = (id: string, edges: RelationshipEdge[]) => edges.filter((edge) => edge.source === id || edge.target === id).length
   const coreID = (nodes: RelationshipNode[], edges: RelationshipEdge[]) =>
     [...nodes].sort((a, b) => Number(entityKind(b.type) === "person") - Number(entityKind(a.type) === "person") || degree(b.id, edges) - degree(a.id, edges))[0]?.id
@@ -70,22 +73,25 @@ export default function RelationshipGraph(props: {
     if (!graph || !drawn || disposed) return
     const path = new Set(props.path)
     const focus = hovered() ?? props.selected
+    const edgeFocus = hoveredEdge()
     const neighbors = new Set(focus ? [focus] : [])
     props.edges.filter((edge) => edge.source === focus || edge.target === focus).forEach((edge) => {
       neighbors.add(edge.source)
       neighbors.add(edge.target)
     })
+    const activeEdge = props.edges.find((edge) => edge.id === edgeFocus)
+    if (activeEdge) { neighbors.add(activeEdge.source); neighbors.add(activeEdge.target) }
     const core = coreID(props.nodes, props.edges)
     graph.updateNodeData(props.nodes.map((node) => ({ id: node.id, style: {
       size: node.id === core ? hovered() === node.id ? 49 : 46 : hovered() === node.id ? 39 : 35,
-      opacity: path.size ? path.has(node.id) ? 1 : focus && neighbors.has(node.id) ? 0.55 : 0.2 : focus && !neighbors.has(node.id) ? 0.24 : 1,
+      opacity: path.size ? path.has(node.id) ? 1 : neighbors.has(node.id) ? 0.55 : 0.2 : edgeFocus ? neighbors.has(node.id) ? 1 : 0.24 : focus && !neighbors.has(node.id) ? 0.24 : 1,
       stroke: path.has(node.id) ? "#e6a328" : focus === node.id ? "#123e75" : "#ffffff",
       lineWidth: path.has(node.id) ? 4 : focus === node.id ? 3 : 2,
     } })))
     graph.updateEdgeData(props.edges.map((edge) => ({ id: edge.id, style: {
-      opacity: path.size ? path.has(edge.id) ? 1 : focus && (edge.source === focus || edge.target === focus) ? 0.55 : 0.13 : focus && edge.source !== focus && edge.target !== focus ? 0.15 : 1,
-      stroke: path.has(edge.id) ? "#dfa328" : focus && (edge.source === focus || edge.target === focus) ? "#397ab8" : "#b7c9dc",
-      lineWidth: path.has(edge.id) ? 3 : focus && (edge.source === focus || edge.target === focus) ? 2 : 1,
+      opacity: path.size ? path.has(edge.id) ? 1 : edge.id === edgeFocus ? 0.75 : 0.13 : edgeFocus ? edge.id === edgeFocus ? 1 : 0.15 : focus && edge.source !== focus && edge.target !== focus ? 0.15 : 1,
+      stroke: path.has(edge.id) ? "#dfa328" : edge.id === edgeFocus || focus && (edge.source === focus || edge.target === focus) ? "#397ab8" : "#b7c9dc",
+      lineWidth: path.has(edge.id) ? 3 : edge.id === edgeFocus || focus && (edge.source === focus || edge.target === focus) ? 2 : 1,
       endArrow: path.has(edge.id) && edge.directed,
       endArrowType: "triangle" as const,
       endArrowSize: 8,
@@ -120,7 +126,7 @@ export default function RelationshipGraph(props: {
           labelPlacement: "bottom" as const, labelOffsetY: 8,
         } }
       }),
-      edges: edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, style: { stroke: "#b7c9dc", lineWidth: 1 } })),
+      edges: edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, style: { stroke: "#b7c9dc", lineWidth: 1, increasedLineWidthForHitTesting: 8 } })),
     })
     if (!drawn) {
       await graph.render()
@@ -130,6 +136,7 @@ export default function RelationshipGraph(props: {
       await fitGraph()
     } else await graph.draw()
     await highlight()
+    if (!ready()) setReady(true)
   }
 
   const schedule = (task: () => Promise<void>) => {
@@ -142,17 +149,21 @@ export default function RelationshipGraph(props: {
       width = stage.clientWidth || 280
       height = stage.clientHeight || 310
       graph = new Graph({
-        container: stage, width, height,
-        layout: { type: "force-atlas2", preventOverlap: true, nodeSize: 48, nodeSpacing: 24, iterations: 180 },
+        container: stage, width, height, animation: false,
+        layout: { type: "force-atlas2", preventOverlap: true, nodeSize: 48, nodeSpacing: 24, maxIteration: 180, animation: false },
         behaviors: ["drag-canvas", "zoom-canvas", "drag-element"],
       })
       graph.on("node:click", (event) => {
         if ("target" in event && event.target && typeof event.target === "object" && "id" in event.target) props.onSelect(String(event.target.id))
       })
       graph.on("node:pointerenter", (event) => {
-        if ("target" in event && event.target && typeof event.target === "object" && "id" in event.target) setHovered(String(event.target.id))
+        if ("target" in event && event.target && typeof event.target === "object" && "id" in event.target) { setHoveredEdge(undefined); setHovered(String(event.target.id)) }
       })
       graph.on("node:pointerleave", () => setHovered(undefined))
+      graph.on("edge:pointerenter", (event) => {
+        if ("target" in event && event.target && typeof event.target === "object" && "id" in event.target) { setHovered(undefined); setHoveredEdge(String(event.target.id)) }
+      })
+      graph.on("edge:pointerleave", () => setHoveredEdge(undefined))
       schedule(() => drawData(props.nodes, props.edges))
     }).catch(() => setLoadError(true))
     const observer = new ResizeObserver(() => {
@@ -177,15 +188,16 @@ export default function RelationshipGraph(props: {
     props.selected
     props.path
     hovered()
+    hoveredEdge()
     untrack(() => schedule(highlight))
   })
 
-  return <div class={props.large ? "entity-graph-canvas large" : "entity-graph-canvas"} ref={container} onPointerLeave={() => setHovered(undefined)} onPointerMove={(event) => {
-    if (!hovered()) return
+  return <div class={props.large ? "entity-graph-canvas large" : "entity-graph-canvas"} ref={container} onPointerLeave={() => { setHovered(undefined); setHoveredEdge(undefined) }} onPointerMove={(event) => {
+    if (!hovered() && !hoveredEdge()) return
     const bounds = container.getBoundingClientRect()
     setPointer({ x: Math.max(8, Math.min(bounds.width - 260, event.clientX - bounds.left + 20)), y: Math.max(8, Math.min(bounds.height - 150, event.clientY - bounds.top + 18)) })
   }}>
-    <div class="entity-graph-stage" ref={stage} />
+    <div class="entity-graph-stage" ref={stage} style={{ visibility: ready() ? "visible" : "hidden" }} />
     <button class="graph-fit-view" type="button" onClick={() => void fitGraph()} aria-label="适配图谱视图">适配视图</button>
     <Show when={loadError()}><p class="graph-load-error">图谱组件加载失败，请刷新页面重试。</p></Show>
     <Show when={nodeInfo()}>{(node) => <div class="graph-entity-card" style={{ left: pointer().x + "px", top: pointer().y + "px" }} role="status">
@@ -194,6 +206,13 @@ export default function RelationshipGraph(props: {
       <span>实体名称：{node().label}</span>
       <Show when={node().evidence_refs?.length}><span>来源：{node().evidence_refs!.map((item) => item.label || item.id).join("、")}</span></Show>
       <For each={Object.entries(node().properties).filter(([key, value]) => value !== null && value !== "" && !["实体类型", "实体名称", "来源"].includes(key))}>{([key, value]) => <span>{key}：{String(value)}</span>}</For>
+    </div>}</Show>
+    <Show when={edgeInfo()}>{(edge) => <div class="graph-entity-card graph-edge-card" style={{ left: pointer().x + "px", top: pointer().y + "px" }} role="status">
+      <strong>{edge().label || edge().type}</strong>
+      <Show when={edge().type}><span>关系类型：{edge().type}</span></Show>
+      <span>关联实体：{props.nodes.find((node) => node.id === edge().source)?.label ?? edge().source} {edge().directed ? "→" : "—"} {props.nodes.find((node) => node.id === edge().target)?.label ?? edge().target}</span>
+      <Show when={edge().evidence_refs?.length}><span>来源：{edge().evidence_refs!.map((item) => item.label || item.id).join("、")}</span></Show>
+      <For each={Object.entries(edge().properties ?? {}).filter(([key, value]) => value !== null && value !== "")}>{([key, value]) => <span>{key}：{String(value)}</span>}</For>
     </div>}</Show>
   </div>
 }

@@ -114,13 +114,13 @@
 .business-shell .chat-layout .plugin-card > button:hover { background: #eef6ff; }
 
 .business-shell .chat-layout .right-panel--clues .clue-list { display: grid; gap: 11px; padding: 12px; }
-.business-shell .chat-layout .right-panel--clues .clue-card { position: relative; display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 10px; min-height: 105px; padding: 14px 13px; border: 1px solid #e3eaf3; border-radius: 11px; background: #fff; box-shadow: 0 3px 9px #172e5412; }
+.business-shell .chat-layout .right-panel--clues .clue-card { position: relative; display: grid; grid-template-columns: 42px minmax(0, 1fr); align-content: start; gap: 10px; min-height: 105px; padding: 14px 13px; border: 1px solid #e3eaf3; border-radius: 11px; background: #fff; box-shadow: 0 3px 9px #172e5412; }
 .business-shell .chat-layout .right-panel--clues .clue-card-icon { width: 40px; height: 40px; object-fit: contain; }
 .business-shell .chat-layout .right-panel--clues .clue-card-copy { min-width: 0; padding-right: 2px; }
 .business-shell .chat-layout .right-panel--clues .clue-card-copy > strong { color: #17243a; font-size: 15px; font-weight: 600; }
-.business-shell .chat-layout .right-panel--clues .clue-card-copy p { display: -webkit-box; overflow: hidden; margin: 6px 0 25px; color: #728096; font-size: 12px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.business-shell .chat-layout .right-panel--clues .clue-card-copy p { display: -webkit-box; overflow: hidden; margin: 6px 0 0; color: #728096; font-size: 12px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .business-shell .chat-layout .right-panel--clues .clue-card-copy b { color: #1269c4; font-weight: 700; }
-.business-shell .chat-layout .right-panel--clues .clue-card-open { position: absolute; right: 12px; bottom: 11px; display: inline-flex; align-items: center; gap: 7px; min-height: 29px; padding: 4px 9px; border: 0; border-radius: 6px; color: #fff; background: #1267d3; font-size: 11px; }
+.business-shell .chat-layout .right-panel--clues .clue-card-open { position: static; grid-column: 2; justify-self: end; display: inline-flex; align-items: center; gap: 7px; min-height: 29px; padding: 4px 9px; border: 0; border-radius: 6px; color: #fff; background: #1267d3; font-size: 11px; }
 .business-shell .chat-layout .right-panel--clues .clue-card-open span { font-size: 20px; line-height: 12px; }
 .business-shell .chat-layout .clue-card--funds .clue-card-open { background: #f27c11; }
 .business-shell .chat-layout .clue-card--night .clue-card-open { background: #176ad6; }

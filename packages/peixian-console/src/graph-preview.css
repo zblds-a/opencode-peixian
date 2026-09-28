@@ -19,6 +19,7 @@
 }
 .graph-entity-card strong { margin-bottom: 2px; color: #173f6c; font-size: 14px; }
 .graph-entity-card span { font-size: 12px; }
+.entity-graph-panel .graph-path-feedback { color: #356492; line-height: 1.5; }
 .entity-graph-panel .graph-path { display: grid; grid-template-columns: 1fr; gap: 10px; }
 .entity-graph-panel .graph-path-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .entity-graph-panel .graph-path-fields label { display: grid; gap: 5px; min-width: 0; }
