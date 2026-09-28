@@ -128,14 +128,6 @@ export default function RealEntityGraph(props: { sessionID?: string; runID?: str
       if (selected() === id && page()?.meta.data_revision === result.data_revision) setDetail(result.node)
     } catch (cause) { fail(cause) }
   }
-  const expand = async () => {
-    const id = selected(), revision = page()?.meta.data_revision
-    if (!id || !revision || working()) return
-    setWorking(true)
-    try { merge(await request<GraphPage>(graphBase() + "/expand", { method: "POST", body: JSON.stringify({ node_id: id, depth: 1, relation_types: [], node_limit: 80, edge_limit: 160, cursor: null, data_revision: revision }) })) }
-    catch (cause) { fail(cause) }
-    finally { setWorking(false) }
-  }
   const findPath = async () => {
     const revision = page()?.meta.data_revision
     if (!revision || !source() || !target() || working()) return
@@ -159,7 +151,7 @@ export default function RealEntityGraph(props: { sessionID?: string; runID?: str
       <div class="graph-controls"><label><span class="graph-visually-hidden">类型筛选</span><select aria-label="筛选节点类型" value={filter()} onChange={(event) => setFilter(event.currentTarget.value)}><option value="all">全部</option><For each={[...new Set(page()?.nodes.map((node) => node.type) ?? [])]}>{(type) => <option value={type}>{type}</option>}</For></select></label><button onClick={() => setLarge(true)}>放大查看 <img src={dialogueIcons.zoomIn} alt=""/></button></div>
       <div class="graph-canvas-card"><GraphCanvas nodes={canvasNodes()} edges={edges()} selected={selected()} path={path()} onSelect={(id) => void selectNode(id)} /><p class="graph-help">可拖动、滚轮缩放，点击节点核对脱敏详情与来源。</p></div>
       <Show when={page()?.meta.next_cursor}><button class="graph-start" disabled={working()} onClick={() => void loadMore()}>加载更多关系</button></Show>
-      <Show when={selected()}><div class="graph-detail"><strong>{detail()?.label ?? nodes().find((node) => node.id === selected())?.label}</strong><small>{detail()?.type ?? "节点"} · 已核对来源</small><For each={Object.entries(detail()?.properties ?? {})}>{([key, value]) => <p>{key}：{String(value)}</p>}</For><small>来源记录 {detail()?.evidence_refs?.length ?? 0} 项</small><button disabled={working()} onClick={() => void expand()}>展开相邻关系</button></div></Show>
+      <Show when={selected()}><div class="graph-detail"><strong>{detail()?.label ?? nodes().find((node) => node.id === selected())?.label}</strong><small>{detail()?.type ?? "节点"} · 已核对来源</small><For each={Object.entries(detail()?.properties ?? {})}>{([key, value]) => <p>{key}：{String(value)}</p>}</For><small>来源记录 {detail()?.evidence_refs?.length ?? 0} 项</small></div></Show>
       <div class="graph-path graph-path-card"><strong><img src={dialogueIcons.sectionEvidence} alt=""/>来源路径分析</strong><div class="graph-path-fields"><label>起点<select aria-label="路径起点" value={source()} onChange={(event) => { setSource(event.currentTarget.value); setPath([]); setPathFeedback("") }}><For each={page()?.nodes}>{(node) => <option value={node.id}>{node.label}</option>}</For></select></label><label>终点<select aria-label="路径终点" value={target()} onChange={(event) => { setTarget(event.currentTarget.value); setPath([]); setPathFeedback("") }}><For each={page()?.nodes}>{(node) => <option value={node.id}>{node.label}</option>}</For></select></label></div><button disabled={working() || !source() || !target()} onClick={() => void findPath()}>{working() ? "查询中…" : "高亮路径"}</button><Show when={pathFeedback()}><small class="graph-path-feedback" role="status">{pathFeedback()}</small></Show></div>
       <Show when={large()}><Portal><div class="graph-overlay" role="dialog" aria-modal="true" aria-label="可信实体关系图谱大视图"><div><header><strong>{entry()?.title || "可信实体关系图谱"}</strong><button onClick={() => setLarge(false)} aria-label="关闭图谱大视图">关闭</button></header><GraphCanvas large nodes={canvasNodes()} edges={edges()} selected={selected()} path={path()} onSelect={(id) => void selectNode(id)} /><p>仅显示当前执行已批准的来源关系；不代表因果或风险判断。</p></div></div></Portal></Show>
     </div>

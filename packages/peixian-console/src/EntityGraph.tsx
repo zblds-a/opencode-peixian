@@ -61,11 +61,6 @@ export default function EntityGraphPanel(props: { notice?: string }) {
   const nodes = () => sample.nodes.filter((node) => visibleIds().includes(node.id) && (filter() === "all" || node.type === filter()))
   const edges = () => sample.edges.filter((edge) => nodes().some((node) => node.id === edge.source) && nodes().some((node) => node.id === edge.target))
   const chosen = () => sample.nodes.find((node) => node.id === selected())
-  const expand = () => {
-    if (!selected()) return
-    const neighbors = sample.edges.filter((edge) => edge.source === selected() || edge.target === selected()).flatMap((edge) => [edge.source, edge.target])
-    setVisibleIds((current) => [...new Set([...current, ...neighbors])])
-  }
   const highlightPath = () => {
     const queue: { id: string; path: string[] }[] = [{ id: source(), path: [source()] }]
     const visited = new Set<string>()
@@ -90,8 +85,8 @@ export default function EntityGraphPanel(props: { notice?: string }) {
         <button onClick={() => setLarge(true)}>放大查看</button>
       </div>
       <GraphCanvas nodes={nodes()} edges={edges()} selected={selected()} path={path()} onSelect={setSelected} />
-      <p class="graph-help">可拖动、滚轮缩放，点击节点查看详情与展开关系。</p>
-      <Show when={chosen()}>{(node) => <div class="graph-detail"><strong>{node().label}</strong><small>{node().type} · 示例节点</small><For each={Object.entries(node().properties)}>{([key, value]) => <p>{key}：{value}</p>}</For><button onClick={expand}>展开相邻关系</button></div>}</Show>
+      <p class="graph-help">可拖动、滚轮缩放，点击节点查看详情。</p>
+      <Show when={chosen()}>{(node) => <div class="graph-detail"><strong>{node().label}</strong><small>{node().type} · 示例节点</small><For each={Object.entries(node().properties)}>{([key, value]) => <p>{key}：{value}</p>}</For></div>}</Show>
       <div class="graph-path"><strong>示例路径分析</strong><label>起点<select aria-label="路径起点" value={source()} onChange={(event) => setSource(event.currentTarget.value)}><For each={sample.nodes}>{(node) => <option value={node.id}>{node.label}</option>}</For></select></label><label>终点<select aria-label="路径终点" value={target()} onChange={(event) => setTarget(event.currentTarget.value)}><For each={sample.nodes}>{(node) => <option value={node.id}>{node.label}</option>}</For></select></label><button onClick={() => { setVisibleIds(sample.nodes.map((node) => node.id)); setFilter("all"); highlightPath() }}>高亮路径</button><Show when={path().length}><small>仅在示例网络中计算，已高亮 {Math.ceil(path().length / 2)} 个节点。</small></Show></div>
       <button class="graph-exit" onClick={() => { setDemo(false); setLarge(false) }}>退出示例</button>
       <Show when={large()}><Portal><div class="graph-overlay" role="dialog" aria-modal="true" aria-label="实体关系图谱示例大视图"><div><header><strong>实体关系图谱 · 示例数据</strong><button onClick={() => setLarge(false)} aria-label="关闭图谱大视图">关闭</button></header><GraphCanvas large nodes={nodes()} edges={edges()} selected={selected()} path={path()} onSelect={setSelected} /><Show when={chosen()}>{(node) => <p>已选：{node().label}。{node().properties.说明}</p>}</Show><p>仅供交互演示；不代表当前会话的事实或推断。</p></div></div></Portal></Show>
