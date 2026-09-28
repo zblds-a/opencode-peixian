@@ -67,8 +67,10 @@ export function QuestionForm(props: { request: () => Pending; busy: boolean; ans
           const question = () => questions()[index()]
           const options = () => (question()?.options ?? []).slice(current().optionPage * 3, current().optionPage * 3 + 3)
           const lastOptionsPage = () => (current().optionPage + 1) * 3 >= (question()?.options?.length ?? 0)
-          return <fieldset class="question-group question-page">
-            <legend>{safeMessage(question().header || "补充信息")}</legend>
+          return <fieldset class="question-group question-page" aria-label={safeMessage(question().header || "补充信息")}>
+            <Show when={safeMessage(question().header || "补充信息") !== props.title}>
+              <legend>{safeMessage(question().header || "补充信息")}</legend>
+            </Show>
             <p>{safeMessage(question().question)}</p>
             <div class="question-options">
               <For each={options()}>

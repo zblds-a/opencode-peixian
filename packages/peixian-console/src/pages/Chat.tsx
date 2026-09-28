@@ -97,6 +97,8 @@ export default function Chat() {
   const [nextQuestion, setNextQuestion] = createSignal<NextQuestion>()
   const [dismissedNextRun, setDismissedNextRun] = createSignal<string>()
   const [nextQuestionBusy, setNextQuestionBusy] = createSignal(false)
+  const [revealRevision, setRevealRevision] = createSignal(0)
+  const [revealedNextQuestion, setRevealedNextQuestion] = createSignal("")
   let nextQuestionSession: string | undefined
   let nextQuestionRun: string | undefined
   let nextQuestionFlight = ""
@@ -232,6 +234,22 @@ export default function Chat() {
     if (!textParts.length && !toolParts.length && !hasAnalysis && !error) return []
     return [{ message: anchor, textParts, toolParts, error, missingBody: !textParts.length && hasAnalysis }]
   }))
+  const answerRevealComplete = createMemo(() => {
+    revealRevision()
+    const run = currentRun()
+    if (!run) return false
+    const parts = shownMessages()
+      .filter((entry) => entry.message.info.role === "assistant" && entry.message.info.run_id === run.id)
+      .flatMap((entry) => entry.textParts)
+    return parts.length > 0 && parts.every((item) => (displayedText.get(`${selected()}:${item.id}`) ?? 0) >= Array.from(item.part.text ?? "").length)
+  })
+  createEffect(() => {
+    const sid = selected()
+    const run = currentRun()
+    const question = nextQuestion()
+    if (!sid || !run || !question) { setRevealedNextQuestion(""); return }
+    if (answerRevealComplete()) setRevealedNextQuestion(`${sid}:${run.id}:${question.id}`)
+  })
   const awaitingReply = createMemo(() => {
     if (!busy() || !currentRun()) return false
     const userIndex = displayMessages().findIndex((message) => message.info.id === currentRun()?.user_message_id)
@@ -1133,7 +1151,7 @@ export default function Chat() {
                   const attachments = () => message().attachments ?? sentAttachments()[message().info.id] ?? []
                   const textParts = () => entry().textParts
                   const toolParts = () => entry().toolParts
-                  const renderText = (item: () => ChatEntry["textParts"][number]) => message().info.role === "assistant" ? <div><Show when={item().part.display_kind === "source_answer"}><span class="chat-source-answer-label">已核对资料</span></Show><SmoothMarkdown id={`${selected()}:${item().id}`} text={item().part.text ?? ""} live={animatedRuns.has(message().info.run_id ?? "") || busy() && currentRun()?.id === message().info.run_id} complete={!busy() || currentRun()?.id !== message().info.run_id} interrupted={currentRun()?.id === message().info.run_id && ["failed", "cancelled"].includes(currentRun()?.status ?? "")} cache={displayedText} pause={() => selectingText || selectionInConversation()} onProgress={scheduleFollowScroll} /></div> : <Markdown text={item().part.text ?? ""} />
+                  const renderText = (item: () => ChatEntry["textParts"][number]) => message().info.role === "assistant" ? <div><Show when={item().part.display_kind === "source_answer"}><span class="chat-source-answer-label">已核对资料</span></Show><SmoothMarkdown id={`${selected()}:${item().id}`} text={item().part.text ?? ""} live={animatedRuns.has(message().info.run_id ?? "") || busy() && currentRun()?.id === message().info.run_id} complete={!busy() || currentRun()?.id !== message().info.run_id} interrupted={currentRun()?.id === message().info.run_id && ["failed", "cancelled"].includes(currentRun()?.status ?? "")} cache={displayedText} pause={() => selectingText || selectionInConversation()} onProgress={scheduleFollowScroll} onRevealProgress={() => setRevealRevision((value) => value + 1)} /></div> : <Markdown text={item().part.text ?? ""} />
                   const traceComplete = () => {
                     const key = `${selected()}:${message().info.id}`
                     if (toolParts().length && toolParts().every((part, index) => ["completed", "succeeded"].includes(toolStatus(part, index, message().info.id)))) completedToolTraces.add(key)
@@ -1152,7 +1170,7 @@ export default function Chat() {
                       <Index each={textParts().filter((item) => !item.afterTools)}>{renderText}</Index>
                       <Show when={entry().missingBody}><p class="message-no-body">本轮暂无可展示的 Markdown 正文；右侧线索仍可查看。</p></Show>
                       <Show when={toolParts().length}>
-                        <details class="tool-trace" open>
+                        <details class="tool-trace">
                           <summary>
                             <Icon
                               name={traceComplete() ? "check" : "clock"}
@@ -1256,7 +1274,7 @@ export default function Chat() {
           <Show when={selected() && currentRun()?.clarification?.version === "theft-clarification-v1"}>
             <QuestionForm request={() => clarificationRequest(currentRun()!, selected()!)} busy={questionBusy() || sending() || !ready()} answer={(answers) => void answerClarification(answers)} />
           </Show>
-          <Show when={selected() && nextQuestion() && !currentRun()?.clarification && !uncertain()}>
+          <Show when={selected() && nextQuestion() && revealedNextQuestion() === `${selected()}:${currentRun()?.id}:${nextQuestion()?.id}` && !currentRun()?.clarification && !uncertain()}>
             <QuestionForm
               title="下一步分析"
               rejectLabel="不再追问，直接作答"

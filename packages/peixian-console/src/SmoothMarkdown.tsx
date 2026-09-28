@@ -4,7 +4,7 @@ import { MarkdownStreamBuffer, type StreamProjection } from "./stream-markdown"
 
 // The server publishes change notices and complete text snapshots, not replayable token deltas.
 // Preserve the displayed prefix across message refreshes so a remount cannot restart the reveal.
-export default function SmoothMarkdown(props: { text: string; live: boolean; complete?: boolean; interrupted?: boolean; cache: Map<string, number>; id: string; onProgress?: () => void; pause?: () => boolean }) {
+export default function SmoothMarkdown(props: { text: string; live: boolean; complete?: boolean; interrupted?: boolean; cache: Map<string, number>; id: string; onProgress?: () => void; onRevealProgress?: () => void; pause?: () => boolean }) {
   const [count, setCount] = createSignal(props.cache.get(props.id) ?? (props.live ? 0 : Array.from(props.text).length))
   const [projection, setProjection] = createSignal<StreamProjection>({ text: "", pendingTable: false, pendingSource: false })
   const buffer = new MarkdownStreamBuffer()
@@ -23,11 +23,13 @@ export default function SmoothMarkdown(props: { text: string; live: boolean; com
       frame = 0
       setCount(characters.length)
       props.cache.set(props.id, characters.length)
+      props.onRevealProgress?.()
       return
     }
     if (untrack(count) > characters.length) {
       setCount(characters.length)
       props.cache.set(props.id, characters.length)
+      props.onRevealProgress?.()
     }
     const tick = (now: number) => {
       const characters = Array.from(target)
@@ -42,6 +44,7 @@ export default function SmoothMarkdown(props: { text: string; live: boolean; com
       if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
         setCount(characters.length)
         props.cache.set(props.id, characters.length)
+        props.onRevealProgress?.()
         frame = 0
         return
       }
@@ -56,6 +59,7 @@ export default function SmoothMarkdown(props: { text: string; live: boolean; com
         const next = Math.min(characters.length, count() + increment)
         setCount(next)
         props.cache.set(props.id, next)
+        props.onRevealProgress?.()
       }
       frame = count() < characters.length ? requestAnimationFrame(tick) : 0
     }
