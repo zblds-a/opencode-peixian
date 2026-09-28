@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import math
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 VERSION = 'theft-score-v1'
 MAX_POINTS = {'d1': 25, 'd2': 20, 'd3': 15, 'd4': 20, 'd5': 12, 'd6': 8}
@@ -47,7 +47,8 @@ def _parse_time(value):
     for fmt in (None, '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M'):
         try:
             if fmt is None:
-                return datetime.fromisoformat(text)
+                value = datetime.fromisoformat(text)
+                return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
             return datetime.strptime(text[:19], fmt).replace(tzinfo=timezone.utc)
         except ValueError:
             continue
@@ -75,6 +76,8 @@ def subject_of(record, snapshot=None):
     """Return person_ref for a verified record, or None when not person-bound."""
     if not isinstance(record, dict):
         return None
+    if isinstance(record.get('subject_ref'), str) and record['subject_ref']:
+        return record['subject_ref']
     module = record.get('module')
     fields = record.get('fields') or {}
     if module == 'captures':
@@ -198,58 +201,108 @@ def score_d5(records, queried=None):
             empty = [label for label, rows in (('轨迹', tracks), ('周边警情', incidents)) if not rows]
             return _dim('d5', 'available', 0, '、'.join(empty) + EMPTY_EVIDENCE + '，无可比较的时空联系')
         return _dim('d5', 'unavailable', evidence='缺少' + '与'.join(missing))
-    best_space = None
-    best_time = None
-    sources = []
-    for tr in tracks:
-        f = tr.get('fields', {})
-        lon, lat = f.get('lon'), f.get('lat')
-        t_time = _parse_time(f.get('captureTime'))
-        for inc in incidents:
-            g = inc.get('fields', {})
-            dist = _haversine_m(lon, lat, g.get('gisX'), g.get('gisY'))
-            if dist is not None and (best_space is None or dist < best_space[0]):
-                best_space = (dist, tr['record_id'], inc['record_id'])
-            i_time = _parse_time(g.get('cjsj'))
-            if t_time and i_time:
-                delta = abs((t_time - i_time).total_seconds())
-                if best_time is None or delta < best_time[0]:
-                    best_time = (delta, tr['record_id'], inc['record_id'])
-    if best_space is None and best_time is None:
-        return _dim('d5', 'unavailable', evidence='轨迹或警情缺少可比较的坐标/时间')
-    space_score = None
-    time_score = None
-    parts = []
-    if best_space is not None:
-        dist_m = best_space[0]
-        sources.extend(best_space[1:])
-        if dist_m > 5000:
-            space_score = 0
-        elif dist_m > 1000:
-            space_score = 3
-        elif dist_m >= 500:
-            space_score = 5
-        else:
-            space_score = 8
-        parts.append(f'最近直线距离约{int(dist_m)}米→空间{space_score}分')
-    if best_time is not None:
-        delta = best_time[0]
-        sources.extend(best_time[1:])
-        hours = delta / 3600.0
-        if hours > 24 * 7:
-            time_score = 0
-        elif hours > 24:
-            time_score = 1
-        elif hours >= 1:
-            time_score = 2
-        else:
-            time_score = 4
-        parts.append(f'最近时间差约{hours:.1f}小时→时间{time_score}分')
-    if space_score is None or time_score is None:
-        return _dim('d5', 'unavailable', evidence='；'.join(parts) or '时空子维度不完整',
-                    source_ids=sorted(set(sources)))
-    score = space_score + time_score
-    return _dim('d5', 'available', score, '；'.join(parts), sorted(set(sources)))
+    in_window = _incidents_in_window(tracks, incidents)
+    if not in_window:
+        return _dim('d5', 'available', 0, '轨迹时间窗内无周边警情', limitation=f'仅比较轨迹前后{WINDOW_DAYS}天内的警情')
+    targets = [{'lon': (inc.get('fields') or {}).get('gisX'), 'lat': (inc.get('fields') or {}).get('gisY'),
+                'time': _incident_time(inc), 'record_id': inc['record_id']} for inc in in_window]
+    return _coupling('d5', tracks, targets, '警情')
+
+
+WINDOW_DAYS = 7
+CASE_MATCH_M = 200
+
+
+def case_reference(lon, lat, case_time=None, incidents=None, start=None, end=None):
+    """Case point for case-to-person D5: stated time first, else the nearest incident at the point inside the window."""
+    ref = {'lon': lon, 'lat': lat, 'time': _parse_time(case_time), 'record_id': None}
+    if ref['time'] is not None or lon is None or lat is None:
+        return ref
+    low, high = _parse_time(start), _parse_time(end)
+    best = None
+    for inc in incidents or []:
+        fields = inc.get('fields') or {}
+        dist = _haversine_m(lon, lat, fields.get('gisX'), fields.get('gisY'))
+        when = _incident_time(inc)
+        if dist is None or when is None or dist > CASE_MATCH_M:
+            continue
+        if (low and when < low) or (high and when > high):
+            continue
+        key = (dist, -when.timestamp())
+        if best is None or key < best[0]:
+            best = (key, when, inc['record_id'])
+    if best:
+        ref['time'], ref['record_id'] = best[1], best[2]
+    return ref
+
+
+def score_d5_case(records, case_ref, queried=None):
+    tracks = _module_records(records, 'tracks')
+    if not tracks:
+        if _queried(queried, 'tracks'):
+            return _dim('d5', 'available', 0, '轨迹' + EMPTY_EVIDENCE + '，无可比较的时空联系')
+        return _dim('d5', 'unavailable', evidence='未补查轨迹')
+    if not case_ref or case_ref.get('lon') is None or case_ref.get('lat') is None:
+        return _dim('d5', 'unavailable', evidence='缺少案发坐标')
+    if case_ref.get('time') is None:
+        return _dim('d5', 'unavailable', evidence='缺少案发时间')
+    return _coupling('d5', tracks, [case_ref], '案发点')
+
+
+def _incident_time(record):
+    fields = record.get('fields') or {}
+    return _parse_time(fields.get('cjsj')) or _parse_time(fields.get('sfsjsx'))
+
+
+def _incidents_in_window(tracks, incidents, days=WINDOW_DAYS):
+    """Keep incidents dated within the track span +/- days; undated incidents stay."""
+    times = [t for t in (_parse_time((tr.get('fields') or {}).get('captureTime')) for tr in tracks or []) if t]
+    if not times:
+        return list(incidents or [])
+    low, high = min(times) - timedelta(days=days), max(times) + timedelta(days=days)
+    return [inc for inc in incidents or [] if _incident_time(inc) is None or low <= _incident_time(inc) <= high]
+
+
+def _space_score(dist_m):
+    if dist_m > 5000:
+        return 0
+    if dist_m > 1000:
+        return 3
+    if dist_m >= 500:
+        return 5
+    return 8
+
+
+def _time_score(hours):
+    if hours > 24 * 7:
+        return 0
+    if hours > 24:
+        return 1
+    if hours >= 1:
+        return 2
+    return 4
+
+
+def _coupling(key, tracks, targets, label):
+    """Score the best single track-point/target pair; distance and time come from the same pair."""
+    best = None
+    for target in targets:
+        for tr in tracks:
+            f = tr.get('fields') or {}
+            dist = _haversine_m(f.get('lon'), f.get('lat'), target['lon'], target['lat'])
+            t_time = _parse_time(f.get('captureTime'))
+            if dist is None or t_time is None or target['time'] is None:
+                continue
+            hours = abs((t_time - target['time']).total_seconds()) / 3600.0
+            space, when = _space_score(dist), _time_score(hours)
+            rank_key = (-(space + when), dist, hours)
+            if best is None or rank_key < best[0]:
+                best = (rank_key, dist, hours, space, when, tr['record_id'], target.get('record_id'))
+    if best is None:
+        return _dim(key, 'unavailable', evidence=f'轨迹或{label}缺少可比较的坐标/时间')
+    _, dist, hours, space, when, track_id, target_id = best
+    evidence = f'同一{label}最近直线距离约{int(dist)}米→空间{space}分；时间差约{hours:.1f}小时→时间{when}分'
+    return _dim(key, 'available', space + when, evidence, sorted({x for x in (track_id, target_id) if x}))
 
 
 def score_d6(records, queried=None):
@@ -398,15 +451,18 @@ def reasons_and_checks(view, records=None, stage='六维'):
     return reasons[:2], next_checks[:2]
 
 
-def compute(records, include_d5=True, queried=None):
+def compute(records, include_d5=True, queried=None, case_ref=None):
     """Score one person's records only. Do not mix subjects.
 
     queried lists modules whose query completed for this person; a completed
     query with no rows scores 0 instead of dropping out of the denominator.
+    case_ref switches D5 to comparing the person's tracks with one case point.
     """
     queried = frozenset(queried or ())
     dims = [score_d1(records, queried), score_d2(records, queried), score_d3(records, queried), score_d4(records, queried)]
-    if include_d5:
+    if case_ref is not None:
+        dims.append(score_d5_case(records, case_ref, queried))
+    elif include_d5:
         dims.append(score_d5(records, queried))
     else:
         dims.append(_dim('d5', 'unavailable', evidence='初排阶段不计时空耦合'))
@@ -497,14 +553,18 @@ def stage1_rank(capture_records):
     }
 
 
-def rank(records_by_person, include_d5=True, queried_by_person=None):
+def rank(records_by_person, include_d5=True, queried_by_person=None, case_ref=None):
     """Full six-dimension ranking for an authorized candidate set."""
     items = []
     insufficient = []
     for person_ref, rows in (records_by_person or {}).items():
         if not person_ref:
             continue
-        view = compute(rows, include_d5=include_d5, queried=(queried_by_person or {}).get(person_ref))
+        view = compute(rows, include_d5=include_d5, queried=(queried_by_person or {}).get(person_ref), case_ref=case_ref)
+        if case_ref is None and not include_d5:
+            for dim in view['dimensions']:
+                if dim['id'] == 'd5':
+                    dim['evidence'] = '本次排序不计时空耦合'
         name = None
         for r in rows:
             fields = r.get('fields') or {}
@@ -553,7 +613,7 @@ def rank(records_by_person, include_d5=True, queried_by_person=None):
 def case_checks(track_records, incident_records):
     """Person-to-case: pairwise track vs incident rows, ranked by space-time coupling."""
     rows = []
-    for inc in incident_records or []:
+    for inc in _incidents_in_window(track_records, incident_records):
         fields = inc.get('fields') or {}
         cjbh = fields.get('cjbh') or fields.get('jjbh') or '未提供编号'
         cjsj = fields.get('cjsj') or '未提供处警时间'

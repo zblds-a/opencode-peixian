@@ -20,6 +20,8 @@ TRACK_SEGMENT = timedelta(days=3)
 TRACK_MIN_SEGMENT = timedelta(days=1)
 TRACK_MAX_CALLS = 20
 TRACK_MAX_CONSECUTIVE_FAILURES = 3
+INCIDENT_PAGE_SIZE = 100
+INCIDENT_MAX_PAGES = 5
 
 
 class TrackRowsLimit(ValueError):
@@ -100,6 +102,42 @@ async def collect_tracks(plan, invoke):
     return merged
 
 
+def incident_request(plan, page, size):
+    request = copy.deepcopy(plan['request'])
+    request['json'].update(pageNum=page, pageSize=size)
+    return request
+
+
+async def collect_incidents(plan, invoke):
+    """Read every page of one frozen area query, up to INCIDENT_MAX_PAGES."""
+    size = min(INCIDENT_PAGE_SIZE, plan['limits']['max_rows'])
+    rows, pages, base, total = [], [], None, None
+    for page in range(1, INCIDENT_MAX_PAGES + 1):
+        try:
+            response = await invoke(incident_request(plan, page, size))
+        except (ValueError, httpx.HTTPError, TimeoutError):
+            if base is None:
+                raise
+            pages.append({'page': page, 'status': 'failed', 'count': 0})
+            break
+        data = response.get('data') if isinstance(response, dict) and response.get('code') == 200 else None
+        if not isinstance(data, dict) or not isinstance(data.get('rows'), list) or type(data.get('total')) is not int:
+            if base is None:
+                return response
+            pages.append({'page': page, 'status': 'failed', 'count': 0})
+            break
+        base = base or response
+        total = data['total']
+        rows.extend(data['rows'])
+        pages.append({'page': page, 'status': 'ok', 'count': len(data['rows'])})
+        if not data['rows'] or len(rows) >= total:
+            break
+    merged = copy.deepcopy(base)
+    data = {k: v for k, v in merged['data'].items() if k not in ('pageNum', 'pageSize')}
+    merged['data'] = {**data, 'rows': rows, 'total': total, 'pages': pages}
+    return merged
+
+
 async def execute(request, app, value, rpc, parent, process, *, native=False):
     if not native and value['args'] != {}:
         raise HTTPException(422, '查询条件已冻结，请勿传入新条件。')
@@ -146,6 +184,8 @@ async def execute(request, app, value, rpc, parent, process, *, native=False):
             try:
                 if kind == 'tracks' and plan.get('version') == theft_provider_v2.VERSION and isinstance(plan['request'].get('json'), dict):
                     response = await collect_tracks(plan, invoke)
+                elif kind == 'incidents' and plan.get('version') == theft_provider_v2.VERSION and isinstance(plan['request'].get('json'), dict):
+                    response = await collect_incidents(plan, invoke)
                 else:
                     response = await invoke(plan['request'])
                 await call('complete', module=kind, status='completed', response=response)

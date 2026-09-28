@@ -82,6 +82,11 @@ def slots(text,explicit=None):
             radii.add(int(d))
         if len(radii)>1:error('scope_ambiguous','本轮存在多个范围值，请明确一个人员或查询范围。',422)
         if radii:values['radius_m']=radii.pop()
+    case_pattern=r'(?:案发时间|处警时间)\s*(?:为|是|[:：=])?\s*(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})'
+    case_times={m.replace('T',' ') for m in re.findall(case_pattern,text)}
+    if len(case_times)>1:error('time_scope_ambiguous','同一时间字段不能填写多个值。',422)
+    if case_times:values['case_time']=case_times.pop()
+    text=re.sub(case_pattern,' ',text)
     labeled=re.findall(r'(开始时间|结束时间)\s*[:：=]?\s*(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})',text)
     if labeled:
         if len({field for field,_ in labeled})!=len(labeled):error('time_scope_ambiguous','同一时间字段不能填写多个值。',422)

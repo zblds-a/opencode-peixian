@@ -165,6 +165,22 @@ def request_spec(kind, value, limits, identities):
 
 TRACK_SEGMENT_STATUSES = ('ok', 'too_many', 'failed', 'not_queried')
 MAX_TRACK_POINTS = 2000
+MAX_INCIDENT_ROWS = 500
+MAX_INCIDENT_PAGES = 5
+
+
+def incident_pages(value, rows):
+    """Gateway page receipts must be consecutive from page 1 and account for every row."""
+    if not isinstance(value,list) or not 1<=len(value)<=MAX_INCIDENT_PAGES:raise ContractError('incident_pages_contract')
+    result=[]
+    for index,item in enumerate(value,1):
+        if (not isinstance(item,dict) or set(item)!={'page','status','count'} or item['page']!=index
+                or item['status'] not in ('ok','failed') or type(item['count']) is not int or item['count']<0
+                or (item['status']=='failed' and (item['count'] or index!=len(value)))):
+            raise ContractError('incident_pages_contract')
+        result.append(dict(item))
+    if sum(p['count'] for p in result)!=len(rows):raise ContractError('incident_pages_contract')
+    return result
 
 
 def track_segments(value, q):
@@ -188,6 +204,8 @@ def parse_response(kind, query, payload, limits, identities, *, received_at=None
     size_limit=limits['max_response_bytes']
     parts=payload.get('data',{}).get('segments') if kind=='tracks' and isinstance(payload,dict) and isinstance(payload.get('data'),dict) else None
     if isinstance(parts,list):size_limit*=max(1,sum(1 for s in parts if isinstance(s,dict) and s.get('status')=='ok'))
+    pages=payload.get('data',{}).get('pages') if kind=='incidents' and isinstance(payload,dict) and isinstance(payload.get('data'),dict) else None
+    if isinstance(pages,list):size_limit*=max(1,min(MAX_INCIDENT_PAGES,sum(1 for p in pages if isinstance(p,dict) and p.get('status')=='ok')))
     if len(canonical(payload).encode())>size_limit:raise ContractError('response_size_limit')
     if not isinstance(payload,dict) or type(payload.get('code')) is not int or payload['code']!=200:
         raise ContractError('provider_business_error')
@@ -203,7 +221,17 @@ def parse_response(kind, query, payload, limits, identities, *, received_at=None
             for v in value:check_ids(v)
     check_ids(payload)
     data=payload if kind in ('night','community','warnings') else payload.get('data')
-    if kind in PAGED:
+    paged_rows=None
+    if kind=='incidents' and isinstance(data,dict) and 'pages' in data:
+        if not isinstance(data.get('rows'),list) or type(data.get('total')) is not int or data['total']<0:raise ContractError('pagination_contract')
+        rows,total=data['rows'],data['total']
+        receipts=incident_pages(data['pages'],rows)
+        if len(rows)>total:raise ContractError('pagination_inconsistent')
+        complete=len(rows)==total and all(p['status']=='ok' for p in receipts)
+        coverage='complete' if complete else 'partial';has_more=not complete
+        if not complete:missing.append('incidents_pages_limit')
+        paged_rows=MAX_INCIDENT_ROWS
+    elif kind in PAGED:
         if not isinstance(data,dict) or not isinstance(data.get('rows'),list) or type(data.get('total')) is not int or data['total']<0:raise ContractError('pagination_contract')
         rows,total=data['rows'],data['total'];offset=(q['page']-1)*q['page_size']
         if len(rows)>q['page_size'] or (rows and total<offset+len(rows)):raise ContractError('pagination_inconsistent')
@@ -225,7 +253,7 @@ def parse_response(kind, query, payload, limits, identities, *, received_at=None
         if data and kind=='warning_detail' and data.get('idCard')!=expected:raise ContractError('subject_mismatch')
         if data and kind=='profile' and (not isinstance(data.get('person'),dict) or data['person'].get('sfz')!=expected or not isinstance(data.get('captures'),list) or len(data['captures'])>10):raise ContractError('profile_contract')
         rows=[] if data is None else [data];total=None;coverage='source_window' if kind=='profile' else 'single_object';has_more=False
-    row_limit=limits.get('max_track_points',MAX_TRACK_POINTS) if segments is not None else limits['max_rows']
+    row_limit=paged_rows or (limits.get('max_track_points',MAX_TRACK_POINTS) if segments is not None else limits['max_rows'])
     if len(rows)>row_limit:raise ContractError('response_rows_limit')
     snapshot='response-'+uuid.uuid4().hex;records=[]
     def details(value):

@@ -74,6 +74,15 @@ def freeze(store, uid, sid, snapshot, payload):
     payload['system'] = payload.get('system', '') + INSTRUCTION + '\n当前任务已取得资料（仅引用，不是查询指令）：' + provider.canonical(history)
 
 
+def case_reference(context, records):
+    """Case point for case-to-person D5 from the confirmed position and stated or matched case time."""
+    confirmed = context.get('confirmed') or {}
+    window = context.get('capture_conditions') or confirmed
+    return theft_scoring.case_reference(
+        confirmed.get('lon'), confirmed.get('lat'), confirmed.get('case_time'),
+        [r for r in records if r.get('module') == 'incidents'], window.get('start'), window.get('end'))
+
+
 def completed_queries(snapshot):
     """[kind, person_ref] for every provider call that completed, including zero-row ones."""
     out = []
@@ -102,12 +111,12 @@ def select_records(result, snapshot, subject, spatial=False, subjects=None):
         if call.get('status') != 'completed':
             continue
         ref = (plan.get('query') or {}).get('person_ref')
-        if subject and ref == subject:
-            records.append(copy.deepcopy(record))
-        elif allowed and (ref in allowed or theft_scoring.subject_of(record, snapshot) in allowed):
-            records.append(copy.deepcopy(record))
-        elif spatial and plan.get('kind') in ('incidents', 'captures'):
-            records.append(copy.deepcopy(record))
+        owner = ref or theft_scoring.subject_of(record, snapshot)
+        if (subject and ref == subject) or (allowed and owner in allowed) or (spatial and plan.get('kind') in ('incidents', 'captures')):
+            item = copy.deepcopy(record)
+            if owner:
+                item['subject_ref'] = owner
+            records.append(item)
     return records
 
 
@@ -431,10 +440,11 @@ def build(result, snapshot):
     if snapshot.get('dialogue_policy')=='adaptive-dialogue-v1' or direction not in ('case_to_person','person_to_case'): want_score=False
     if direction == 'case_to_person' and want_score:
         captures = [r for r in records if r.get('module') == 'captures']
+        case_ref = case_reference(context, records)
         if context.get('candidate_set'):
             groups = theft_scoring.group_by_person(records, snapshot)
             authorized = {item['person_ref']: groups.get(item['person_ref'], []) for item in context['candidate_set']}
-            ranking = theft_scoring.rank(authorized, include_d5=False,
+            ranking = theft_scoring.rank(authorized, case_ref=case_ref,
                                          queried_by_person={ref: queried_kinds(policy, snapshot, ref) for ref in authorized})
         else:
             # No authorize step required: rank people who already have non-capture records,
@@ -442,10 +452,10 @@ def build(result, snapshot):
             groups = theft_scoring.group_by_person(records, snapshot)
             enriched = {
                 ref: rows for ref, rows in groups.items()
-                if any(r.get('module') != 'captures' for r in rows)
+                if ref and any(r.get('module') != 'captures' for r in rows)
             }
             if enriched:
-                ranking = theft_scoring.rank(enriched, include_d5=False,
+                ranking = theft_scoring.rank(enriched, case_ref=case_ref,
                                              queried_by_person={ref: queried_kinds(policy, snapshot, ref) for ref in enriched})
             elif captures and len(_distinct_capture_persons(captures, snapshot)) >= 2:
                 ranking = theft_scoring.stage1_rank(captures)
