@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, Index, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, Index, onCleanup, Show, untrack } from "solid-js"
 import { toolFailureMessage, toolPartStatus } from "../tool-trace-status"
 import { Portal } from "solid-js/web"
 import { api, ApiError, list, patch, post, remove, safeMessage } from "../api"
@@ -97,6 +97,9 @@ export default function Chat() {
   const [nextQuestion, setNextQuestion] = createSignal<NextQuestion>()
   const [dismissedNextRun, setDismissedNextRun] = createSignal<string>()
   const [nextQuestionBusy, setNextQuestionBusy] = createSignal(false)
+  let nextQuestionSession: string | undefined
+  let nextQuestionRun: string | undefined
+  let nextQuestionFlight = ""
   let scroll!: HTMLDivElement
   let textarea!: HTMLTextAreaElement
   let fileInput!: HTMLInputElement
@@ -717,23 +720,31 @@ export default function Chat() {
     const sid = selected()
     const run = currentRun()
     const rid = run?.id
-    setNextQuestion(undefined)
+    const scope = sid && rid ? `${sid}:${rid}` : ""
+    if (nextQuestionSession !== sid || rid && nextQuestionRun !== rid) {
+      nextQuestionSession = sid
+      nextQuestionRun = rid
+      setNextQuestion(undefined)
+    }
     if (!sid || !run || !rid) return
+    if (run.clarification || dismissedNextRun() === rid) { setNextQuestion(undefined); return }
+    const question = untrack(nextQuestion)
+    if (question && run.answered_questions?.includes(question.id)) { setNextQuestion(undefined); return }
     if (!terminalRun(run.status)) return
-    if (run.clarification) return
-    if (dismissedNextRun() === rid) return
     if (busy() || sending() || uncertain()) return
-    let alive = true
-    onCleanup(() => { alive = false })
+    if (question || nextQuestionFlight === scope) return
+    nextQuestionFlight = scope
     void api<TrustedResult>(`/sessions/${sid}/runs/${rid}/result`)
       .then((result) => {
-        if (!alive) return
-        if (selected() !== sid || currentRun()?.id !== rid) return
+        const latest = currentRun()
+        if (selected() !== sid || latest?.id !== rid || !terminalRun(latest.status)) return
+        if (latest.clarification || dismissedNextRun() === rid || busy() || sending() || uncertain()) return
         const question = result.answer_view?.next_question
-        if (question && currentRun()?.answered_questions?.includes(question.id)) return
+        if (question && latest.answered_questions?.includes(question.id)) return
         if (question?.options?.length) setNextQuestion(question)
       })
       .catch(() => {})
+      .finally(() => { if (nextQuestionFlight === scope) nextQuestionFlight = "" })
   })
 
   async function answerNextQuestion(answers?: string[][]) {
@@ -1245,12 +1256,12 @@ export default function Chat() {
           <Show when={selected() && currentRun()?.clarification?.version === "theft-clarification-v1"}>
             <QuestionForm request={() => clarificationRequest(currentRun()!, selected()!)} busy={questionBusy() || sending() || !ready()} answer={(answers) => void answerClarification(answers)} />
           </Show>
-          <Show when={selected() && nextQuestion() && !currentRun()?.clarification && !busy() && !sending() && !uncertain()}>
+          <Show when={selected() && nextQuestion() && !currentRun()?.clarification && !uncertain()}>
             <QuestionForm
               title="下一步分析"
               rejectLabel="不再追问，直接作答"
               request={() => nextQuestionRequest(nextQuestion()!, selected()!)}
-              busy={nextQuestionBusy() || sending() || !ready()}
+              busy={nextQuestionBusy() || busy() || sending() || !ready()}
               answer={(answers) => void answerNextQuestion(answers)}
             />
           </Show>
