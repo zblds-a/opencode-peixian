@@ -688,7 +688,7 @@ export default function Chat() {
     if (!chosen?.length || uploading() || !ready()) return
     const incoming = Array.from(chosen)
     fileInput.value = ""
-    if (incoming.length > 5) {
+    if (incoming.length > 5 || fileSelectionReady() && incoming.length + selectedFiles().length > 5) {
       app.notify("一次最多上传五个文件。", "error")
       return
     }
@@ -719,9 +719,10 @@ export default function Chat() {
           await new Promise((resolve) => setTimeout(resolve, 2000))
         }
         if ((readyFile?.parse_status ?? readyFile?.status) !== "ready" || readyFile?.truncated) throw new Error(`${file.name} 已上传但仍在解析，暂不能关联；请稍后重新选择。`)
+        if (fileSelectionReady()) setSelectedFiles((current) => [...new Set([...current, uploaded.id])])
       }
       app.invalidate(["files"])
-        app.notify(fileSelectionReady() ? "文件已上传并完成解析，可在文件选择中关联本次消息。" : "文件已上传到资料库；当前服务暂不支持随消息关联。")
+      app.notify(fileSelectionReady() ? "文件已上传并关联本次消息。" : "文件已上传到资料库；当前服务暂不支持随消息关联。")
     } catch (cause) {
       app.notify((cause as Error).message, "error")
     } finally {
@@ -1113,6 +1114,7 @@ export default function Chat() {
             </div>
           </Show>
           <Show when={scene()?.scenario_id}><div class="selection-chips" role="status"><span>当前场景：{scene()?.name} · 追问将沿用</span><button disabled={busy() || sending() || clearingScene()} onClick={() => void clearScene()} aria-label="清除当前场景">清除场景 <Icon name="close" size={12}/></button></div></Show>
+          <Show when={selectedFiles().length}><div class="selection-chips" role="status"><span>本次关联文件：</span><For each={selectedFiles()}>{(id) => <button type="button" disabled={sending()} onClick={() => setSelectedFiles((current) => current.filter((item) => item !== id))} aria-label={`移除文件 ${files().find((item) => item.id === id)?.name ?? id}`}>{files().find((item) => item.id === id)?.name ?? id} <Icon name="close" size={12}/></button>}</For></div></Show>
           <div class="composer">
             <textarea
               ref={textarea}
