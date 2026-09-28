@@ -1,0 +1,21 @@
+[Unit]
+Description=Peixian private platform runtime worker
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/peixian-private/20260928/source/deploy/peixian
+ExecStart=/opt/peixian-private/20260928/venv/bin/python -u /opt/peixian-private/20260928/source/deploy/peixian/platform-manage.py worker --config /etc/peixian-private/platform.json
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=90
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

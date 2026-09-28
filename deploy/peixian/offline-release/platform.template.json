@@ -1,0 +1,72 @@
+{
+  "version": 4,
+  "profile": "single-host-on-demand",
+  "deployment_id": "peixian-private",
+  "product": {
+    "name": "沛警智枢",
+    "short_name": "沛警",
+    "description": "智能研判、文件、技能与插件工作台"
+  },
+  "public_url": "https://REPLACE_PRIVATE_HOST:19460",
+  "bind_host": "0.0.0.0",
+  "https_port": 19460,
+  "control_port": 14099,
+  "data_root": "/var/lib/peixian-private",
+  "tls": {
+    "certificate": "/etc/peixian-private/tls/certificate.pem",
+    "private_key": "/etc/peixian-private/tls/private-key.pem"
+  },
+  "network_pool": "10.247.0.0/16",
+  "max_runtimes": 2,
+  "control_resources": { "cpus": 2, "memory_mib": 2048 },
+  "capacity_policy": {
+    "cpu_mode": "shared",
+    "cpu_reserve": 4,
+    "cpu_overcommit_factor": 2,
+    "host_memory_reserve_mib": 4096
+  },
+  "orchestration": {
+    "worker_lease_seconds": 90,
+    "worker_heartbeat_seconds": 20,
+    "worker_heartbeat_timeout_seconds": 5,
+    "defer_seconds": 15,
+    "gate_probe_seconds": 2,
+    "reconcile_seconds": 30,
+    "reconcile_batch": 4,
+    "observation_ttl_seconds": 60,
+    "gate_observation_seconds": 3,
+    "receipt_retention_seconds": 604800,
+    "apply_defer_max_seconds": 300,
+    "drain_alert_seconds": 900,
+    "security_permit_ttl_seconds": 4,
+    "security_renew_seconds": 1,
+    "security_watchdog_ms": 100,
+    "security_request_seconds": 1,
+    "security_connections": 4,
+    "cancel_observe_seconds": 10
+  },
+  "images": {
+    "control": "peixian-control:euler-20260928",
+    "gateway": "peixian-gateway:euler-20260928",
+    "agent": "peixian-agent:euler-20260928",
+    "proxy": "peixian-proxy:euler-20260928"
+  },
+  "runtime_pool": {
+    "runtime_mode": "on_demand",
+    "capacity_wait_enabled": true,
+    "idle_pause_enabled": false,
+    "max_waiting_requests": 1000,
+    "capacity_wait_ttl_seconds": 1800,
+    "scheduler_batch": 8,
+    "scheduler_tick_seconds": 10
+  },
+  "feature_scopes": {
+    "task_spec_v1": [],
+    "multi_agent_v1": [],
+    "trusted_result_v2": [],
+    "theft_provider_v1": [],
+    "theft_mock_v2": [],
+    "theft_planner_v1": [],
+    "theft_native": []
+  }
+}
