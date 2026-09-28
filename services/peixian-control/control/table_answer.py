@@ -121,30 +121,63 @@ def select_records(result, snapshot, subject, spatial=False, subjects=None):
 
 
 INSTRUCTION = """
-资料终稿只输出一个 person-tables-v3 JSON 对象，由平台渲染为人员基本信息、研判摘要、分析依据、下一步研判四段式，不另外生成Markdown终稿。
+本轮调用过资料工具后的每次答复（包括追问、对比、复核、换条件重查、0条或失败）都只输出一个 person-tables-v3 JSON 对象，由平台渲染为人员基本信息、研判摘要、分析依据、下一步研判四段式。不要用Markdown自己写四段式，也不要问「是否需要输出JSON／终稿」。0条、失败和需要民警确认的范围写进JSON的结论、missing或suggestions。
 格式：{"format":"person-tables-v3","mode":"data","source_refs":["已取得的记录编号"],"scoring":{"requested":true},"suggestions":[]}。
 scoring仅当用户明确要求综合研判、嫌疑评估、评分或排序，且处于由人到案或由案到人工作流时才声明requested=true；其余场景省略该字段。评分与排名由平台按确定性规则计算并在终稿表格中呈现，你不得自行给出、修改分数或排序。
 source_refs只能引用当前任务已取得资料；平台逐字段核对并生成事实表，不把自由文字当作已核验结论。
 suggestions默认留空。已取得资料能回答当前问题时不提建议；只有存在影响结论的具体缺口，且补上它需要新的查询或需要用户确认时间、半径、人员等条件时才提出，一般一项，最多两项。action只用query或clarify_scope：条件已齐、可以直接查询时用query，须提供当前授权的kind，reply写成民警口吻的查询请求（如「查询此人2026-09-01至2026-09-15的夜间活动记录」）；还缺位置、半径、时间、人员等条件时用clarify_scope，缺项放fields，reply写成带空位、民警补全后即可发送的句子（如「核对案发地周边抓拍：位置＿＿，半径＿＿米，时间＿＿至＿＿」），不要写成「请提供……」这类向民警索要条件的话。具体建议用text、reason、conditions、reply，reason写清对应哪条结论或缺口。不要把「查看来源详情」「查看已有记录」「继续核实」「持续关注」这类不产生新资料的事项写成建议。不得自动执行建议。
 取得跨小区、夜间活动或人员轨迹记录时，在activity_summaries中按资料类型各写一条概括，格式：{"kind":"community","text":"……","source_refs":["记录编号"]}，kind为community、night或tracks。先写事实：跨小区写清每段时间范围、流经的小区名称和数量（如「9月3日07:10至18:40跨A、B、C、D共4个小区流动，约11.5小时」），多段按时间顺序最多列5段，其余写合计段数；夜间写清出现日期或次数、集中时段和主要地点；轨迹写清时段和依次经过的主要地点。时间、小区和地点用来源原文。再写研判：可结合时段、频次、路线和案发时空推测活动目的或行为特点（如踩点、流窜作案、规律性往返），并给出嫌疑研判；推测与研判另起一句，以「研判：」开头，用「可能」「疑似」等措辞，不写成确定性罪责结论。没有这三类记录时省略该字段。
 不要求查完全部接口，未查询不是失败。失败、零条和未知分别说明；可以结合资料对人员的活动目的、行为特点和嫌疑作出研判。
-问候、能力说明和缺项追问使用自然中文，不输出JSON；需要补充时用question。取消补充后整理已有结果。
+只有本轮完全没有调用资料工具时（问候、能力说明、查询前的缺项追问），才使用自然中文且不输出JSON；需要补充时用question。取消补充后用JSON整理已有结果。
 """
 
 
 
 def selection(text):
+    """Last person-tables data object anywhere in the text, fenced or not."""
     if not isinstance(text, str):
         return {}
-    value = text.strip()
-    blocks = re.findall(r'```json\s*([\s\S]*?)```', value)
-    if len(blocks) == 1:
-        value = blocks[0].strip()
-    try:
-        data, _ = json.JSONDecoder().raw_decode(value)
-    except (ValueError, TypeError):
-        return {}
-    return data if isinstance(data, dict) and data.get('format') in SUPPORTED_FORMATS and data.get('mode') == 'data' else {}
+    decoder = json.JSONDecoder()
+    found, pos = {}, 0
+    while True:
+        start = text.find('{', pos)
+        if start < 0:
+            return found
+        try:
+            data, end = decoder.raw_decode(text, start)
+        except (ValueError, TypeError):
+            pos = start + 1
+            continue
+        if isinstance(data, dict) and data.get('format') in SUPPORTED_FORMATS and data.get('mode') == 'data':
+            found = data
+        pos = end
+
+
+NOTE_MAX = 2000
+NOTE_DROP = re.compile(r'(需要我.*[吗？?]\s*$|终稿|person-tables|JSON|json)')
+
+
+def model_notes(text):
+    """Unstructured model prose kept when no JSON was produced; reasoning-like text is dropped."""
+    if not isinstance(text, str):
+        return ''
+    text = re.sub(r'```[\s\S]*?(```|$)', '', text)
+    lines = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line[0] in '{}[]"' or NOTE_DROP.search(line) or re.fullmatch(r'[|:\-\s]+', line):
+            continue
+        line = re.sub(r'^#+\s*', '', line)
+        if line.startswith('|'):
+            line = '；'.join(c.strip() for c in line.strip('|').split('|') if c.strip())
+        if line:
+            lines.append(line)
+    body = '\n'.join(lines)
+    cjk = len(re.findall(r'[\u4e00-\u9fff]', body))
+    latin = len(re.findall(r'[A-Za-z]', body))
+    if not cjk or cjk / (cjk + latin) < 0.3:
+        return ''
+    return body[:NOTE_MAX]
 
 
 def suggestion_key(item):
@@ -588,6 +621,7 @@ def build(result, snapshot):
         'source_runs': sorted({r['source_run_id'] for r in records}),
         'scoring': scoring, 'ranking': ranking, 'case_checks': case_view,
         'activity_summaries': model_activity_summaries(chosen, records, aliases),
+        **({} if chosen else {'model_notes': note for note in [model_notes(snapshot.get('model_final_text'))] if note}),
         'coverage': coverage,
         'track_gaps': track_gaps,
         'direction': direction,
@@ -612,6 +646,8 @@ def markdown(view):
         return '当前表格版本暂不受支持，请查看已有来源。'
     sections = []
     revised=view.get('layout_version')=='theft-four-sections-v1'
+    if view.get('model_notes'):
+        sections += ['**模型分析（未结构化，平台未核验）**\n\n' + '\n\n'.join(escape(x) for x in view['model_notes'].splitlines())]
     if view.get('basic'):
         sections += ['### 人员基本信息', table(['信息项', '内容', '来源／说明'],
             [(x['label'], x['value'], '、'.join(x['source_ids']) + '；取得时间：' + str(x['obtained_at'] or '未提供')) for x in view['basic']])]

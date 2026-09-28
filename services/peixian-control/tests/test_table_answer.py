@@ -564,3 +564,56 @@ def test_judgement_limits_removed_from_prompts():
         for phrase in ('犯罪倾向', '罪责结论，评分', '作案人认定', '犯罪结论'):
             assert phrase not in text, phrase
     assert 'activity_summaries' in t.INSTRUCTION
+
+
+
+def test_selection_finds_json_anywhere_and_keeps_last():
+    body = {'format': t.VERSION, 'mode': 'data', 'conclusions': []}
+    text = '整理如下：\n' + json.dumps(body, ensure_ascii=False) + '\n以上。'
+    assert t.selection(text)['format'] == t.VERSION
+    first = dict(body, marker=1)
+    second = dict(body, marker=2)
+    fenced = '```json\n' + json.dumps(first) + '\n```\n补充：\n```json\n' + json.dumps(second) + '\n```'
+    assert t.selection(fenced)['marker'] == 2
+    assert t.selection('{"format":"other","mode":"data"} {"a":{"b":1}}') == {}
+    assert t.selection('{"format":"' + t.VERSION + '","mode":"chat"}') == {}
+
+
+def test_prose_without_json_kept_as_model_notes():
+    result, snap = fixture()
+    snap['model_final_text'] = '### 分析\n此人夜间多次出现在案发小区附近，疑似踩点。\n| 日期 | 地点 |\n|---|---|\n| 9月3日 | 东环路 |\n需要我输出 person-tables-v3 终稿吗？'
+    view = t.build(result, snap)
+    assert view['selection_status'] == 'fallback'
+    notes = view['model_notes']
+    assert '疑似踩点' in notes and '9月3日；东环路' in notes
+    assert '终稿' not in notes and '---' not in notes and '###' not in notes
+    output = t.markdown(view)
+    assert output.index('模型分析（未结构化，平台未核验）') < output.index('### 人员基本信息')
+    assert '疑似踩点' in output
+
+
+def test_reasoning_text_not_kept_as_notes():
+    result, snap = fixture()
+    snap['model_final_text'] = 'The user selected the checkpoint but no coordinates are available, so I need to call the tool again with 东环路.'
+    view = t.build(result, snap)
+    assert 'model_notes' not in view and '模型分析' not in t.markdown(view)
+
+
+def test_notes_absent_when_json_selected_and_clipped():
+    result, snap = fixture()
+    choose(snap)
+    snap['model_final_text'] = '此人实施盗窃。\n' + snap['model_final_text']
+    view = t.build(result, snap)
+    assert view['selection_status'] == 'accepted' and 'model_notes' not in view
+    assert '实施盗窃' not in t.markdown(view)
+    snap['model_final_text'] = '研判' * 3000
+    assert len(t.build(result, snap)['model_notes']) == t.NOTE_MAX
+
+
+def test_prompt_requires_json_every_data_round():
+    from pathlib import Path
+    assert '每次答复（包括追问、对比、复核' in t.INSTRUCTION
+    assert '只有本轮完全没有调用资料工具时' in t.INSTRUCTION
+    assert '资料终稿只输出' not in t.INSTRUCTION
+    prompt = (Path(t.__file__).parent / 'agents/profiles/theft_prompt.md').read_text(encoding='utf-8')
+    assert '由你填进JSON对应字段，平台负责排版' in prompt and '不询问是否输出终稿' in prompt
