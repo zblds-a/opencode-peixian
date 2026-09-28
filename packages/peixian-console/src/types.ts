@@ -64,6 +64,11 @@ export type Message = {
     error?: { message?: string; data?: { message?: string } }
     time?: { created?: number; completed?: number }
     finish?: string
+    message_kind?: "question_answer"
+    question_id?: string
+    question_kind?: "clarification" | "next_question" | "stop"
+    parent_run_id?: string
+    answer_label?: string
   }
   parts: Part[]
 }
@@ -240,6 +245,7 @@ export type Run = {
   status_revision?: number
   event_sequence?: number
   answer_delivery?: { version?: string; sequence?: number; final?: boolean; result_saved?: boolean; phase?: string }
+  answered_questions?: string[]
   cancel_requested?: boolean
   model_id?: string
   message_id?: string | null

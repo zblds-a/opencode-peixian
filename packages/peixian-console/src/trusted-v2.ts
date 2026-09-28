@@ -37,7 +37,7 @@ export type PersonTableAnswer = {
     id: string
     header: string
     question: string
-    options: { label: string; description?: string; action: string; send: boolean }[]
+    options: { id?: string; label: string; description?: string; action: string; send: boolean }[]
     custom: boolean
     multiple?: boolean
   }

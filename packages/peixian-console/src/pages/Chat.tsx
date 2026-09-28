@@ -11,6 +11,7 @@ import type { TrustedResult } from "../trusted-v2"
 import { ClueDetailPanel, CluePanel } from "../TrustedAnalysis"
 import RealEntityGraph from "../RealEntityGraph"
 import SmoothMarkdown from "../SmoothMarkdown"
+import { applyLive, fromPage, needsBackfill, withLive, type LiveAnswer } from "../live-answer"
 import type { TrustedEvidence } from "../TrustedAnalysis"
 import { isAnalysisResult, legacyPresentation, sourcePresentation } from "../result-contract"
 import RuntimeStatus from "../RuntimeStatus"
@@ -52,10 +53,9 @@ export default function Chat() {
   const [busy, setBusy] = createSignal(false)
   const [sending, setSending] = createSignal(false)
   const [pendingPrompt, setPendingPrompt] = createSignal<{ text: string; attachments: { id: string; name: string }[]; messageID?: string; questionAnswer?: boolean }>()
-  const questionAnswerKey = `peixian:question-answers:${app.user().id}`
-  const [questionAnswerIDs, setQuestionAnswerIDs] = createSignal((sessionStorage.getItem(questionAnswerKey) ?? "").split(",").filter(Boolean))
+  const [live, setLive] = createSignal<LiveAnswer>()
   const [replyJump, setReplyJump] = createSignal(false)
-  const [messageSupport, setMessageSupport] = createSignal<{ version?: string; file_ids?: boolean; max_files?: number; requires_ready?: boolean; allows_truncated?: boolean }>()
+  const [messageSupport, setMessageSupport] = createSignal<{ version?: string; file_ids?: boolean; max_files?: number; requires_ready?: boolean; allows_truncated?: boolean; question_answers?: boolean }>()
   const [uploading, setUploading] = createSignal(false)
   const [uncertain, setUncertain] = createSignal(false)
   const [loading, setLoading] = createSignal(true)
@@ -155,7 +155,17 @@ export default function Chat() {
   const sideMode = createMemo(() => loading() ? "empty" : selectedClue() ? "clue-detail" : hasInsights() ? (showClues() ? "insight" : "collapsed") : "plugins")
   const rightMode = createMemo(() => sideMode() === "insight" ? insightTab() === "graph" ? "graph" : "clues" : sideMode())
   type ChatEntry = { message: Message; textParts: { part: Message["parts"][number]; id: string; afterTools: boolean }[]; toolParts: Message["parts"]; error?: Message["info"]["error"]; missingBody: boolean }
-  const shownMessages = createMemo<ChatEntry[]>(() => messages().flatMap((message, index, all): ChatEntry[] => {
+  const displayMessages = createMemo(() => {
+    const state = live()
+    if (!state || state.sessionID !== selected()) return messages()
+    const run = currentRun()
+    return withLive(messages(), state, run?.id === state.runID ? run.user_message_id : undefined)
+  })
+  const liveProgress = createMemo(() => {
+    const state = live()
+    return state && state.sessionID === selected() && state.runID === currentRun()?.id ? state.progress : undefined
+  })
+  const shownMessages = createMemo<ChatEntry[]>(() => displayMessages().flatMap((message, index, all): ChatEntry[] => {
     if (message.info.role === "user") return [{ message, textParts: message.parts.filter((part) => part.type === "text" && part.text).map((part, partIndex) => ({ part, id: `${message.info.id}:${part.id ?? partIndex}`, afterTools: false })), toolParts: [], missingBody: false }]
     const turnStart = all.slice(0, index).map((item) => item.info.role).lastIndexOf("user") + 1
     const nextUser = all.findIndex((item, offset) => offset > index && item.info.role === "user")
@@ -177,8 +187,8 @@ export default function Chat() {
   }))
   const awaitingReply = createMemo(() => {
     if (!busy() || !currentRun()) return false
-    const userIndex = messages().findIndex((message) => message.info.id === currentRun()?.user_message_id)
-    return !messages().some((message, index) => message.info.role === "assistant" &&
+    const userIndex = displayMessages().findIndex((message) => message.info.id === currentRun()?.user_message_id)
+    return !displayMessages().some((message, index) => message.info.role === "assistant" &&
       (message.info.run_id === currentRun()?.id || (userIndex >= 0 && index > userIndex)) &&
       message.parts.some((part) => part.type === "text" && part.text?.trim() || part.type === "tool"))
   })
@@ -373,6 +383,43 @@ export default function Chat() {
   })
   useResourceRefresh(["messages"], () => selected() ? fetchMessages(selected()!, false) : Promise.resolve(), 700)
   useResourceRefresh(["sessions", "runs"], refresh, 10000)
+  const backfills = new Set<string>()
+  async function backfill(sid: string, rid: string, finalMessageID?: string) {
+    if (backfills.has(rid)) return
+    backfills.add(rid)
+    try {
+      let after = 0
+      for (let page = 0; page < 20; page++) {
+        const value = await api<{ message_id?: string; items: { sequence: number; part_id: string; display_kind: string; text: string; index?: number; count?: number }[]; has_more?: boolean; next_sequence?: number }>(`/sessions/${sid}/runs/${rid}/answer-segments?after=${after}&limit=100`)
+        if (selected() !== sid || live()?.runID !== rid) return
+        setLive((current) => current && current.runID === rid ? fromPage(current, value, finalMessageID) : current)
+        if (!value.has_more || !value.items.length) return
+        after = value.next_sequence ?? value.items[value.items.length - 1].sequence
+      }
+    } catch {
+      // The next /messages refresh still delivers the persisted answer.
+    } finally {
+      backfills.delete(rid)
+    }
+  }
+  const stopLive = app.subscribeLive?.((notice) => {
+    const sid = selected()
+    if (!sid || notice.session_id !== sid) return
+    const run = currentRun()
+    if (run && run.id !== notice.run_id && !terminalRun(run.status)) return
+    const previous = live()
+    const next = applyLive(previous, notice)
+    setLive(next)
+    if (notice.type === "run.progress") {
+      if (notice.status && terminalRun(notice.status as Run["status"])) void fetchMessages(sid, true)
+      else if (!run || run.id !== notice.run_id) void refresh()
+      return
+    }
+    animatedRuns.add(notice.run_id)
+    if (needsBackfill(previous?.runID === notice.run_id ? previous : { ...next, segments: [] }, notice)) void backfill(sid, notice.run_id, notice.display_kind === "final_answer" ? notice.message_id : undefined)
+    if (notice.final) void fetchMessages(sid, true)
+  })
+  onCleanup(() => stopLive?.())
   const poll = setInterval(() => {
     if (busy()) void refresh()
   }, 1800)
@@ -417,6 +464,7 @@ export default function Chat() {
     setCurrentRun(undefined)
     setLatestRun(undefined)
     setRunEvents([])
+    setLive(undefined)
     setRunEventRun(undefined)
     setRunEvidence(undefined)
     setSelectedClue(undefined)
@@ -452,6 +500,7 @@ export default function Chat() {
     setCurrentRun(undefined)
     setLatestRun(undefined)
     setRunEvents([])
+    setLive(undefined)
     setRunEventRun(undefined)
     setRunEvidence(undefined)
     setSelectedClue(undefined)
@@ -528,10 +577,6 @@ export default function Chat() {
       if (app.user().id !== uid) return
       if (result.accepted !== true) throw new ApiError("提交结果待确认，请核对历史记录。", 0, "unknown_submission")
       accepted = true
-      if (questionAnswer) {
-        setQuestionAnswerIDs((current) => [...new Set([...current, result.message_id])])
-        sessionStorage.setItem(questionAnswerKey, questionAnswerIDs().join(","))
-      }
       setSentAttachments((current) => ({ ...current, [result.message_id]: attachments }))
       setPendingPrompt({ text, attachments, messageID: result.message_id, questionAnswer })
       if (fileIDs.length) setSelectedFiles([])
@@ -539,6 +584,7 @@ export default function Chat() {
       setLatestRun(result.run_id)
       setCurrentRun({ id: result.run_id, session_id: id, status: "queued", phase: "accepted", user_message_id: result.message_id, created_at: new Date().toISOString() })
       setRunEvents([])
+      setLive(undefined)
       setRunEventRun(result.run_id)
       if (textOverride === undefined && draft() === text) setDraft("")
       if (JSON.stringify(selectedSkills()) === JSON.stringify(payload.skill_ids)) setSelectedSkills([])
@@ -571,9 +617,39 @@ export default function Chat() {
       }
       const reply=clarificationAnswer(question.missing,answers)
       if (selected()!==sid || currentRun()?.id!==run.id || currentRun()?.clarification?.id!==question.id) return
-      await send(reply, true)
+      if (messageSupport()?.question_answers) {
+        const values=Object.fromEntries(question.missing.map((field,index)=>[field,answers[index]?.[0]?.trim() ?? ""]))
+        await submitAnswer(run,{kind:"clarification",question_id:question.id,values})
+      } else await send(reply, true)
     } catch (cause) { if (selected()===sid) setError(safeMessage((cause as Error).message)) }
     finally { setQuestionBusy(false) }
+  }
+  async function submitAnswer(run: Run, body: Record<string, unknown>) {
+    const sid = run.session_id
+    const uid = app.user().id
+    if (sending() || busy() || uncertain() || !ready()) return
+    setSending(true)
+    setError("")
+    try {
+      const result = await post<{ accepted: boolean; run_id: string; message_id: string; answer_label: string }>(`/sessions/${sid}/runs/${run.id}/answers`, { ...body, client_request_id: crypto.randomUUID(), model_id: model() || undefined })
+      if (app.user().id !== uid || selected() !== sid) return
+      if (result.accepted !== true) throw new ApiError("提交结果待确认，请核对历史记录。", 0, "unknown_submission")
+      setPendingPrompt({ text: result.answer_label, attachments: [], messageID: result.message_id, questionAnswer: true })
+      animatedRuns.add(result.run_id)
+      setLatestRun(result.run_id)
+      setCurrentRun({ id: result.run_id, session_id: sid, status: "queued", phase: "accepted", user_message_id: result.message_id, created_at: new Date().toISOString() })
+      setRunEvents([])
+      setLive(undefined)
+      setRunEventRun(result.run_id)
+      setBusy(true)
+      setSending(false)
+      await refresh()
+    } catch (error) {
+      if (app.user().id === uid && selected() === sid) void refresh()
+      throw error
+    } finally {
+      if (app.user().id === uid) setSending(false)
+    }
   }
 
   createEffect(() => {
@@ -593,6 +669,7 @@ export default function Chat() {
         if (!alive) return
         if (selected() !== sid || currentRun()?.id !== rid) return
         const question = result.answer_view?.next_question
+        if (question && currentRun()?.answered_questions?.includes(question.id)) return
         if (question?.options?.length) setNextQuestion(question)
       })
       .catch(() => {})
@@ -606,7 +683,8 @@ export default function Chat() {
     if (answers === undefined) {
       setNextQuestion(undefined)
       setDismissedNextRun(run.id)
-      await send(STOP_FOLLOWUP_TEXT, true)
+      if (messageSupport()?.question_answers) await submitAnswer(run, { kind: "stop", question_id: question.id }).catch((cause) => setError(safeMessage((cause as Error).message)))
+      else await send(STOP_FOLLOWUP_TEXT, true)
       return
     }
     setNextQuestionBusy(true)
@@ -623,7 +701,13 @@ export default function Chat() {
       }
       setNextQuestion(undefined)
       setDismissedNextRun(run.id)
-      await send(action.send, true)
+      const options = question.options ?? []
+      if (messageSupport()?.question_answers && options.every((option) => typeof option.id === "string")) {
+        const chosen = (answers[0] ?? []).map((item) => item.trim()).filter(Boolean)
+        const option_ids = options.flatMap((option) => option.id && chosen.includes(option.label) ? [option.id] : [])
+        const custom = chosen.filter((label) => !options.some((option) => option.label === label)).join("；")
+        await submitAnswer(run, { kind: "next_question", question_id: question.id, option_ids, ...(custom ? { custom_value: custom } : {}) })
+      } else await send(action.send, true)
     } catch (cause) {
       if (selected() === sid) setError(safeMessage((cause as Error).message))
     } finally {
@@ -964,7 +1048,7 @@ export default function Chat() {
               <Index each={shownMessages()}>
                 {(entry) => {
                   const message = () => entry().message
-                  const questionAnswer = () => message().info.role === "user" && questionAnswerIDs().includes(message().info.id)
+                  const questionAnswer = () => message().info.role === "user" && (message().info.message_kind === "question_answer" || pendingPrompt()?.questionAnswer === true && pendingPrompt()?.messageID === message().info.id)
                   const attachments = () => message().attachments ?? sentAttachments()[message().info.id] ?? []
                   const textParts = () => entry().textParts
                   const toolParts = () => entry().toolParts
@@ -1068,7 +1152,7 @@ export default function Chat() {
               <Show when={pendingPrompt()?.messageID && messages().some((message) => message.info.id === pendingPrompt()?.messageID) ? undefined : pendingPrompt()}>
                 {(prompt) => <article class={"message user pending-prompt" + (prompt().questionAnswer ? " question-answer" : "")}><Show when={!prompt().questionAnswer}><div class="message-avatar"><img src={app.user().avatar ?? chatAssets.userFallbackAvatar} alt="" /></div></Show><div class="message-content"><div class="message-author">{prompt().questionAnswer ? "已选答案" : "你"}</div><Show when={prompt().attachments.length}><div class="message-attachments"><For each={prompt().attachments}>{(file) => <span title={file.name}><Icon name="file" size={14} /><span>{file.name}</span></span>}</For></div></Show><Markdown text={prompt().text} /></div></article>}
               </Show>
-              <Show when={awaitingReply()}><div class="assistant-thinking" role="status"><span class="message-avatar"><img src={chatAssets.policeAvatar} alt="" /></span><span>智能助手正在思考…</span></div></Show>
+              <Show when={awaitingReply()}><div class="assistant-thinking" role="status"><span class="message-avatar"><img src={chatAssets.policeAvatar} alt="" /></span><span>{liveProgress() ? `智能助手${liveProgress()}…` : "智能助手正在思考…"}</span></div></Show>
             </div>
           </Show>
         </div>
