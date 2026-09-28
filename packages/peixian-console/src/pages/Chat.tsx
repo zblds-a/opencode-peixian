@@ -78,6 +78,8 @@ export default function Chat() {
   const [clearingScene, setClearingScene] = createSignal(false)
   const [trusted, setTrusted] = createSignal<TrustedEvidence>()
   const [sourceClues, setSourceClues] = createSignal<AnalysisResult>()
+  const [sentSession, setSentSession] = createSignal<string>()
+  const [graphAvailable, setGraphAvailable] = createSignal(false)
   const [selectedClue, setSelectedClue] = createSignal<AnalysisClue>()
   const [showClues, setShowClues] = createSignal(true)
   const [insightTab, setInsightTab] = createSignal<"clues" | "graph">("clues")
@@ -110,7 +112,7 @@ export default function Chat() {
   const completedToolTraces = new Set<string>()
   const toolStatuses = new Map<string, string>()
   const draftsBySession = new Map<string, string>()
-  const suggestedQuestions = ["你能帮我做什么？", "如何整理并核对已有资料？", "研判结论如何追溯依据？", "如何使用技能或插件？"]
+  const suggestedQuestions = ["你能帮我做哪些研判?", "平台能查询哪些资料?", "怎样提问能查得更准?", "研判回答分哪几部分，各看什么?"]
 
   function updateSessions(values: Session[]) {
     if (historyList) historyScroll = historyList.scrollTop
@@ -151,9 +153,37 @@ export default function Chat() {
     return { ...result, missing: [...new Set([...(result.missing ?? []), ...(gaps ?? [])])] }
   })
   const graphRunID = createMemo(() => latestAnalysis()?.run_id ?? resultV2RunID() ?? currentRun()?.id)
-  const hasInsights = createMemo(() => Boolean(latestAnalysis()?.clues.length || latestAnalysis()?.diagram || latestAnalysis()?.run_id || resultV2RunID()))
-  const sideMode = createMemo(() => loading() ? "empty" : selectedClue() ? "clue-detail" : hasInsights() ? (showClues() ? "insight" : "collapsed") : "plugins")
-  const rightMode = createMemo(() => sideMode() === "insight" ? insightTab() === "graph" ? "graph" : "clues" : sideMode())
+  let graphScope = ""
+  createEffect(() => {
+    const sid = selected(), rid = graphRunID()
+    currentRun()?.status
+    currentRun()?.status_revision
+    if (!sid || !rid || loadingConversation()) { graphScope = ""; setGraphAvailable(false); return }
+    const scope = `${sid}:${rid}`
+    if (graphScope !== scope) { graphScope = scope; setGraphAvailable(false) }
+    const controller = new AbortController()
+    void api<{ items: { id: string; status: string }[] }>(`/sessions/${sid}/runs/${rid}/graphs?page=1&page_size=20`, { signal: controller.signal })
+      .then((directory) => {
+        const graph = directory.items.find((item) => item.status === "ready" || item.status === "partial")
+        if (!graph) { if (!controller.signal.aborted) setGraphAvailable(false); return }
+        return api<{ nodes: unknown[] }>(`/sessions/${sid}/runs/${rid}/graphs/${graph.id}?node_limit=80&edge_limit=160`, { signal: controller.signal })
+          .then((page) => { if (!controller.signal.aborted) setGraphAvailable(page.nodes.length > 0) })
+      })
+      .catch(() => { if (!controller.signal.aborted) setGraphAvailable(false) })
+    onCleanup(() => controller.abort())
+  })
+  const hasSent = createMemo(() => Boolean(selected() && (sentSession() === selected() || messages().some((message) => message.info.role === "user") || currentRun()?.user_message_id)))
+  const hasClues = createMemo(() => Boolean(latestAnalysis()?.clues.length))
+  const rightMode = createMemo(() => {
+    if (loading() || loadingConversation()) return "empty"
+    if (!hasSent()) return "plugins"
+    if (selectedClue() && hasClues()) return "clue-detail"
+    if (!hasClues() && !graphAvailable()) return "empty"
+    if (!showClues()) return "collapsed"
+    if (hasClues() && graphAvailable()) return insightTab() === "graph" ? "graph" : "clues"
+    return hasClues() ? "clues" : "graph"
+  })
+  const sideMode = createMemo(() => rightMode() === "clues" || rightMode() === "graph" ? "insight" : rightMode())
   type ChatEntry = { message: Message; textParts: { part: Message["parts"][number]; id: string; afterTools: boolean }[]; toolParts: Message["parts"]; error?: Message["info"]["error"]; missingBody: boolean }
   const displayMessages = createMemo(() => {
     const state = live()
@@ -452,6 +482,7 @@ export default function Chat() {
     followOutput = true
     setReplyJump(false)
     setSelected(id)
+    setSentSession(undefined)
     setDraft(draftsBySession.get(id) ?? "")
     setPendingPrompt(undefined)
     setSelectedFiles([])
@@ -493,6 +524,7 @@ export default function Chat() {
     followOutput = true
     setReplyJump(false)
     setSelected(undefined)
+    setSentSession(undefined)
     setPendingPrompt(undefined)
     setMessages([])
     setTrusted(undefined)
@@ -577,6 +609,7 @@ export default function Chat() {
       if (app.user().id !== uid) return
       if (result.accepted !== true) throw new ApiError("提交结果待确认，请核对历史记录。", 0, "unknown_submission")
       accepted = true
+      setSentSession(id)
       setSentAttachments((current) => ({ ...current, [result.message_id]: attachments }))
       setPendingPrompt({ text, attachments, messageID: result.message_id, questionAnswer })
       if (fileIDs.length) setSelectedFiles([])
@@ -1251,19 +1284,17 @@ export default function Chat() {
           </div>
         </div>
       </section>
-      <Show when={sideMode() !== "empty"}>
-        <aside class={"insight-sidebar rail-" + sideMode() + " right-panel--" + rightMode()} aria-label="研判侧栏">
+      <aside class={"insight-sidebar rail-" + sideMode() + " right-panel--" + rightMode()} aria-label="研判侧栏">
           <Show when={sideMode() === "plugins"}><RelatedCapabilities /></Show>
-          <Show when={sideMode() === "collapsed"}><button class="insight-reopen" onClick={() => setShowClues(true)} aria-label="展开研判侧栏" title="展开研判侧栏"><Icon name="star" size={17} /></button></Show>
+          <Show when={sideMode() === "collapsed"}><button class="insight-icon-button insight-reopen" onClick={() => setShowClues(true)} aria-label="展开研判侧栏" title="展开研判侧栏"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 5-7 7 7 7" /></svg></button></Show>
           <Show when={sideMode() === "insight"}>
-            <div class="insight-single-head"><strong>{insightTab() === "clues" ? "智能发现线索" : "实体关系图谱"}</strong><div><button class="insight-icon-button" aria-label="切换侧栏内容" title="切换侧栏内容" onClick={() => setInsightTab(insightTab() === "clues" ? "graph" : "clues")}><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h15l-4-4M20 16H5l4 4" /></svg></button><button class="insight-icon-button" aria-label="收起侧栏" title="收起侧栏" onClick={() => setShowClues(false)}><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 15 7-7 7 7" /></svg></button></div></div>
-            <Show when={insightTab() === "clues"} fallback={<RealEntityGraph sessionID={selected()} runID={graphRunID()} runStatus={currentRun()?.id === graphRunID() ? currentRun()?.status : undefined} />}>
+            <div class="insight-single-head"><strong>{rightMode() === "clues" ? "智能发现线索" : "实体关系图谱"}</strong><div><Show when={hasClues() && graphAvailable()}><button class="insight-icon-button" aria-label="切换侧栏内容" title="切换侧栏内容" onClick={() => setInsightTab(rightMode() === "clues" ? "graph" : "clues")}><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h15l-4-4M20 16H5l4 4" /></svg></button></Show><button class="insight-icon-button" aria-label="收起侧栏" title="收起侧栏" onClick={() => setShowClues(false)}><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 5 7 7-7 7" /></svg></button></div></div>
+            <Show when={rightMode() === "clues"} fallback={<RealEntityGraph sessionID={selected()} runID={graphRunID()} runStatus={currentRun()?.id === graphRunID() ? currentRun()?.status : undefined} />}>
               <CluePanel clues={latestAnalysis()?.clues ?? []} expanded={showClues()} onExpandedChange={setShowClues} onSelect={setSelectedClue} hideHeader />
             </Show>
           </Show>
           <Show when={sideMode() === "clue-detail" && selectedClue()}>{(clue) => <ClueDetailPanel clue={clue()} onClose={() => setSelectedClue(undefined)} onReturn={clue().message_id ? () => { const id = clue().message_id; setSelectedClue(undefined); queueMicrotask(() => { const target = Array.from(document.querySelectorAll<HTMLElement>("[data-message-id]")).find((element) => element.dataset.messageId === id); target?.scrollIntoView({ block: "center" }); target?.focus() }) } : undefined} />}</Show>
         </aside>
-      </Show>
       <Show when={picker()}>
         {(type) => (
           <Modal
