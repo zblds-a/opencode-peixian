@@ -55,7 +55,7 @@ function EvidenceDrawer(props: { card: EvidenceCard; close: () => void }) {
     <dl><dt>记录编号</dt><dd>{props.card.id}</dd><dt>时间</dt><dd>{props.card.time || "资料未提供"}</dd><dt>资料快照</dt><dd>{props.card.snapshot_id}</dd>
     <For each={props.card.fields}>{field => <><dt>{field.label}</dt><dd>{field.value}</dd></>}</For></dl>
     <h3>引用来源</h3><ul><For each={props.card.source_ids} fallback={<li>本条即为原始来源记录</li>}>{id => <li>{id}</li>}</For></ul>
-    <p>合成演示资料。记录存在不证明违法犯罪；没有观测记录也不证明行为未发生。</p>
+    <p>记录存在不证明违法犯罪；没有观测记录也不证明行为未发生。</p>
     <Show when={props.card.message_id}><button onClick={() => { const id = props.card.message_id; props.close(); queueMicrotask(() => document.getElementById("message-" + id)?.scrollIntoView({ block: "center" })) }}>返回关联消息</button></Show>
   </dialog>
 }

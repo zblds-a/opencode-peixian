@@ -129,6 +129,9 @@ const statuses: Record<string, [string, string]> = {
   updating: ["更新中", "pending"],
   draining: ["等待当前任务结束", "pending"],
   awaiting_action: ["等待管理员处理", "warn"],
+  waiting_input: ["待你确认", "warn"],
+  waiting_question: ["等待补充信息", "warn"],
+  waiting_permission: ["等待操作确认", "warn"],
   reconciling: ["正在核对恢复状态", "pending"],
   closing: ["正在关闭入口", "pending"],
   security_blocked: ["调用已受限", "warn"],
@@ -175,7 +178,11 @@ export function Markdown(props: { text: string }) {
     }),
   )
   createEffect(() => {
-    html()
+    const next = html()
+    const opened = Array.from(host.querySelectorAll<HTMLDetailsElement>("details")).flatMap((item, index) => item.open ? [index] : [])
+    host.innerHTML = next
+    const details = host.querySelectorAll<HTMLDetailsElement>("details")
+    opened.forEach((index) => { if (details[index]) details[index].open = true })
     const current = ++generation
     queueMicrotask(() => {
       if (current !== generation || !host?.isConnected) return
@@ -237,7 +244,7 @@ export function Markdown(props: { text: string }) {
     })
   })
   onCleanup(() => generation++)
-  return <div ref={host} class="markdown" innerHTML={html()} onClick={(event) => {
+  return <div ref={host} class="markdown" onClick={(event) => {
     const link = (event.target as Element).closest<HTMLAnchorElement>("a[href]")
     const href = link?.getAttribute("href") ?? ""
     if (!/^#source-[a-zA-Z0-9-]+$/.test(href)) return

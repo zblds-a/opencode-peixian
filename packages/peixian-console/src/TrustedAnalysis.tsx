@@ -1,6 +1,7 @@
 import {EventDiagramView} from "./EventDiagram"
 import { createEffect, For, onCleanup, Show } from "solid-js"
 import { Icon, Status } from "./components"
+import { clueIcon, clueTheme, dialogueIcons } from "./dialogue-icons"
 import type { AnalysisClue, AnalysisResult } from "./types"
 export type Presentation = AnalysisResult
 export type TrustedEvidence = {turn_id?: string; presentation?: unknown}
@@ -17,7 +18,20 @@ export function AnalysisResultView(props: {result: Presentation; onSelect: (clue
   </div>
 }
 export function CluePanel(props:{clues:AnalysisClue[];expanded:boolean;onExpandedChange:(expanded:boolean)=>void;onSelect:(clue:AnalysisClue)=>void;hideHeader?:boolean}) {
- return <aside class="clue-panel trusted-clues expanded" aria-label="智能发现线索"><Show when={!props.hideHeader}><button class="clue-panel-head" onClick={()=>props.onExpandedChange(false)} aria-expanded={props.expanded} aria-label="收起智能发现线索"><strong><Icon name="star" size={18}/>智能发现线索</strong><span class="clue-panel-actions"><small>{props.clues.length} 项</small><b>收起</b></span></button></Show><div class="clue-list"><For each={props.clues}>{clue=><article class={"clue-card clue-"+clue.type}><div class="clue-card-head"><span><Icon name={icon(clue.type)} size={18}/></span><strong>{clue.title}</strong></div><h4>{clue.headline}</h4><button onClick={()=>props.onSelect(clue)}>查看详情</button></article>}</For></div></aside>
+ return <aside class="clue-panel trusted-clues expanded right-panel--clues" aria-label="智能发现线索"><Show when={!props.hideHeader}><button class="clue-panel-head" onClick={()=>props.onExpandedChange(false)} aria-expanded={props.expanded} aria-label="收起智能发现线索"><strong>智能发现线索</strong><span class="clue-panel-actions"><small>{props.clues.length} 项</small><b>收起</b></span></button></Show><div class="clue-list"><For each={props.clues}>{clue=><article class={"clue-card clue-card--"+clueTheme(clue.type,clue.title)}><img class="clue-card-icon" src={clueIcon(clue.type,clue.title)} alt=""/><div class="clue-card-copy"><strong>{clue.title}</strong><p>{clue.headline.split(/(\d[\d,]*)/g).map((part)=>/^\d/.test(part)?<b>{part}</b>:part)}</p></div><button class="clue-card-open" onClick={()=>props.onSelect(clue)}>查看详情 <span aria-hidden="true">›</span></button></article>}</For></div></aside>
+}
+export function ClueDetailPanel(props: { clue: AnalysisClue; onClose: () => void; onReturn?: () => void }) {
+ const theme = () => clueTheme(props.clue.type, props.clue.title)
+ return <div class={"clue-detail-panel right-panel--clue-detail clue-detail--"+theme()}>
+  <header class="clue-detail-head"><h2>线索详情</h2><button aria-label="关闭线索详情" onClick={props.onClose}><Icon name="close" size={17}/></button></header>
+  <div class="clue-detail-scroll">
+   <section class="clue-detail-hero"><img src={clueIcon(props.clue.type,props.clue.title)} alt=""/><div><h3>{props.clue.title}</h3><p>{props.clue.headline}</p></div></section>
+   <section class="clue-detail-section"><h3><img src={dialogueIcons.sectionSummary} alt=""/>线索摘要</h3><p>{props.clue.summary}</p></section>
+   <section class="clue-detail-section"><h3><img src={dialogueIcons.sectionFinding} alt=""/>核心发现</h3><ul><For each={props.clue.discoveries} fallback={<li>暂无可展示的核对发现。</li>}>{text=><li>{text}</li>}</For></ul></section>
+   <section class="clue-detail-section clue-detail-evidence"><h3><img src={dialogueIcons.sectionEvidence} alt=""/>研判依据 <span>{props.clue.evidence.length} 项</span></h3><div class="clue-detail-evidence-list"><For each={props.clue.evidence} fallback={<p>当前线索暂无可展示的来源记录。</p>}>{item=><article><img src={dialogueIcons.document} alt=""/><div><strong>{item.label}</strong><p>{item.content}</p><Show when={item.occurred_at}><time>{item.occurred_at}</time></Show></div></article>}</For></div></section>
+   <Show when={props.onReturn}><button class="clue-detail-return" onClick={()=>props.onReturn?.()}>返回关联消息</button></Show>
+  </div>
+ </div>
 }
 export function ClueDrawer(props:{clue:AnalysisClue;onClose:()=>void;onReturn?:()=>void}) {
  let dialog!:HTMLDialogElement

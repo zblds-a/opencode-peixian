@@ -12,11 +12,12 @@ import Admin from "./pages/Admin"
 import FinalAdmin from "./pages/FinalAdmin"
 import { defaultPlatform, platformMetadata } from "./platform"
 import type { Platform } from "./platform"
-import { connectEvents, createChangeBus, parseChange, resources } from "./events"
+import { connectEvents, createChangeBus, parseChange, parseLive, resources } from "./events"
 import RuntimeStatus from "./RuntimeStatus"
 import loginStory from "./assets/peixian-login-left.webp"
 import loginSide from "./assets/peixian-login-right.webp"
 import policeEmblem from "./assets/police-emblem.png"
+import settingsIcon from "./assets/images/chat/settings.png"
 import cultureTitle from "./assets/peixian-culture-title.png"
 import loginFeatureAnalysis from "./assets/login-feature-analysis.svg"
 import loginFeatureCapability from "./assets/login-feature-capability.svg"
@@ -138,6 +139,10 @@ export default function App() {
       onEvent: (event) => {
         const change = parseChange(event)
         if (change) changes.publish(change)
+        else {
+          const notice = parseLive(event)
+          if (notice) changes.publishLive(notice)
+        }
       },
     })
     onCleanup(() => controller.abort())
@@ -201,6 +206,7 @@ export default function App() {
                 refreshUser,
                 changed,
                 subscribe: changes.subscribe,
+                subscribeLive: changes.subscribeLive,
                 invalidate: (resources) => changes.publish({ resources }),
               }}
             >
@@ -224,9 +230,9 @@ export default function App() {
                       <small class="police-brand-subtitle">沛县公安智能研判平台</small>
                     </span>
                   </a>
-                  <div class="space-label">
-                    {can("business.use") ? "个人工作空间" : "管理工作台"} <Icon name="lock" size={12} />
-                  </div>
+                  <Show when={!can("business.use")}>
+                    <div class="space-label">管理工作台 <Icon name="lock" size={12} /></div>
+                  </Show>
                   <nav aria-label="主导航">
                     <For each={visiblePages()}>
                       {(item) => (
@@ -238,7 +244,7 @@ export default function App() {
                           }}
                           aria-current={page() === item.id ? "page" : undefined}
                         >
-                          <Icon name={item.icon} />
+                          {item.id === "settings" ? <img class="sidebar-settings-icon" src={settingsIcon} alt="" /> : <Icon name={item.icon} />}
                           <span>{item.name}</span>
                           <Show when={page() === item.id}>
                             <span class="nav-dot" />

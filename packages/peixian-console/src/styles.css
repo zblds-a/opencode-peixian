@@ -1,5 +1,5 @@
 :root {
-  font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  font-family: "Inter Offline", "Noto Sans SC Offline", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   font-synthesis: none;
   color: #233c3b;
   background: #f6f8f7;
@@ -15,7 +15,7 @@
   --danger: #bf4e4e;
   --danger-bg: #fff1ef;
   --shadow: 0 8px 32px #1e403609;
-  --font-family-sans: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-family-sans: "Inter Offline", "Noto Sans SC Offline", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
 }
 
 /* 沛警智枢终版界面 */
@@ -39,7 +39,7 @@
 .login-story {
   background: linear-gradient(150deg, #052d67dd, #0d5599c9), radial-gradient(circle at 55% 60%, #65adff, #062250 70%);
 }
-.login-story h1 { font-family: "STKaiti", "KaiTi", serif; letter-spacing: 8px; }
+.login-story h1 { font-family: "LXGW WenKai Offline", "STKaiti", "KaiTi", serif; letter-spacing: 8px; }
 .login-side { background: linear-gradient(145deg, #f7fbff, #eef6ff); }
 .login-card { border: 1px solid #d6e7fb; box-shadow: 0 24px 70px #174d8a20; }
 .final-admin { display: flex; flex-direction: column; gap: 16px; }

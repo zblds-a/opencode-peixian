@@ -14,6 +14,7 @@ export type Capability =
 export type User = {
   id: string
   username: string
+  avatar?: string
   role: Role
   must_change_password: boolean
   active?: boolean
@@ -42,6 +43,7 @@ export type Part = {
   type: string
   text?: string
   origin?: "verified_result" | string
+  display_kind?: "source_answer" | "final_answer" | string
   run_id?: string
   step_id?: string
   call_id?: string | null
@@ -62,6 +64,11 @@ export type Message = {
     error?: { message?: string; data?: { message?: string } }
     time?: { created?: number; completed?: number }
     finish?: string
+    message_kind?: "question_answer"
+    question_id?: string
+    question_kind?: "clarification" | "next_question" | "stop"
+    parent_run_id?: string
+    answer_label?: string
   }
   parts: Part[]
 }
@@ -87,6 +94,7 @@ export type FileItem = {
   size?: number
   status?: string
   truncated?: boolean
+  parse_status?: string
   error?: string
   created_at?: string
   created?: number
@@ -141,7 +149,7 @@ export type AnalysisClue = {
   level?: string
   source?: string
   discoveries: string[]
-  evidence: { type: string; label: string; content: string; source_ids?: string[]; record_id?: string; occurred_at?: string | null; synthetic?: boolean; verification_status?: string }[]
+  evidence: { id?: string; type: string; label: string; content: string; source_ids?: string[]; source_run_id?: string; record_id?: string; occurred_at?: string | null; synthetic?: boolean; verification_status?: string }[]
 }
 export type AnalysisResult = {
   diagram?: import("./event-diagram").EventDiagram | null
@@ -179,6 +187,9 @@ export type CapabilityItem = {
   scope: string
   available?: boolean
   unavailable_reason?: string | null
+  selectable_in_message?: boolean
+  selection_mode?: string
+  selection_unavailable_reason?: string | null
   dependency_ids?: string[]
 }
 export type SkillDraft = {
@@ -231,6 +242,10 @@ export type Run = {
   session_id: string
   status: "queued" | "running" | "cancelling" | "reconciling" | "completed" | "failed" | "cancelled"
   phase: string
+  status_revision?: number
+  event_sequence?: number
+  answer_delivery?: { version?: string; sequence?: number; final?: boolean; result_saved?: boolean; phase?: string }
+  answered_questions?: string[]
   cancel_requested?: boolean
   model_id?: string
   message_id?: string | null

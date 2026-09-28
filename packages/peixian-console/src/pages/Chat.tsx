@@ -1,20 +1,38 @@
-import { toolFailureMessage, toolPartStatus, toolTraceStatus } from "../tool-trace-status"
 import { createEffect, createMemo, createSignal, For, Index, onCleanup, Show } from "solid-js"
+import { toolFailureMessage, toolPartStatus } from "../tool-trace-status"
+import { Portal } from "solid-js/web"
 import { api, ApiError, list, patch, post, remove, safeMessage } from "../api"
 import { Button, Empty, ErrorLine, Field, Icon, Markdown, Modal, Spinner, Status } from "../components"
 import { useConsole } from "../context"
 import BusinessConfirmations, { QuestionForm } from "../BusinessConfirmations"
 import { clarificationRequest, clarificationAnswer } from "../planner-question"
-import { ClueDrawer, CluePanel } from "../TrustedAnalysis"
+import { nextQuestionRequest, nextQuestionAction, STOP_FOLLOWUP_TEXT, type NextQuestion } from "../next-question"
+import type { TrustedResult } from "../trusted-v2"
+import { ClueDetailPanel, CluePanel } from "../TrustedAnalysis"
 import RealEntityGraph from "../RealEntityGraph"
 import SmoothMarkdown from "../SmoothMarkdown"
+import { applyLive, fromPage, needsBackfill, withLive, type LiveAnswer } from "../live-answer"
 import type { TrustedEvidence } from "../TrustedAnalysis"
-import { isAnalysisResult, legacyPresentation } from "../result-contract"
+import { isAnalysisResult, legacyPresentation, sourcePresentation } from "../result-contract"
 import RuntimeStatus from "../RuntimeStatus"
 import { displayName } from "../analysis-display"
 import { canObserve, canSend } from "../runtime-view"
 import { useResourceRefresh } from "../resource-refresh"
+import { chatAssets } from "../chat-assets"
+import { pluginIcon } from "../dialogue-icons"
+import uploadIcon from "../assets/images/chat/upload-icon.png"
 import type { AnalysisClue, AnalysisResult, CapabilityItem, FileItem, Message, Model, Plugin, Run, RunEvent, RunEvidence, Session, Skill, SkillDraft } from "../types"
+
+const pluginPrompts: Record<string, string> = {
+  地点周边警情列表: "请使用周边警情插件帮我查询经度【116.9355】、纬度【34.721】、半径【800米】范围内的警情信息",
+  地点周边人员抓拍统计: "请使用周边抓拍插件帮我查询【位置坐标/已选择位置】在【开始时间】至【结束时间】期间【半径】米范围内的抓拍记录",
+  人员跨小区活动汇总: "请使用跨小区来源插件帮我查询人员【人员编号】在【开始时间】至【结束时间】期间的跨小区来源记录",
+  人员夜间抓拍记录: "请使用夜间来源插件帮我查询人员【人员编号】在【开始时间】至【结束时间】期间的夜间来源记录",
+  人员基础档案与最近十条抓拍: "请使用档案及最近抓拍插件帮我查询人员【人员编号】的基础档案信息和最近抓拍记录",
+  人员指定时段轨迹明细: "请使用单人轨迹插件帮我查询人员【姓名/人员编号】在【开始时间】至【结束时间】期间的轨迹记录",
+  人员预警类型概览: "请使用预警概况插件帮我查询人员【人员编号】的预警类型概况",
+  人员近七天预警记录: "请使用固定近七天明细插件帮我查询人员【人员编号】固定近七天窗口内的预警来源明细",
+}
 
 export default function Chat() {
   const app = useConsole()
@@ -34,10 +52,14 @@ export default function Chat() {
   const [selectedPlugins, setSelectedPlugins] = createSignal<string[]>([])
   const [busy, setBusy] = createSignal(false)
   const [sending, setSending] = createSignal(false)
-  const [pendingPrompt, setPendingPrompt] = createSignal<{ text: string; attachments: { id: string; name: string }[]; messageID?: string; accepted: boolean }>()
+  const [pendingPrompt, setPendingPrompt] = createSignal<{ text: string; attachments: { id: string; name: string }[]; messageID?: string; questionAnswer?: boolean }>()
+  const [live, setLive] = createSignal<LiveAnswer>()
+  const [replyJump, setReplyJump] = createSignal(false)
+  const [messageSupport, setMessageSupport] = createSignal<{ version?: string; file_ids?: boolean; max_files?: number; requires_ready?: boolean; allows_truncated?: boolean; question_answers?: boolean }>()
   const [uploading, setUploading] = createSignal(false)
   const [uncertain, setUncertain] = createSignal(false)
   const [loading, setLoading] = createSignal(true)
+  const [loadingConversation, setLoadingConversation] = createSignal(false)
   const [error, setError] = createSignal("")
   const [picker, setPicker] = createSignal<"files" | "capabilities">()
   const [search, setSearch] = createSignal("")
@@ -55,29 +77,66 @@ export default function Chat() {
   const [scene, setScene] = createSignal<{ scenario_id: string | null; name: string | null; source: string }>()
   const [clearingScene, setClearingScene] = createSignal(false)
   const [trusted, setTrusted] = createSignal<TrustedEvidence>()
+  const [sourceClues, setSourceClues] = createSignal<AnalysisResult>()
+  const [sentSession, setSentSession] = createSignal<string>()
+  const [graphAvailable, setGraphAvailable] = createSignal(false)
   const [selectedClue, setSelectedClue] = createSignal<AnalysisClue>()
   const [showClues, setShowClues] = createSignal(true)
+  const [pluginOpen, setPluginOpen] = createSignal<boolean>()
+  const [resultSeen, setResultSeen] = createSignal(false)
   const [insightTab, setInsightTab] = createSignal<"clues" | "graph">("clues")
   const [showHistory, setShowHistory] = createSignal(false)
   const [rename, setRename] = createSignal<Session>()
+  const [contextSession, setContextSession] = createSignal<{ session: Session; x: number; y: number }>()
   const [title, setTitle] = createSignal("")
   const [skillRequirement, setSkillRequirement] = createSignal("")
   const [draftTestText, setDraftTestText] = createSignal("")
   const [draftBusy, setDraftBusy] = createSignal(false)
   const [questionBusy, setQuestionBusy] = createSignal(false)
+  const [nextQuestion, setNextQuestion] = createSignal<NextQuestion>()
+  const [dismissedNextRun, setDismissedNextRun] = createSignal<string>()
+  const [nextQuestionBusy, setNextQuestionBusy] = createSignal(false)
   let scroll!: HTMLDivElement
   let textarea!: HTMLTextAreaElement
   let fileInput!: HTMLInputElement
+  let historyList!: HTMLDivElement
+  let historyScroll = 0
+  let suggestionDrag: { x: number; scroll: number; moved: boolean } | undefined
+  let suggestionWasDragged = false
   const displayedText = new Map<string, number>()
   let scrollFrame = 0
   let followOutput = true
   let selectingText = false
-  let animateUntil = 0
+  const animatedRuns = new Set<string>()
+  const terminalSince = new Map<string, number>()
   let selectionRevision = 0
   let messageFlight: { id: string; revision: number; trailing: boolean; detail: boolean; promise: Promise<void> } | undefined
+  const completedToolTraces = new Set<string>()
+  const toolStatuses = new Map<string, string>()
+  const draftsBySession = new Map<string, string>()
+  const suggestedQuestions = ["你能帮我做哪些研判?", "平台能查询哪些资料?", "怎样提问能查得更准?", "研判回答分哪几部分，各看什么?"]
+
+  function updateSessions(values: Session[]) {
+    if (historyList) historyScroll = historyList.scrollTop
+    setSessions((current) => values.map((item) => {
+      const previous = current.find((existing) => existing.id === item.id)
+      return previous && JSON.stringify(previous) === JSON.stringify(item) ? previous : item
+    }))
+    requestAnimationFrame(() => { if (historyList) historyList.scrollTop = historyScroll })
+  }
+  function toolStatus(part: Message["parts"][number], index: number, messageID: string) {
+    const key = `${selected()}:${messageID}:${part.id ?? part.call_id ?? part.step_id ?? index}`
+    const status = toolPartStatus(part) ?? "running"
+    const previous = toolStatuses.get(key)
+    const stable = previous && ["completed", "succeeded", "failed", "cancelled", "not_executed", "rows_limit"].includes(previous) ? previous : status
+    toolStatuses.set(key, stable)
+    return stable
+  }
   const shownSessions = createMemo(() => sessions())
   const shownModels = createMemo(() => models())
   const shownCapabilities = createMemo(() => capabilities().filter((item) => item.enabled).map(item=>({...item,name:displayName(item.name),description:displayName(item.name)!==item.name?"整理相关资料并核对来源。":item.description})))
+  const relatedPlugins = createMemo(() => shownCapabilities().filter((item) => item.kind === "plugin"))
+  const fileSelectionReady = createMemo(() => messageSupport()?.version === "message-support-v1" && messageSupport()?.file_ids === true)
   const slashQuery = createMemo(() => draft().match(/^\s*\/([^\s]*)$/)?.[1]?.toLowerCase())
   const slashCapabilities = createMemo(() => {
     if (slashQuery() === undefined) return []
@@ -85,24 +144,75 @@ export default function Chat() {
     return shownCapabilities().filter((item) => !query || `${item.name}${item.description ?? ""}`.toLowerCase().includes(query)).slice(0, 7)
   })
   const messageAnalysis = createMemo(() => [...messages().flatMap((message) => message.parts)].reverse().find((part) => part.type === "analysis_result" && isAnalysisResult(part.data))?.data as AnalysisResult | undefined)
+  const resultV2RunID = createMemo(() => {
+    const result = [...messages().flatMap((message) => message.parts)].reverse().find((part) => part.type === "analysis_result" && part.data && typeof part.data === "object" && !Array.isArray(part.data) && part.data.schema === "peixian.analysis-result" && part.data.version === "2.0" && typeof part.data.run_id === "string")?.data
+    return result && typeof result === "object" && "run_id" in result ? String(result.run_id) : undefined
+  })
   const latestAnalysis = createMemo(() => {
-    const result = messageAnalysis() ?? legacyPresentation(trusted()?.presentation)
+    const result = messageAnalysis() ?? sourceClues() ?? legacyPresentation(trusted()?.presentation)
     if (!result) return
     const gaps = result.run_id && runEvidence()?.run_id === result.run_id ? runEvidence()?.missing : undefined
     return { ...result, missing: [...new Set([...(result.missing ?? []), ...(gaps ?? [])])] }
   })
-  const graphRunID = createMemo(() => latestAnalysis()?.run_id ?? currentRun()?.id)
-  const hasInsights = createMemo(() => Boolean(latestAnalysis()?.clues.length || latestAnalysis()?.diagram || latestAnalysis()?.run_id))
-  const sideMode = createMemo(() => hasInsights() ? (showClues() ? "insight" : "collapsed") : "empty")
+  const graphRunID = createMemo(() => latestAnalysis()?.run_id ?? resultV2RunID() ?? currentRun()?.id)
+  let graphScope = ""
+  createEffect(() => {
+    const sid = selected(), rid = graphRunID()
+    currentRun()?.status
+    currentRun()?.status_revision
+    if (!sid || !rid || loadingConversation()) { graphScope = ""; setGraphAvailable(false); return }
+    const scope = `${sid}:${rid}`
+    if (graphScope !== scope) { graphScope = scope; setGraphAvailable(false) }
+    const controller = new AbortController()
+    void api<{ items: { id: string; status: string }[] }>(`/sessions/${sid}/runs/${rid}/graphs?page=1&page_size=20`, { signal: controller.signal })
+      .then((directory) => {
+        const graph = directory.items.find((item) => item.status === "ready" || item.status === "partial")
+        if (!graph) { if (!controller.signal.aborted) setGraphAvailable(false); return }
+        return api<{ nodes: unknown[] }>(`/sessions/${sid}/runs/${rid}/graphs/${graph.id}?node_limit=80&edge_limit=160`, { signal: controller.signal })
+          .then((page) => { if (!controller.signal.aborted) setGraphAvailable(page.nodes.length > 0) })
+      })
+      .catch(() => { if (!controller.signal.aborted) setGraphAvailable(false) })
+    onCleanup(() => controller.abort())
+  })
+  const hasSent = createMemo(() => Boolean(selected() && (sentSession() === selected() || messages().some((message) => message.info.role === "user") || currentRun()?.user_message_id)))
+  const hasClues = createMemo(() => Boolean(latestAnalysis()?.clues.length))
+  createEffect(() => {
+    if (loadingConversation() || resultSeen() || (!hasClues() && !graphAvailable())) return
+    setResultSeen(true)
+    setPluginOpen(false)
+    setShowClues(true)
+  })
+  const rightMode = createMemo(() => {
+    if (loading() || loadingConversation()) return "empty"
+    if (selectedClue() && hasClues()) return "clue-detail"
+    if (hasClues() || graphAvailable()) {
+      if (!showClues()) return "collapsed"
+      if (hasClues() && graphAvailable()) return insightTab() === "graph" ? "graph" : "clues"
+      return hasClues() ? "clues" : "graph"
+    }
+    if (resultSeen()) return "collapsed"
+    return (pluginOpen() ?? !hasSent()) ? "plugins" : "plugins-collapsed"
+  })
+  const sideMode = createMemo(() => rightMode() === "clues" || rightMode() === "graph" ? "insight" : rightMode())
   type ChatEntry = { message: Message; textParts: { part: Message["parts"][number]; id: string; afterTools: boolean }[]; toolParts: Message["parts"]; error?: Message["info"]["error"]; missingBody: boolean }
-  const shownMessages = createMemo<ChatEntry[]>(() => messages().flatMap((message, index, all): ChatEntry[] => {
+  const displayMessages = createMemo(() => {
+    const state = live()
+    if (!state || state.sessionID !== selected()) return messages()
+    const run = currentRun()
+    return withLive(messages(), state, run?.id === state.runID ? run.user_message_id : undefined)
+  })
+  const liveProgress = createMemo(() => {
+    const state = live()
+    return state && state.sessionID === selected() && state.runID === currentRun()?.id ? state.progress : undefined
+  })
+  const shownMessages = createMemo<ChatEntry[]>(() => displayMessages().flatMap((message, index, all): ChatEntry[] => {
     if (message.info.role === "user") return [{ message, textParts: message.parts.filter((part) => part.type === "text" && part.text).map((part, partIndex) => ({ part, id: `${message.info.id}:${part.id ?? partIndex}`, afterTools: false })), toolParts: [], missingBody: false }]
     const turnStart = all.slice(0, index).map((item) => item.info.role).lastIndexOf("user") + 1
     const nextUser = all.findIndex((item, offset) => offset > index && item.info.role === "user")
-    const turn = message.info.turn_id
-      ? all.filter((item) => item.info.role === "assistant" && item.info.turn_id === message.info.turn_id)
-      : message.info.run_id
-        ? all.filter((item) => item.info.role === "assistant" && item.info.run_id === message.info.run_id)
+    const turn = message.info.run_id
+      ? all.filter((item) => item.info.role === "assistant" && item.info.run_id === message.info.run_id)
+      : message.info.turn_id
+        ? all.filter((item) => item.info.role === "assistant" && item.info.turn_id === message.info.turn_id)
         : all.slice(turnStart, nextUser < 0 ? undefined : nextUser).filter((item) => item.info.role === "assistant")
     const anchor = turn[0]
     if (message !== anchor) return []
@@ -117,9 +227,8 @@ export default function Chat() {
   }))
   const awaitingReply = createMemo(() => {
     if (!busy() || !currentRun()) return false
-    if (runEventRun() === currentRun()?.id && runEvents().length) return false
-    const userIndex = messages().findIndex((message) => message.info.id === currentRun()?.user_message_id)
-    return !messages().some((message, index) => message.info.role === "assistant" &&
+    const userIndex = displayMessages().findIndex((message) => message.info.id === currentRun()?.user_message_id)
+    return !displayMessages().some((message, index) => message.info.role === "assistant" &&
       (message.info.run_id === currentRun()?.id || (userIndex >= 0 && index > userIndex)) &&
       message.parts.some((part) => part.type === "text" && part.text?.trim() || part.type === "tool"))
   })
@@ -132,6 +241,12 @@ export default function Chat() {
   })
   createEffect(() => {
     if (slashQuery() === undefined && slashFilter()) setSlashFilter("")
+  })
+  createEffect(() => {
+    if (!contextSession()) return
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape") setContextSession(undefined) }
+    window.addEventListener("keydown", close)
+    onCleanup(() => window.removeEventListener("keydown", close))
   })
   const ready = createMemo(() => canSend(app.user().runtime))
   const available = createMemo(() => canObserve(app.user().runtime))
@@ -153,13 +268,38 @@ export default function Chat() {
         flight.detail = false
         const data = await list<Message>("/sessions/" + id + "/messages")
         if (!current()) return
-        setMessages((current) => data.map((message, index) => {
-          const old = current[index]
-          return old?.info.id === message.info.id && JSON.stringify(old) === JSON.stringify(message) ? old : message
-        }))
+        setMessages((previous) => {
+          const incoming = new Set(data.map((message) => message.info.id))
+          const retained = busy() && currentRun() ? previous.filter((message) => message.info.role === "assistant" && message.info.run_id === currentRun()?.id && !incoming.has(message.info.id)) : []
+          const expectedUserID = pendingPrompt()?.messageID ?? currentRun()?.user_message_id
+          const waitingForUser = expectedUserID && !data.some((message) => message.info.role === "user" && message.info.id === expectedUserID)
+          const combined = [...data, ...retained].filter((message) => !waitingForUser || message.info.role !== "assistant" || message.info.run_id !== currentRun()?.id && message.info.parentID !== expectedUserID)
+          const users = new Set(combined.filter((message) => message.info.role === "user").map((message) => message.info.id))
+          const children = new Map<string, Message[]>()
+          for (const message of combined) {
+            if (message.info.role !== "assistant") continue
+            const parent = [message.info.parentID, message.info.turn_id, currentRun()?.id === message.info.run_id ? currentRun()?.user_message_id : undefined]
+              .find((value) => value && users.has(value))
+            if (parent) children.set(parent, [...(children.get(parent) ?? []), message])
+          }
+          const grouped = new Set([...children.values()].flat())
+          const ordered = combined.flatMap((message) => grouped.has(message) ? [] : message.info.role === "user" ? [message, ...(children.get(message.info.id) ?? [])] : [message])
+          return ordered.map((message) => {
+            const old = previous.find((item) => item.info.id === message.info.id)
+            if (old?.info.id !== message.info.id) return message
+            if (JSON.stringify(old) === JSON.stringify(message)) return old
+            return {
+              ...message,
+              parts: message.parts.map((part, partIndex) => {
+                const prior = old.parts.find((item) => item.id && item.id === part.id) ?? old.parts[partIndex]
+                return prior && JSON.stringify(prior) === JSON.stringify(part) ? prior : part
+              }),
+            }
+          })
+        })
         if (pendingPrompt()?.messageID && data.some((message) => message.info.id === pendingPrompt()?.messageID)) setPendingPrompt(undefined)
         if (!includeDetail) continue
-        const hasAnalysis = data.some((message) => message.parts.some((part) => part.type === "analysis_result" && isAnalysisResult(part.data)))
+        const hasAnalysis = messages().some((message) => message.parts.some((part) => part.type === "analysis_result" && isAnalysisResult(part.data)))
         if (hasAnalysis) setTrusted(undefined)
         if (!hasAnalysis) {
           try {
@@ -181,18 +321,29 @@ export default function Chat() {
   async function fetchRunState(id: string, current = () => selected() === id) {
     const page = await api<{ items: Run[] }>("/sessions/" + id + "/runs?page=1&page_size=20")
     if (!current()) return
-    const run = page.items.find((item) => item.id === latestRun()) ?? page.items.find((item) => !terminalRun(item.status)) ?? page.items[0]
+    if (latestRun() && currentRun()?.id === latestRun() && !terminalRun(currentRun()!.status) && !page.items.some((item) => item.id === latestRun())) return
+    const run = page.items.find((item) => !terminalRun(item.status)) ?? page.items.find((item) => item.id === latestRun()) ?? page.items[0]
+    if (run && currentRun()?.id === run.id && (run.status_revision ?? 0) < (currentRun()?.status_revision ?? 0)) return
     if (!run) {
+      setBusy(false)
       setCurrentRun(undefined)
       setLatestRun(undefined)
       setRunEvents([])
       setRunEventRun(undefined)
       setRunEvidence(undefined)
+      setSourceClues(undefined)
       return
     }
     setLatestRun(run.id)
     setCurrentRun(run)
-    setBusy(!terminalRun(run.status))
+    if (terminalRun(run.status)) {
+      if (!terminalSince.has(run.id)) terminalSince.set(run.id, Date.now())
+      const answered = messages().some((message) => message.info.role === "assistant" && message.info.run_id === run.id && message.parts.some((part) => part.type === "text" && part.text?.trim()))
+      setBusy(run.status === "completed" && !answered && Date.now() - terminalSince.get(run.id)! < 8000)
+    } else {
+      terminalSince.delete(run.id)
+      setBusy(true)
+    }
     const sameRun = runEventRun() === run.id
     const after = sameRun ? Math.max(0, ...runEvents().map((item) => item.sequence)) : 0
     const [eventsResult, evidenceResult] = await Promise.allSettled([
@@ -205,6 +356,10 @@ export default function Chat() {
       setRunEventRun(run.id)
     }
     if (evidenceResult.status === "fulfilled") setRunEvidence(evidenceResult.value)
+    if (terminalRun(run.status)) {
+      const result = await api<TrustedResult>("/sessions/" + id + "/runs/" + run.id + "/result").catch(() => undefined)
+      if (current()) setSourceClues(result ? sourcePresentation(result, run.id) : undefined)
+    }
   }
   async function refresh() {
     if (!available()) {
@@ -213,9 +368,8 @@ export default function Chat() {
     }
     try {
       const values = await list<Session>("/sessions")
-      setSessions(values)
+      updateSessions(values)
       if (selected()) {
-        setBusy(["busy", "retry"].includes(values.find((item) => item.id === selected())?.status ?? "idle"))
         await fetchMessages(selected()!)
       }
       setError("")
@@ -236,6 +390,9 @@ export default function Chat() {
       list<Plugin>("/plugins"),
       list<Omit<CapabilityItem, "kind"> & { kind: "personal_skill" | "plugin" | "official_skill" }>("/capabilities?page=1&page_size=100"),
     ])
+    void api<{ message_support?: { version?: string; file_ids?: boolean; max_files?: number; requires_ready?: boolean; allows_truncated?: boolean } }>("/capabilities?page=1&page_size=100")
+      .then((value) => setMessageSupport(value.message_support))
+      .catch(() => setMessageSupport(undefined))
     if (result[0].status === "fulfilled") {
       setModels(result[0].value as Model[])
       const data = result[0].value as Model[]
@@ -243,7 +400,7 @@ export default function Chat() {
     }
     if (result[1].status === "fulfilled") setFiles(result[1].value as FileItem[])
     if (result[2].status === "fulfilled") setSkills(result[2].value as Skill[])
-    if (result[3].status === "fulfilled") setSessions(result[3].value as Session[])
+    if (result[3].status === "fulfilled") updateSessions(result[3].value as Session[])
     if (result[4].status === "fulfilled") setPlugins(result[4].value as Plugin[])
     if (result[5].status === "fulfilled") setCapabilities((result[5].value as (Omit<CapabilityItem, "kind"> & { kind: "personal_skill" | "plugin" | "official_skill" })[]).map((item) => ({
       ...item,
@@ -266,6 +423,43 @@ export default function Chat() {
   })
   useResourceRefresh(["messages"], () => selected() ? fetchMessages(selected()!, false) : Promise.resolve(), 700)
   useResourceRefresh(["sessions", "runs"], refresh, 10000)
+  const backfills = new Set<string>()
+  async function backfill(sid: string, rid: string, finalMessageID?: string) {
+    if (backfills.has(rid)) return
+    backfills.add(rid)
+    try {
+      let after = 0
+      for (let page = 0; page < 20; page++) {
+        const value = await api<{ message_id?: string; items: { sequence: number; part_id: string; display_kind: string; text: string; index?: number; count?: number }[]; has_more?: boolean; next_sequence?: number }>(`/sessions/${sid}/runs/${rid}/answer-segments?after=${after}&limit=100`)
+        if (selected() !== sid || live()?.runID !== rid) return
+        setLive((current) => current && current.runID === rid ? fromPage(current, value, finalMessageID) : current)
+        if (!value.has_more || !value.items.length) return
+        after = value.next_sequence ?? value.items[value.items.length - 1].sequence
+      }
+    } catch {
+      // The next /messages refresh still delivers the persisted answer.
+    } finally {
+      backfills.delete(rid)
+    }
+  }
+  const stopLive = app.subscribeLive?.((notice) => {
+    const sid = selected()
+    if (!sid || notice.session_id !== sid) return
+    const run = currentRun()
+    if (run && run.id !== notice.run_id && !terminalRun(run.status)) return
+    const previous = live()
+    const next = applyLive(previous, notice)
+    setLive(next)
+    if (notice.type === "run.progress") {
+      if (notice.status && terminalRun(notice.status as Run["status"])) void fetchMessages(sid, true)
+      else if (!run || run.id !== notice.run_id) void refresh()
+      return
+    }
+    animatedRuns.add(notice.run_id)
+    if (needsBackfill(previous?.runID === notice.run_id ? previous : { ...next, segments: [] }, notice)) void backfill(sid, notice.run_id, notice.display_kind === "final_answer" ? notice.message_id : undefined)
+    if (notice.final) void fetchMessages(sid, true)
+  })
+  onCleanup(() => stopLive?.())
   const poll = setInterval(() => {
     if (busy()) void refresh()
   }, 1800)
@@ -288,11 +482,18 @@ export default function Chat() {
     return Boolean(selection && !selection.isCollapsed && selection.anchorNode && scroll?.contains(selection.anchorNode))
   }
   async function choose(id: string) {
-    selectionRevision++
+    if (selected()) draftsBySession.set(selected()!, draft())
+    const revision = ++selectionRevision
+    setLoadingConversation(true)
     displayedText.clear()
-    animateUntil = 0
+    animatedRuns.clear()
+    completedToolTraces.clear()
+    toolStatuses.clear()
     followOutput = true
+    setReplyJump(false)
     setSelected(id)
+    setSentSession(undefined)
+    setDraft(draftsBySession.get(id) ?? "")
     setPendingPrompt(undefined)
     setSelectedFiles([])
     setScene(undefined)
@@ -300,13 +501,17 @@ export default function Chat() {
     setSelectedPlugins([])
     setMessages([])
     setTrusted(undefined)
+    setSourceClues(undefined)
     setCurrentRun(undefined)
     setLatestRun(undefined)
     setRunEvents([])
+    setLive(undefined)
     setRunEventRun(undefined)
     setRunEvidence(undefined)
     setSelectedClue(undefined)
     setShowClues(true)
+    setPluginOpen(undefined)
+    setResultSeen(false)
     setInsightTab("clues")
     setError("")
     setShowHistory(false)
@@ -314,27 +519,40 @@ export default function Chat() {
     try {
       await fetchMessages(id)
     } catch (error) {
-      setError((error as Error).message)
+      if (selected() === id && selectionRevision === revision) setError((error as Error).message)
+    } finally {
+      if (selected() === id && selectionRevision === revision) setLoadingConversation(false)
     }
   }
   function fresh() {
+    if (selected()) draftsBySession.set(selected()!, draft())
+    const hadSession = Boolean(selected())
     selectionRevision++
+    setLoadingConversation(false)
     displayedText.clear()
-    animateUntil = 0
+    animatedRuns.clear()
+    completedToolTraces.clear()
+    toolStatuses.clear()
     followOutput = true
+    setReplyJump(false)
     setSelected(undefined)
+    setSentSession(undefined)
     setPendingPrompt(undefined)
     setMessages([])
     setTrusted(undefined)
+    setSourceClues(undefined)
     setCurrentRun(undefined)
     setLatestRun(undefined)
     setRunEvents([])
+    setLive(undefined)
     setRunEventRun(undefined)
     setRunEvidence(undefined)
     setSelectedClue(undefined)
     setShowClues(true)
+    setPluginOpen(undefined)
+    setResultSeen(false)
     setInsightTab("clues")
-    if (!uncertain()) setDraft("")
+    if (hadSession || !uncertain()) setDraft("")
     setSelectedFiles([])
     setScene(undefined)
     setSelectedSkills([])
@@ -342,6 +560,8 @@ export default function Chat() {
     setError("")
     setShowHistory(false)
     setBusy(false)
+    setNextQuestion(undefined)
+    setDismissedNextRun(undefined)
     textarea?.focus()
   }
   async function clearScene() {
@@ -359,23 +579,27 @@ export default function Chat() {
     } catch (cause) { if (selected() === id) app.notify((cause as Error).message, "error") }
     finally { if (app.user().id === owner) setClearingScene(false) }
   }
-  async function send(textOverride?: string) {
+  async function send(textOverride?: string, questionAnswer = false) {
     const text = textOverride ?? draft()
-    if (!text.trim() || sending() || uncertain() || busy() || !ready() || !shownModels().length) return
-    const attachments: {id:string;name:string}[] = []
+    if (!text.trim() || sending() || loadingConversation() || uncertain() || busy() || !ready() || !shownModels().length) return
+    const fileIDs = !questionAnswer && fileSelectionReady() ? selectedFiles() : []
+    const attachments = fileIDs.map((id) => files().find((item) => item.id === id)).filter((item): item is FileItem => !!item).map((item) => ({ id: item.id, name: item.name }))
+    if (fileIDs.length !== attachments.length || fileIDs.some((id) => { const item = files().find((file) => file.id === id); return (item?.parse_status ?? item?.status) !== "ready" || item?.truncated === true })) { setError("关联文件尚未完成解析或已被删除，请重新选择后发送。"); return }
     const payload = {
       text: text.trim(),
       agent_id: "theft-assistant",
       model_id: model() || undefined,
       skill_ids: [],
       plugin_ids: [],
-      file_ids: [],
+      file_ids: fileIDs,
       mode: "standard",
       client_request_id: crypto.randomUUID(),
     }
     const uid = app.user().id
+    const showJump = Boolean(scroll && scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight >= 96)
+    if (showJump) setReplyJump(true)
     setSending(true)
-    setPendingPrompt({ text, attachments, accepted: false })
+    setPendingPrompt({ text, attachments, questionAnswer })
     setError("")
     let submitting = false
     let accepted = false
@@ -399,15 +623,17 @@ export default function Chat() {
       if (app.user().id !== uid) return
       if (result.accepted !== true) throw new ApiError("提交结果待确认，请核对历史记录。", 0, "unknown_submission")
       accepted = true
+      setSentSession(id)
       setSentAttachments((current) => ({ ...current, [result.message_id]: attachments }))
-      setPendingPrompt({ text, attachments, messageID: result.message_id, accepted: true })
-      animateUntil = Date.now() + 30000
+      setPendingPrompt({ text, attachments, messageID: result.message_id, questionAnswer })
+      if (fileIDs.length) setSelectedFiles([])
+      animatedRuns.add(result.run_id)
       setLatestRun(result.run_id)
       setCurrentRun({ id: result.run_id, session_id: id, status: "queued", phase: "accepted", user_message_id: result.message_id, created_at: new Date().toISOString() })
       setRunEvents([])
+      setLive(undefined)
       setRunEventRun(result.run_id)
       if (textOverride === undefined && draft() === text) setDraft("")
-      if (JSON.stringify(selectedFiles()) === JSON.stringify(payload.file_ids)) setSelectedFiles([])
       if (JSON.stringify(selectedSkills()) === JSON.stringify(payload.skill_ids)) setSelectedSkills([])
       if (JSON.stringify(selectedPlugins()) === JSON.stringify(payload.plugin_ids)) setSelectedPlugins([])
       setBusy(true)
@@ -420,7 +646,7 @@ export default function Chat() {
         setPendingPrompt(undefined)
         setUncertain(true)
         setError("提交结果待确认，草稿已保留。请先检查历史和当前任务状态，避免重复调用。")
-      } else { setPendingPrompt(undefined); setError((error as Error).message) }
+      } else { setPendingPrompt(undefined); setReplyJump(false); setError((error as Error).message) }
     } finally {
       if (app.user().id === uid) setSending(false)
     }
@@ -438,10 +664,104 @@ export default function Chat() {
       }
       const reply=clarificationAnswer(question.missing,answers)
       if (selected()!==sid || currentRun()?.id!==run.id || currentRun()?.clarification?.id!==question.id) return
-      await send(reply)
+      if (messageSupport()?.question_answers) {
+        const values=Object.fromEntries(question.missing.map((field,index)=>[field,answers[index]?.[0]?.trim() ?? ""]))
+        await submitAnswer(run,{kind:"clarification",question_id:question.id,values})
+      } else await send(reply, true)
     } catch (cause) { if (selected()===sid) setError(safeMessage((cause as Error).message)) }
     finally { setQuestionBusy(false) }
   }
+  async function submitAnswer(run: Run, body: Record<string, unknown>) {
+    const sid = run.session_id
+    const uid = app.user().id
+    if (sending() || busy() || uncertain() || !ready()) return
+    setSending(true)
+    setError("")
+    try {
+      const result = await post<{ accepted: boolean; run_id: string; message_id: string; answer_label: string }>(`/sessions/${sid}/runs/${run.id}/answers`, { ...body, client_request_id: crypto.randomUUID(), model_id: model() || undefined })
+      if (app.user().id !== uid || selected() !== sid) return
+      if (result.accepted !== true) throw new ApiError("提交结果待确认，请核对历史记录。", 0, "unknown_submission")
+      setPendingPrompt({ text: result.answer_label, attachments: [], messageID: result.message_id, questionAnswer: true })
+      animatedRuns.add(result.run_id)
+      setLatestRun(result.run_id)
+      setCurrentRun({ id: result.run_id, session_id: sid, status: "queued", phase: "accepted", user_message_id: result.message_id, created_at: new Date().toISOString() })
+      setRunEvents([])
+      setLive(undefined)
+      setRunEventRun(result.run_id)
+      setBusy(true)
+      setSending(false)
+      await refresh()
+    } catch (error) {
+      if (app.user().id === uid && selected() === sid) void refresh()
+      throw error
+    } finally {
+      if (app.user().id === uid) setSending(false)
+    }
+  }
+
+  createEffect(() => {
+    const sid = selected()
+    const run = currentRun()
+    const rid = run?.id
+    setNextQuestion(undefined)
+    if (!sid || !run || !rid) return
+    if (!terminalRun(run.status)) return
+    if (run.clarification) return
+    if (dismissedNextRun() === rid) return
+    if (busy() || sending() || uncertain()) return
+    let alive = true
+    onCleanup(() => { alive = false })
+    void api<TrustedResult>(`/sessions/${sid}/runs/${rid}/result`)
+      .then((result) => {
+        if (!alive) return
+        if (selected() !== sid || currentRun()?.id !== rid) return
+        const question = result.answer_view?.next_question
+        if (question && currentRun()?.answered_questions?.includes(question.id)) return
+        if (question?.options?.length) setNextQuestion(question)
+      })
+      .catch(() => {})
+  })
+
+  async function answerNextQuestion(answers?: string[][]) {
+    const sid = selected()
+    const run = currentRun()
+    const question = nextQuestion()
+    if (!sid || !run || !question || nextQuestionBusy() || sending() || busy()) return
+    if (answers === undefined) {
+      setNextQuestion(undefined)
+      setDismissedNextRun(run.id)
+      if (messageSupport()?.question_answers) await submitAnswer(run, { kind: "stop", question_id: question.id }).catch((cause) => setError(safeMessage((cause as Error).message)))
+      else await send(STOP_FOLLOWUP_TEXT, true)
+      return
+    }
+    setNextQuestionBusy(true)
+    setError("")
+    try {
+      const action = nextQuestionAction(question, answers)
+      if (selected() !== sid || currentRun()?.id !== run.id || nextQuestion()?.id !== question.id) return
+      if ("draft" in action) {
+        setDraft(action.draft)
+        setNextQuestion(undefined)
+        setDismissedNextRun(run.id)
+        queueMicrotask(() => textarea?.focus())
+        return
+      }
+      setNextQuestion(undefined)
+      setDismissedNextRun(run.id)
+      const options = question.options ?? []
+      if (messageSupport()?.question_answers && options.every((option) => typeof option.id === "string")) {
+        const chosen = (answers[0] ?? []).map((item) => item.trim()).filter(Boolean)
+        const option_ids = options.flatMap((option) => option.id && chosen.includes(option.label) ? [option.id] : [])
+        const custom = chosen.filter((label) => !options.some((option) => option.label === label)).join("；")
+        await submitAnswer(run, { kind: "next_question", question_id: question.id, option_ids, ...(custom ? { custom_value: custom } : {}) })
+      } else await send(action.send, true)
+    } catch (cause) {
+      if (selected() === sid) setError(safeMessage((cause as Error).message))
+    } finally {
+      setNextQuestionBusy(false)
+    }
+  }
+
   async function abort() {
     if (!selected()) return
     try {
@@ -461,6 +781,7 @@ export default function Chat() {
     try {
       await remove("/sessions/" + item.id)
       if (selected() === item.id) fresh()
+      draftsBySession.delete(item.id)
       await refresh()
     } catch (error) {
       app.notify((error as Error).message, "error")
@@ -468,13 +789,22 @@ export default function Chat() {
   }
   async function saveTitle(event: SubmitEvent) {
     event.preventDefault()
+    const session = rename()
+    const value = title().trim()
+    if (!session || !value) return
     try {
-      await patch("/sessions/" + rename()!.id, { title: title().trim() })
+      await patch("/sessions/" + session.id, { title: value })
+      setSessions((current) => current.map((item) => item.id === session.id ? { ...item, title: value } : item))
       setRename(undefined)
       await refresh()
     } catch (error) {
       app.notify((error as Error).message, "error")
     }
+  }
+  function openRename(item: Session) {
+    setContextSession(undefined)
+    setTitle(item.title)
+    setRename(item)
   }
   function toggle(id: string, type: "files" | "skills") {
     const setter = type === "files" ? setSelectedFiles : setSelectedSkills
@@ -489,8 +819,8 @@ export default function Chat() {
     if (!chosen?.length || uploading() || !ready()) return
     const incoming = Array.from(chosen)
     fileInput.value = ""
-    if (incoming.length + selectedFiles().length > 5) {
-      app.notify("每次最多关联五个文件。", "error")
+    if (incoming.length > 5 || fileSelectionReady() && incoming.length + selectedFiles().length > 5) {
+      app.notify("一次最多上传五个文件。", "error")
       return
     }
     const owner = app.user().id
@@ -515,15 +845,15 @@ export default function Chat() {
             setFiles(inventory)
             readyFile = inventory.find((item) => item.id === uploaded.id)
           }
-          if (readyFile?.status === "ready" && readyFile.truncated !== true) break
+          if ((readyFile?.parse_status ?? readyFile?.status) === "ready" && readyFile?.truncated !== true) break
           if (readyFile?.truncated || readyFile && ["partial", "no_text", "failed", "error"].includes(readyFile.status ?? "")) throw new Error(`${file.name} 解析未完成或内容被截断，请拆分或重传。`)
           await new Promise((resolve) => setTimeout(resolve, 2000))
         }
-        if (readyFile?.status !== "ready" || readyFile.truncated) throw new Error(`${file.name} 已上传但仍在解析，暂不能关联；请稍后重新选择。`)
-        setSelectedFiles((current) => current.includes(uploaded.id) ? current : [...current, uploaded.id])
+        if ((readyFile?.parse_status ?? readyFile?.status) !== "ready" || readyFile?.truncated) throw new Error(`${file.name} 已上传但仍在解析，暂不能关联；请稍后重新选择。`)
+        if (fileSelectionReady()) setSelectedFiles((current) => [...new Set([...current, uploaded.id])])
       }
       app.invalidate(["files"])
-      app.notify("文件已上传并解析完成，发送时将随消息关联。")
+      app.notify(fileSelectionReady() ? "文件已上传并关联本次消息。" : "文件已上传到资料库；当前服务暂不支持随消息关联。")
     } catch (cause) {
       app.notify((cause as Error).message, "error")
     } finally {
@@ -531,24 +861,17 @@ export default function Chat() {
     }
   }
   function toggleCapability(item: CapabilityItem) {
-    if (item.available === false) {
-      app.notify(item.unavailable_reason || "该能力当前不可用。", "error")
+    const prompt = item.kind === "plugin" ? pluginPrompts[displayName(item.name)] : undefined
+    if (!prompt) {
+      app.notify("该能力暂无使用引导，请直接描述您的需求。")
       return
     }
-    if (item.kind === "skill") {
-      toggle(item.id, "skills")
-      return
-    }
-    const current = selectedPlugins()
-    if (!current.includes(item.id) && current.length >= 5) {
-      app.notify("每次最多选择五个插件。", "error")
-      return
-    }
-    setSelectedPlugins(current.includes(item.id) ? current.filter((value) => value !== item.id) : [...current, item.id])
+    setDraft(prompt)
+    setPicker(undefined)
+    queueMicrotask(() => textarea?.focus())
   }
   function chooseSlashCapability(item: CapabilityItem) {
     toggleCapability(item)
-    setDraft("")
     setSlashFilter("")
     queueMicrotask(() => textarea?.focus())
   }
@@ -667,8 +990,18 @@ export default function Chat() {
       app.notify((cause as Error).message, "error")
     }
   }
+  const RelatedCapabilities = () => (
+    <div class="related-capabilities right-panel--plugins">
+      <div class="related-capabilities-head"><strong>相关插件</strong><button class="insight-icon-button" onClick={() => setPluginOpen(false)} aria-label="收起相关插件" title="收起相关插件"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 5 7 7-7 7" /></svg></button></div>
+      <div class="related-capabilities-list">
+        <For each={relatedPlugins()}>
+          {(item) => <article class="plugin-card"><img class="plugin-card-icon" src={pluginIcon(capabilities().find((value) => value.id === item.id)?.name ?? item.name)} alt="" /><div class="plugin-card-body"><div class="plugin-card-title"><strong>{item.name}</strong><small>v{String(item.version).replace(/^v/i, "")}</small></div><p>{item.description}</p><span>插件工具</span></div><button onClick={() => toggleCapability(item)}>使用</button></article>}
+        </For>
+      </div>
+    </div>
+  )
   return (
-    <div class={"chat-layout side-mode-" + sideMode()}>
+    <div class={"chat-layout side-mode-" + sideMode() + " right-panel--" + rightMode()}>
       <aside class={"history-panel " + (showHistory() ? "visible" : "")}>
         <div class="history-head">
           <strong>研判记录</strong>
@@ -688,7 +1021,7 @@ export default function Chat() {
             onInput={(event) => setSearch(event.currentTarget.value)}
           />
         </label>
-        <div class="history-list">
+        <div class="history-list" ref={historyList} onScroll={(event) => { historyScroll = event.currentTarget.scrollTop }}>
           <Show
             when={!loading()}
             fallback={
@@ -702,19 +1035,20 @@ export default function Chat() {
               fallback={<p class="quiet">你的研判记录会保存在这里</p>}
             >
               {(item) => (
-                <div class={"history-item " + (selected() === item.id ? "selected" : "")}>
+                <div class={"history-item " + (selected() === item.id ? "selected" : "")} onContextMenu={(event) => {
+                  if (item.id.startsWith("mock-")) return
+                  event.preventDefault()
+                  setContextSession({ session: item, x: Math.min(event.clientX, window.innerWidth - 170), y: Math.min(event.clientY, window.innerHeight - 64) })
+                }}>
                   <button onClick={() => void choose(item.id)}>
-                    <Icon name="chat" size={16} />
+                    <img class="chat-history-icon" src={chatAssets.conversationIcon} alt="" />
                     <span>{displayName(item.title) || "未命名对话"}</span>
                   </button>
                   <Show when={!item.id.startsWith("mock-")}><div class="history-actions">
                     <button
                       class="icon-button"
                       aria-label="重命名对话"
-                      onClick={() => {
-                        setRename(item)
-                        setTitle(item.title)
-                      }}
+                      onClick={() => openRename(item)}
                     >
                       <Icon name="edit" size={14} />
                     </button>
@@ -727,18 +1061,20 @@ export default function Chat() {
             </For>
           </Show>
         </div>
-        <div class="history-foot">
-          <Icon name="lock" size={13} />
-          仅你可见
-        </div>
       </aside>
+      <Show when={contextSession()}>{(value) => <Portal>
+        <div class="history-context-dismiss" onPointerDown={() => setContextSession(undefined)} />
+        <div class="history-context-menu" role="menu" aria-label="对话操作" style={{ left: `${value().x}px`, top: `${value().y}px` }}>
+          <button role="menuitem" onClick={() => openRename(value().session)}>重命名</button>
+        </div>
+      </Portal>}</Show>
       <section class="conversation">
         <button class="mobile-history-open" aria-label="显示研判记录" aria-expanded={showHistory()} onClick={() => setShowHistory(!showHistory())}>研判记录</button>
         <Show when={!ready()}>
           <div class="runtime-banner">
             <Icon name="clock" size={17} />
             <span>
-              个人工作空间
+              研判服务
               {["updating", "applying"].includes(app.user().runtime?.status ?? "")
                 ? "正在更新配置，当前对话可继续查看或停止，完成后即可发送新消息。"
                 : ["paused", "stopped"].includes(app.user().runtime?.status ?? "")
@@ -750,53 +1086,55 @@ export default function Chat() {
             <Status value={app.user().runtime?.status} />
           </div>
         </Show>
-        <div class="messages-scroll" ref={scroll} onPointerDown={() => { selectingText = true }} onPointerUp={() => { selectingText = false }} onPointerCancel={() => { selectingText = false }} onScroll={() => { followOutput = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 96 }}>
+        <div class="messages-scroll" ref={scroll} onPointerDown={() => { selectingText = true }} onPointerUp={() => { requestAnimationFrame(() => { selectingText = false }) }} onPointerCancel={() => { selectingText = false }} onScroll={() => { followOutput = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 96; if (followOutput) setReplyJump(false) }}>
           <Show
-            when={messages().length || pendingPrompt() || awaitingReply()}
-            fallback={<Show when={!selected()} fallback={<div class="conversation-blank" aria-label="空白研判对话区" />}><div class="chat-welcome"><span class="welcome-icon"><Icon name="skill" size={25} /></span><h2>你好，我是盗窃资料助手</h2><p>直接说出要核对的问题。我会根据已有资料继续分析；缺少必要条件时，会在对话中请你补充。</p><div class="welcome-questions"><For each={["你能帮我做什么？", "帮我核对一处位置周边的警情", "解释刚才的资料依据", "继续核对我选定的来源记录"]}>{(question) => <button onClick={() => { setDraft(question); textarea?.focus() }}>{question}<Icon name="send" size={14} /></button>}</For></div></div></Show>}
+            when={!loadingConversation() && (messages().length || pendingPrompt() || awaitingReply())}
+            fallback={loadingConversation() ? <div class="loading" role="status"><Spinner /><span>正在加载对话…</span></div> : <div class="chat-welcome"><strong>你好，我是你的智能研判助手</strong><p>可以从一个问题开始，重要结论请结合原始资料核验。</p></div>}
           >
             <div class="messages">
               <Index each={shownMessages()}>
                 {(entry) => {
                   const message = () => entry().message
+                  const questionAnswer = () => message().info.role === "user" && (message().info.message_kind === "question_answer" || pendingPrompt()?.questionAnswer === true && pendingPrompt()?.messageID === message().info.id)
                   const attachments = () => message().attachments ?? sentAttachments()[message().info.id] ?? []
                   const textParts = () => entry().textParts
                   const toolParts = () => entry().toolParts
-                  const renderText = (item: { part: Message["parts"][number]; id: string }) => message().info.role === "assistant" && item.part.origin !== "controlled_answer" ? <div><Show when={item.part.origin === "verified_result"}><small class="verified-result-label">已核对结果摘要</small></Show><SmoothMarkdown id={`${selected()}:${item.id}`} text={item.part.text ?? ""} live={busy() || Date.now() < animateUntil} cache={displayedText} onProgress={() => { if (scroll && followOutput && !selectingText && !selectionInConversation()) scroll.scrollTop = scroll.scrollHeight }} /></div> : <Markdown text={item.part.text ?? ""} />
+                  const renderText = (item: () => ChatEntry["textParts"][number]) => message().info.role === "assistant" ? <div><Show when={item().part.display_kind === "source_answer"}><span class="chat-source-answer-label">已核对资料</span></Show><SmoothMarkdown id={`${selected()}:${item().id}`} text={item().part.text ?? ""} live={animatedRuns.has(message().info.run_id ?? "") || busy() && currentRun()?.id === message().info.run_id} cache={displayedText} pause={() => selectingText || selectionInConversation()} onProgress={() => { if (scroll && followOutput && !selectingText && !selectionInConversation()) scroll.scrollTop = scroll.scrollHeight }} /></div> : <Markdown text={item().part.text ?? ""} />
+                  const traceComplete = () => {
+                    const key = `${selected()}:${message().info.id}`
+                    if (toolParts().length && toolParts().every((part, index) => ["completed", "succeeded"].includes(toolStatus(part, index, message().info.id)))) completedToolTraces.add(key)
+                    return completedToolTraces.has(key)
+                  }
                   return (
-                  <article data-message-id={message().info.id} tabindex={-1} class={"message " + (message().info.role === "user" ? "user" : "assistant")}>
-                    <div class="message-avatar">
-                      <Show when={message().info.role === "user"} fallback={<Icon name="skill" size={17} />}>
-                        {app.user().username.slice(0, 1).toUpperCase()}
-                      </Show>
-                    </div>
+                  <article data-message-id={message().info.id} tabindex={-1} class={"message " + (message().info.role === "user" ? "user" : "assistant") + (questionAnswer() ? " question-answer" : "")}>
+                    <Show when={!questionAnswer()}><div class="message-avatar">
+                      <img src={message().info.role === "user" ? app.user().avatar ?? chatAssets.userFallbackAvatar : chatAssets.policeAvatar} alt="" />
+                    </div></Show>
                     <div class="message-content">
-                      <div class="message-author">{message().info.role === "user" ? "你" : "智能助手"}</div>
+                      <div class="message-author">{questionAnswer() ? "已选答案" : message().info.role === "user" ? "你" : "智能助手"}</div>
                       <Show when={message().info.role === "user" && attachments().length}>
                         <div class="message-attachments"><For each={attachments()}>{(file) => <span title={file.name}><Icon name="file" size={14} /><span>{file.name}</span></span>}</For></div>
                       </Show>
-                      <For each={textParts().filter((item) => !item.afterTools)}>{renderText}</For>
+                      <Index each={textParts().filter((item) => !item.afterTools)}>{renderText}</Index>
                       <Show when={entry().missingBody}><p class="message-no-body">本轮暂无可展示的 Markdown 正文；右侧线索仍可查看。</p></Show>
                       <Show when={toolParts().length}>
-                        <details class="tool-trace">
+                        <details class="tool-trace" open>
                           <summary>
                             <Icon
-                              name={toolParts().every((part) => (part.execution?.status ?? part.state?.status) === "completed") ? "check" : "clock"}
+                              name={traceComplete() ? "check" : "clock"}
                               size={14}
                             />
-                            <span>查看资料处理过程（{toolParts().length} 项）</span>
-                            <Status
-                              value={toolTraceStatus(toolParts())}
-                            />
+                            <span>查看执行过程（{toolParts().length} 项）</span>
+                            <span class="chat-trace-state">{traceComplete() ? "✓" : "处理中"}</span>
                           </summary>
                           <div class="tool-trace-list">
                             <For each={toolParts()}>
-                              {(part) => (
+                              {(part, index) => (
                                 <details class="tool-trace-item">
                                   <summary>
-                                    <Icon name={(part.execution?.status ?? part.state?.status) === "completed" ? "check" : "clock"} size={14} />
-                                    <span>{safeMessage(part.execution?.capability_name || part.execution?.name || part.state?.title || part.tool, "处理业务资料")}</span>
-                                    <Status value={toolPartStatus(part)} />
+                                    <Icon name={["completed", "succeeded"].includes(toolStatus(part, index(), message().info.id)) ? "check" : "clock"} size={14} />
+                                    <span>{displayName(safeMessage(part.execution?.capability_name || part.execution?.name || part.state?.title || part.tool, "处理业务资料"))}</span>
+                                    <Status value={toolStatus(part, index(), message().info.id)} />
                                   </summary>
                                   <div class="tool-trace-detail">
                                   <For
@@ -843,7 +1181,7 @@ export default function Chat() {
                           </div>
                         </details>
                       </Show>
-                      <For each={textParts().filter((item) => item.afterTools)}>{renderText}</For>
+                      <Index each={textParts().filter((item) => item.afterTools)}>{renderText}</Index>
                       <Show when={entry().error}>
                         <ErrorLine
                           message={
@@ -859,20 +1197,39 @@ export default function Chat() {
                 }}
               </Index>
               <Show when={pendingPrompt()?.messageID && messages().some((message) => message.info.id === pendingPrompt()?.messageID) ? undefined : pendingPrompt()}>
-                {(prompt) => <article class="message user pending-prompt" aria-live="polite"><div class="message-avatar">{app.user().username.slice(0, 1).toUpperCase()}</div><div class="message-content"><div class="message-author">你</div><Show when={prompt().attachments.length}><div class="message-attachments"><For each={prompt().attachments}>{(file) => <span title={file.name}><Icon name="file" size={14} /><span>{file.name}</span></span>}</For></div></Show><Markdown text={prompt().text} /><small>{prompt().accepted ? "已发送" : "正在提交…"}</small></div></article>}
+                {(prompt) => <article class={"message user pending-prompt" + (prompt().questionAnswer ? " question-answer" : "")}><Show when={!prompt().questionAnswer}><div class="message-avatar"><img src={app.user().avatar ?? chatAssets.userFallbackAvatar} alt="" /></div></Show><div class="message-content"><div class="message-author">{prompt().questionAnswer ? "已选答案" : "你"}</div><Show when={prompt().attachments.length}><div class="message-attachments"><For each={prompt().attachments}>{(file) => <span title={file.name}><Icon name="file" size={14} /><span>{file.name}</span></span>}</For></div></Show><Markdown text={prompt().text} /></div></article>}
               </Show>
-              <Show when={awaitingReply()}><div class="assistant-thinking" role="status"><span class="message-avatar"><Icon name="skill" size={17} /></span><span>智能助手正在思考…</span></div></Show>
-              <Show when={busy() && runEventRun() === currentRun()?.id && runEvents().length && !messages().some((message) => message.info.run_id === currentRun()?.id && message.parts.some((part) => part.type === "tool"))}>
-                <div class="active-run-trace" role="status"><strong>执行过程</strong><For each={runEvents()}>{(step) => <span>{step.capability_name || step.name}<Status value={step.status} /></span>}</For></div>
-              </Show>
+              <Show when={awaitingReply()}><div class="assistant-thinking" role="status"><span class="message-avatar"><img src={chatAssets.policeAvatar} alt="" /></span><span>{liveProgress() ? `智能助手${liveProgress()}…` : "智能助手正在思考…"}</span></div></Show>
             </div>
           </Show>
         </div>
         <div class="composer-area">
+          <Show when={replyJump()}><button type="button" class="reply-jump" aria-label={busy() || sending() ? "正在回复，跳转到最新消息" : "跳转到最新消息"} title={busy() || sending() ? "正在回复，点击查看" : "点击查看最新回复"} onClick={() => { followOutput = true; setReplyJump(false); if (scroll) scroll.scrollTop = scroll.scrollHeight }}><Show when={busy() || sending()} fallback={<span class="reply-jump-arrow" aria-hidden="true">↓</span>}><span class="reply-jump-dots" aria-hidden="true"><i/><i/><i/></span></Show></button></Show>
+          <Show when={!messages().length && !pendingPrompt() && !awaitingReply()}>
+            <div class="chat-suggestions"><span>为你推荐</span>
+              <div class="chat-suggestions-track"
+                onPointerDown={(event) => { if (event.pointerType !== "mouse" || event.button !== 0) return; suggestionWasDragged = false; suggestionDrag = { x: event.clientX, scroll: event.currentTarget.scrollLeft, moved: false } }}
+                onPointerMove={(event) => { if (!suggestionDrag) return; const delta = event.clientX - suggestionDrag.x; if (Math.abs(delta) > 4) { suggestionDrag.moved = true; if (!event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.setPointerCapture(event.pointerId) } event.currentTarget.scrollLeft = suggestionDrag.scroll - delta }}
+                onPointerUp={(event) => { suggestionWasDragged = Boolean(suggestionDrag?.moved); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); suggestionDrag = undefined }}
+                onPointerCancel={() => { suggestionDrag = undefined }}
+                onWheel={(event) => { if (!event.shiftKey) return; event.preventDefault(); event.currentTarget.scrollLeft += event.deltaY }}>
+                <For each={suggestedQuestions}>{(question) => <button onClick={() => { if (suggestionWasDragged) return; setDraft(question); textarea?.focus() }}>{question}<Icon name="send" size={13} /></button>}</For>
+              </div>
+            </div>
+          </Show>
           <RuntimeStatus compact />
           <BusinessConfirmations sessionID={selected()} available={available()} onAnswered={() => void refresh()} />
           <Show when={selected() && currentRun()?.clarification?.version === "theft-clarification-v1"}>
             <QuestionForm request={() => clarificationRequest(currentRun()!, selected()!)} busy={questionBusy() || sending() || !ready()} answer={(answers) => void answerClarification(answers)} />
+          </Show>
+          <Show when={selected() && nextQuestion() && !currentRun()?.clarification && !busy() && !sending() && !uncertain()}>
+            <QuestionForm
+              title="下一步分析"
+              rejectLabel="不再追问，直接作答"
+              request={() => nextQuestionRequest(nextQuestion()!, selected()!)}
+              busy={nextQuestionBusy() || sending() || !ready()}
+              answer={(answers) => void answerNextQuestion(answers)}
+            />
           </Show>
           <ErrorLine message={error()} />
           <Show when={uncertain()}>
@@ -888,7 +1245,7 @@ export default function Chat() {
             </div>
           </Show>
           <Show when={scene()?.scenario_id}><div class="selection-chips" role="status"><span>当前场景：{scene()?.name} · 追问将沿用</span><button disabled={busy() || sending() || clearingScene()} onClick={() => void clearScene()} aria-label="清除当前场景">清除场景 <Icon name="close" size={12}/></button></div></Show>
-          <Show when={selectedFiles().length}><div class="pending-attachments" aria-label="待发送附件"><For each={selectedFiles()}>{(id) => <button type="button" title={files().find((file) => file.id === id)?.name ?? "已上传文件"} aria-label={`移除附件 ${files().find((file) => file.id === id)?.name ?? "已上传文件"}`} onClick={() => toggle(id, "files")}><Icon name="file" size={14} /><span>{files().find((file) => file.id === id)?.name ?? "已上传文件"}</span><Icon name="close" size={12} /></button>}</For></div></Show>
+          <Show when={selectedFiles().length}><div class="selection-chips" role="status"><span>本次关联文件：</span><For each={selectedFiles()}>{(id) => <button type="button" disabled={sending()} onClick={() => setSelectedFiles((current) => current.filter((item) => item !== id))} aria-label={`移除文件 ${files().find((item) => item.id === id)?.name ?? id}`}>{files().find((item) => item.id === id)?.name ?? id} <Icon name="close" size={12}/></button>}</For></div></Show>
           <div class="composer">
             <textarea
               ref={textarea}
@@ -896,7 +1253,7 @@ export default function Chat() {
               maxlength={32000}
               placeholder="直接描述要核对的问题，或继续追问已有结果…"
               value={draft()}
-              rows={3}
+              rows={2}
               onInput={(event) => setDraft(event.currentTarget.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
@@ -906,6 +1263,10 @@ export default function Chat() {
               }}
             />
             <div class="composer-tools">
+              <div class="chat-upload-control">
+                <input ref={fileInput} type="file" accept=".xlsx,.pdf,.docx,.txt,.md,.csv" multiple hidden onChange={(event) => void uploadLocal(event.currentTarget.files)} />
+                <button type="button" disabled={!ready() || uploading()} title={fileSelectionReady() ? "上传文件到资料库并选择关联" : "上传到资料库；当前服务暂不支持随消息关联"} aria-label={uploading() ? "正在上传文件" : "上传文件到资料库"} onClick={() => fileInput.click()}><img src={uploadIcon} alt="" /><span>{uploading() ? "上传中…" : "文件"}</span></button>
+              </div>
               <div class="model-choice">
                 <span class="model-dot" />
                 <select aria-label="选择授权模型" value={model() || shownModels()[0]?.id} disabled={busy()} onChange={(event) => setModel(event.currentTarget.value)}>
@@ -916,14 +1277,14 @@ export default function Chat() {
                 when={busy()}
                 fallback={
                   <Button
-                    variant="primary"
+                    class="chat-send-button"
                     icon="send"
+                    aria-label="发送消息"
+                    title="发送消息"
                     busy={sending()}
-                    disabled={!draft().trim() || uncertain() || !ready() || !shownModels().length}
+                    disabled={!draft().trim() || loadingConversation() || uncertain() || !ready() || !shownModels().length}
                     onClick={() => void send()}
-                  >
-                    发送
-                  </Button>
+                  />
                 }
               >
                 <Button icon="stop" onClick={abort}>
@@ -937,23 +1298,23 @@ export default function Chat() {
           </div>
         </div>
       </section>
-      <Show when={sideMode() !== "empty"}>
-        <aside class={"insight-sidebar rail-" + sideMode()} aria-label="研判侧栏">
-          <Show when={sideMode() === "collapsed"}><button class="insight-reopen" onClick={() => setShowClues(true)} aria-label="展开研判侧栏" title="展开研判侧栏"><Icon name="star" size={17} /></button></Show>
+      <aside class={"insight-sidebar rail-" + sideMode() + " right-panel--" + rightMode()} aria-label="研判侧栏">
+          <Show when={sideMode() === "plugins"}><RelatedCapabilities /></Show>
+          <Show when={sideMode() === "plugins-collapsed"}><button class="insight-icon-button insight-reopen" onClick={() => setPluginOpen(true)} aria-label="展开相关插件" title="展开相关插件"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 5-7 7 7 7" /></svg></button></Show>
+          <Show when={sideMode() === "collapsed"}><button class="insight-icon-button insight-reopen" onClick={() => setShowClues(true)} disabled={!hasClues() && !graphAvailable()} aria-label="展开研判侧栏" title="展开研判侧栏"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 5-7 7 7 7" /></svg></button></Show>
           <Show when={sideMode() === "insight"}>
-            <div class="insight-single-head"><strong>{insightTab() === "clues" ? "智能发现线索" : "实体关系图谱"}</strong><div><button class="insight-icon-button" aria-label="切换侧栏内容" title="切换侧栏内容" onClick={() => setInsightTab(insightTab() === "clues" ? "graph" : "clues")}><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h15l-4-4M20 16H5l4 4" /></svg></button><button class="insight-icon-button" aria-label="收起侧栏" title="收起侧栏" onClick={() => setShowClues(false)}><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 15 7-7 7 7" /></svg></button></div></div>
-            <Show when={insightTab() === "clues"} fallback={<RealEntityGraph sessionID={selected()} runID={graphRunID()} runStatus={currentRun()?.id === graphRunID() ? currentRun()?.status : undefined} />}>
+            <div class="insight-single-head"><strong>{rightMode() === "clues" ? "智能发现线索" : "实体关系图谱"}</strong><div><Show when={hasClues() && graphAvailable()}><button class="insight-icon-button" aria-label="切换侧栏内容" title="切换侧栏内容" onClick={() => setInsightTab(rightMode() === "clues" ? "graph" : "clues")}><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h15l-4-4M20 16H5l4 4" /></svg></button></Show><button class="insight-icon-button" aria-label="收起侧栏" title="收起侧栏" onClick={() => setShowClues(false)}><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 5 7 7-7 7" /></svg></button></div></div>
+            <Show when={rightMode() === "clues"} fallback={<RealEntityGraph sessionID={selected()} runID={graphRunID()} runStatus={currentRun()?.id === graphRunID() ? currentRun()?.status : undefined} />}>
               <CluePanel clues={latestAnalysis()?.clues ?? []} expanded={showClues()} onExpandedChange={setShowClues} onSelect={setSelectedClue} hideHeader />
             </Show>
           </Show>
+          <Show when={sideMode() === "clue-detail" && selectedClue()}>{(clue) => <ClueDetailPanel clue={clue()} onClose={() => setSelectedClue(undefined)} onReturn={clue().message_id ? () => { const id = clue().message_id; setSelectedClue(undefined); queueMicrotask(() => { const target = Array.from(document.querySelectorAll<HTMLElement>("[data-message-id]")).find((element) => element.dataset.messageId === id); target?.scrollIntoView({ block: "center" }); target?.focus() }) } : undefined} />}</Show>
         </aside>
-      </Show>
-      <Show when={selectedClue()}>{(clue) => <ClueDrawer clue={clue()} onClose={() => setSelectedClue(undefined)} onReturn={clue().message_id ? ()=>{const id=clue().message_id;setSelectedClue(undefined);queueMicrotask(()=>{const target=Array.from(document.querySelectorAll<HTMLElement>('[data-message-id]')).find(el=>el.dataset.messageId===id);target?.scrollIntoView({block:"center"});target?.focus()})}:undefined} />}</Show>
       <Show when={picker()}>
         {(type) => (
           <Modal
             title={type() === "files" ? "关联文件" : "能力选择"}
-            text={type() === "files" ? "仅可选择已完成解析的个人文件。" : "选择适合当前任务的能力；个人 Skill 可在此编辑和使用。"}
+             text={type() === "files" ? "仅可选择已完成解析且未截断的个人文件。" : "点击插件可填入使用引导，核对参数后发送；个人 Skill 仍可编辑。"}
             onClose={() => setPicker(undefined)}
           >
             <Show when={type() === "capabilities"}>
@@ -963,7 +1324,7 @@ export default function Chat() {
               <For
                 each={
                   type() === "files"
-                    ? files().filter((item) => ["ready", "partial"].includes(item.status ?? ""))
+                    ? files().filter((item) => ["ready", "partial"].includes(item.parse_status ?? item.status ?? ""))
                     : shownCapabilities().filter((item) => (capabilityKind() === "all" || item.kind === capabilityKind()) && (!search() || (item.name + (item.description ?? "")).toLowerCase().includes(search().toLowerCase())))
                 }
                 fallback={
@@ -975,11 +1336,11 @@ export default function Chat() {
               >
                 {(item) => (
                   <div class="pick-row capability-row">
-                    <input
+                     <input
                       type="checkbox"
-                      disabled={(type() === "files" && "status" in item && item.status === "partial") || (type() === "capabilities" && "available" in item && item.available === false)}
+                       disabled={type() === "files" && "status" in item && ((item.parse_status ?? item.status) !== "ready" || item.truncated === true)}
                       checked={(type() === "files" ? selectedFiles() : "kind" in item && item.kind === "plugin" ? selectedPlugins() : selectedSkills()).includes(item.id)}
-                      onChange={() => type() === "files" ? toggle(item.id, "files") : "kind" in item && toggleCapability(item)}
+                       onChange={() => type() === "files" ? toggle(item.id, "files") : "kind" in item && toggleCapability(item)}
                     />
                     <Icon name={type() === "files" ? "file" : "skill"} />
                     <span>
@@ -1020,20 +1381,19 @@ export default function Chat() {
       <Show when={creator() === "edit" && skillDraft()}>{(value) => <Modal title="编辑 Skill" text={`来源：${creatorSource() === "conversation" ? "当前对话" : "需求描述"} · 状态：${draftStatusText(value().status)}`} wide onClose={() => setCreator(undefined)}><Show when={["preparing","generating"].includes(value().status)}><div class="runtime-banner"><Spinner/><span>系统正在生成草稿，完成后将自动刷新。</span></div></Show><div class="form-grid"><Field label="Skill 名称" required><input disabled={["preparing","generating"].includes(value().status)} value={value().name} onInput={(event) => setSkillDraft({ ...value(), name: event.currentTarget.value })} /></Field><Field label="使用场景"><input disabled={["preparing","generating"].includes(value().status)} value={value().description} onInput={(event) => setSkillDraft({ ...value(), description: event.currentTarget.value })} /></Field></div><Field label="Skill 内容（SKILL.md）" required><textarea disabled={["preparing","generating"].includes(value().status)} class="skill-editor" value={value().content} onInput={(event) => setSkillDraft({ ...value(), content: event.currentTarget.value })} /></Field><Field label="模型试运行输入"><input value={draftTestText()} onInput={(event) => setDraftTestText(event.currentTarget.value)} placeholder="填写合成测试输入；不会使用当前对话原文" /></Field><Show when={value().error}><ErrorLine message={value().error?.message}/></Show><div class="modal-actions"><Button disabled={!['ready','needs_review'].includes(value().status)} onClick={() => void testDraft("validation")}>结构检查</Button><Button disabled={value().status !== "ready"} onClick={() => void testDraft("model")}>模型试运行</Button><Button variant="primary" disabled={value().status !== "ready"} onClick={() => void saveDraft()}>保存到个人 Skill</Button></div></Modal>}</Show>
       <Show when={skillEditor()}>{(value) => <Modal title="编辑个人 Skill" text="个人 Skill 仅当前账号可见，可在能力选择弹窗中继续使用。" wide onClose={() => setSkillEditor(undefined)}><div class="form-grid"><Field label="Skill 名称" required><input value={value().name} onInput={(event) => setSkillEditor({ ...value(), name: event.currentTarget.value })} /></Field><Field label="使用场景"><input value={value().description ?? ""} onInput={(event) => setSkillEditor({ ...value(), description: event.currentTarget.value })} /></Field></div><Field label="Skill 内容（SKILL.md）" required><textarea class="skill-editor" value={value().content ?? ""} onInput={(event) => setSkillEditor({ ...value(), content: event.currentTarget.value })} /></Field><div class="modal-actions split"><Button variant="danger" onClick={() => void deletePersonalSkill()}>删除</Button><span /><Button onClick={() => void testPersonalSkill()}>测试运行</Button><Button variant="primary" onClick={() => void savePersonalSkill()}>保存</Button></div></Modal>}</Show>
       <Show when={rename()}>
-        <Modal title="重命名对话" onClose={() => setRename(undefined)}>
-          <form onSubmit={saveTitle}>
-            <Field label="对话名称">
-              <input
-                required
-                maxlength={100}
-                value={title()}
-                onInput={(event) => setTitle(event.currentTarget.value)}
-              />
-            </Field>
+        <Modal title="编辑对话名称" onClose={() => setRename(undefined)}>
+          <form class="rename-form" onSubmit={saveTitle}>
+            <input
+              aria-label="对话名称"
+              required
+              maxlength={100}
+              value={title()}
+              ref={(input) => requestAnimationFrame(() => { input.focus(); input.select() })}
+              onInput={(event) => setTitle(event.currentTarget.value)}
+            />
             <div class="modal-actions">
-              <Button type="submit" variant="primary">
-                保存名称
-              </Button>
+              <Button type="button" onClick={() => setRename(undefined)}>取消</Button>
+              <Button type="submit" variant="primary" disabled={!title().trim()}>确定</Button>
             </div>
           </form>
         </Modal>
