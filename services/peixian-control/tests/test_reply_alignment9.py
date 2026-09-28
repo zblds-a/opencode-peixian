@@ -53,7 +53,9 @@ def test_verified_increment_before_terminal_and_replay(provider,monkeypatch):
     business_runs.set_state(s,row['id'],'completed','completed')
     finalrow=business_runs.owned(s,uid,'ses_multi',row['id'])
     last=answer_delivery.read(s,finalrow)
-    assert last['final'] and last['items']==first['items']
+    assert last['final'] and [x for x in last['items'] if x['display_kind']=='source_answer']==first['items']
+    finals=[x for x in last['items'] if x['display_kind']=='final_answer']
+    assert finals and [x['sequence'] for x in finals]==list(range(len(first['items'])+1,len(last['items'])+1))
     result=trusted_results.read(s,uid,'ses_multi',row['id'])
     assert result['presentation']['clues']
     eid=result['presentation']['clues'][0]['evidence'][0]['id']

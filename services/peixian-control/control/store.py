@@ -249,6 +249,7 @@ class Store:
             yield active
             return
         db = self._connect()
+        self._transaction_local.after = []
         try:
             # Keep BEGIN inside the cleanup scope: busy can fail before yielding.
             db.execute("BEGIN IMMEDIATE")
@@ -257,13 +258,26 @@ class Store:
             db.execute("COMMIT")
         except BaseException:
             self._abort_connection(db)
+            self._transaction_local.after = []
             raise
         else:
             db.close()
         finally:
             self._transaction_local.db = None
+        callbacks, self._transaction_local.after = self._transaction_local.after, []
+        for callback in callbacks:
+            with suppress(Exception):
+                callback()
 
     atomic_request = tx
+
+    def after_commit(self, callback):
+        """Run callback once the outermost transaction commits; immediately when none is open."""
+        if getattr(self._transaction_local, "db", None) is None:
+            with suppress(Exception):
+                callback()
+            return
+        self._transaction_local.after.append(callback)
 
     def rows(self, query, args=()):
         with self.read() as db:

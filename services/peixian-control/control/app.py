@@ -453,6 +453,8 @@ def create_app(store=None):
         app.state.live_text = LiveTextCache(max_owners=config["sse_owners"], owner_ttl_seconds=config["sse_owner_ttl_seconds"],
             max_total_bytes=32 * 1024 * 1024, max_parts=1024, max_messages=1024)
         await initialize_streams(app)
+        from .live_push import install as install_live_push
+        install_live_push(asyncio.get_running_loop(), app.state.event_hubs)
         app.state.safety = SafetyCoordinator(app)
         app.state.safety.start()
         app.state.pool_task = None

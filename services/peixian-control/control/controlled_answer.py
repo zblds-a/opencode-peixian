@@ -160,7 +160,6 @@ async def observe(app, uid, envelope, stream_id):
 
 
 def messages(store, uid, sid, values):
-    from .trusted_results import checked_result
     rows = store.rows("SELECT * FROM business_runs WHERE uid=? AND session_id=?", (uid, sid))
     snapshots = {r["id"]: store.decrypt(r["request_ciphertext"]) for r in rows}
     managed = [r for r in rows if enabled(snapshots[r["id"]])]
@@ -179,17 +178,23 @@ def messages(store, uid, sid, values):
         message["parts"] = [p for p in message.get("parts", []) if p.get("type") not in ("text", "reasoning")]
         if not row or info.get("id") != row["assistant_id"]:
             continue
-        saved = store.one("SELECT * FROM run_results WHERE run_id=?", (row["id"],))
-        if saved:
-            result = checked_result(store, saved)
-            answer = result.get("answer", {})
-            if snapshots[row['id']].get('table_answer_policy'):
-                from .table_answer import markdown as table_markdown, selection
-                view = result.get('answer_view')
-                raw = snapshots[row['id']].get('model_final_text', '')
-                body = (view.get('markdown') or table_markdown(view)) if view and view.get('version') in ('person-tables-v1','person-tables-v2','person-tables-v3') else ('当前表格版本暂不受支持，请查看已有来源。' if view else ('请说明希望核对的人员或资料范围。' if selection(raw) else raw))
-            else:
-                body = markdown(answer)
+        body = final_body(store, row, snapshots[row["id"]])
+        if body is not None:
             message["parts"].append({"id": "part_answer_" + row["id"], "type": "text", "origin": "controlled_answer", "visibility": "user", "display_kind": "final_answer", "content_revision": 1, "final": True, "run_id": row["id"], "text": body})
 
     return values
+
+
+def final_body(store, row, snapshot):
+    """Platform-rendered final answer for a finalized controlled run; None before a result is saved."""
+    from .trusted_results import checked_result
+    saved = store.one("SELECT * FROM run_results WHERE run_id=?", (row["id"],))
+    if not saved:
+        return None
+    result = checked_result(store, saved)
+    if snapshot.get('table_answer_policy'):
+        from .table_answer import markdown as table_markdown, selection
+        view = result.get('answer_view')
+        raw = snapshot.get('model_final_text', '')
+        return (view.get('markdown') or table_markdown(view)) if view and view.get('version') in ('person-tables-v1','person-tables-v2','person-tables-v3') else ('当前表格版本暂不受支持，请查看已有来源。' if view else ('请说明希望核对的人员或资料范围。' if selection(raw) else raw))
+    return markdown(result.get("answer", {}))

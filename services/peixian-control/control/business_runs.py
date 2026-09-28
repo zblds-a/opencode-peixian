@@ -179,7 +179,7 @@ def public(row):
 
 def set_state(store,rid,status,phase,code=None):
     with store.tx() as db:
-        row=db.execute('SELECT status,phase,error_code,cancel_requested FROM business_runs WHERE id=?',(rid,)).fetchone()
+        row=db.execute('SELECT id,uid,session_id,assistant_id,status,phase,error_code,cancel_requested FROM business_runs WHERE id=?',(rid,)).fetchone()
         if not row or row['status'] in TERMINAL:return
         if row['cancel_requested'] and status not in ('cancelling','cancelled','completed','failed','reconciling'):return
         if (row['status'],row['phase'],row['error_code'])==(status,phase,code):return
@@ -198,6 +198,20 @@ def set_state(store,rid,status,phase,code=None):
             db.execute('UPDATE business_runs SET request_ciphertext=? WHERE id=?',(store.encrypt(frozen),rid))
             from .trusted_results import finalize
             finalize(store,db,rid)
+            if status=='completed':final_sections(store,db,rid)
+        from .live_push import after_commit,phase_notice
+        notice=phase_notice(dict(row),status,phase)
+        if notice:after_commit(store,row['uid'],notice)
+
+
+def final_sections(store,db,rid):
+    current=dict(db.execute('SELECT * FROM business_runs WHERE id=?',(rid,)).fetchone())
+    frozen=store.decrypt(current['request_ciphertext'])
+    from .controlled_answer import enabled,final_body
+    if not frozen.get('answer_delivery') or not enabled(frozen):return
+    from .answer_delivery import append_final
+    if append_final(store,current,frozen,final_body(store,current,frozen)):
+        db.execute('UPDATE business_runs SET request_ciphertext=? WHERE id=?',(store.encrypt(frozen),rid))
 
 
 def event(store,rid,key,kind,name,status,started=None,completed=None,capability=None,count=0,metadata=None):

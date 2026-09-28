@@ -15,6 +15,7 @@ def public(store,row):
     saved=store.one('SELECT 1 AS found FROM run_results WHERE run_id=?',(row['id'],)) is not None
     delivery=snapshot.get('answer_delivery') or {}
     return {**runs.public(row),'outcome':project(store,row),'clarification':None if snapshot.get('task_spec',{}).get('schema_version')=='native-tools-v1' else public_question(store,row),
+            'answered_questions':sorted(qid for qid,x in (snapshot.get('question_answers') or {}).items() if x.get('receipt')),
             'event_sequence':sequence,'status_authority':'run','status_revision':snapshot.get('public_status_revision',0),
             'answer_delivery':{'version':delivery.get('version'),'sequence':len(delivery.get('segments',[])),
                 'final':bool(delivery.get('final')), 'result_saved':saved,
@@ -59,6 +60,8 @@ def attach_results(store,uid,values,sid=None):
         values=messages(store,uid,sid,values)
         from .answer_delivery import attach as attach_delivery
         values=attach_delivery(store,uid,sid,values)
+        from .question_answers import project as project_answers
+        values=project_answers(store,uid,sid,values)
     return values
 
 
@@ -167,6 +170,27 @@ def register(app):
         forwarded=Request(request.scope,receive);forwarded.state.run_parent=rid
         endpoint=next(route.endpoint for route in app.routes if getattr(route,'name',None)=='message_send')
         return await endpoint(sid,forwarded,user)
+
+    @app.post(PREFIX+'/sessions/{sid}/runs/{rid}/answers',status_code=202)
+    async def run_answer(sid:str,rid:str,request:Request,user=Depends(normal)):
+        from . import question_answers as qa
+        s=app.state.store
+        data=body_fields(await request.json(),('kind','question_id','values','option_ids','custom_value','client_request_id','model_id'))
+        await app.state.db_work.run(require_v6,s)
+        record,receipt=await app.state.db_work.run(qa.prepare,s,user['uid'],sid,rid,data)
+        if receipt:return qa.response(record,receipt)
+        parent=await app.state.db_work.run(runs.owned,s,user['uid'],sid,rid)
+        body={'text':record['text'],'model_id':data.get('model_id') or parent['model_id'],'agent_id':'theft-assistant','client_request_id':record['client_request_id']}
+        async def receive():return {'type':'http.request','body':json.dumps(body,ensure_ascii=False).encode(),'more_body':False}
+        forwarded=Request(request.scope,receive)
+        endpoint=next(route.endpoint for route in app.routes if getattr(route,'name',None)=='message_send')
+        try:
+            receipt=await endpoint(sid,forwarded,user)
+        except BaseException:
+            await app.state.db_work.run(qa.settle,s,rid,record['question_id'],record['client_request_id'],None)
+            raise
+        await app.state.db_work.run(qa.settle,s,rid,record['question_id'],record['client_request_id'],receipt)
+        return qa.response(record,receipt)
 
     @app.get(PREFIX+'/sessions/{sid}/runs/{rid}/report')
     @blocking_endpoint(app)

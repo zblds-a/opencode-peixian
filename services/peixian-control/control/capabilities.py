@@ -83,4 +83,5 @@ def register(app):
                 'message_support':{'version':'message-support-v1','file_ids':supports,
                     'max_files':5,'file_usage':'user_reference','requires_ready':True,'allows_truncated':False,
                     'plugin_ids':'preference' if supports else 'unavailable','skill_ids':'method' if supports else 'unavailable',
-                    'manual_selection':False,'skill_dispatch':'native_tool' if native_enabled(app.state.store,user['uid']) else 'unavailable'}}
+                    'manual_selection':False,'skill_dispatch':'native_tool' if native_enabled(app.state.store,user['uid']) else 'unavailable',
+                    'question_answers':True,'live_push':'live-push-v1'}}

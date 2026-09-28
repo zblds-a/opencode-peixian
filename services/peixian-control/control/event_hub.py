@@ -1,4 +1,4 @@
-"""Single-loop, account-scoped readers. Queues contain notices, never text copies."""
+"""Single-loop, account-scoped readers. Queues carry notices plus verified answer segments, never model text."""
 import asyncio
 from contextlib import suppress
 import json
@@ -12,6 +12,7 @@ from .store import ident
 
 
 RESYNC = {"type": "resync_required"}
+COALESCE_SECONDS = .15
 
 
 class Subscriber:
@@ -85,6 +86,7 @@ class AccountHub:
         self.retention_generation = 0
         self.deadline_handle = None
         self.cleanup_task = None
+        self.coalescing = {}
 
     def invalidate_retention(self):
         self.retention_generation += 1
@@ -131,6 +133,30 @@ class AccountHub:
         return self.retention_current(generation) and not active
 
     def publish(self, notice):
+        # Repeated resource notices within one window collapse into the first plus one trailing copy.
+        # Content-bearing notices (answer.segment, run.progress, run.updated) are never delayed.
+        window = self.manager.config.get("hub_coalesce_seconds", COALESCE_SECONDS)
+        if notice.get("type") != "updated" or window <= 0:
+            self.deliver(notice)
+            return
+        key = json.dumps(notice, sort_keys=True)
+        if key in self.coalescing:
+            self.coalescing[key] = True
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self.deliver(notice)
+            return
+        self.deliver(notice)
+        self.coalescing[key] = False
+        loop.call_later(window, self.release, key, notice)
+
+    def release(self, key, notice):
+        if self.coalescing.pop(key, False) and not self.closed:
+            self.deliver(notice)
+
+    def deliver(self, notice):
         for subscriber in tuple(self.subscribers.values()):
             subscriber.put(notice)
 

@@ -295,6 +295,8 @@ def next_question(run_id, suggestions, chosen=None, context=None):
             if len(options) >= 8:
                 break
         if options:
+            for index, option in enumerate(options, 1):
+                option['id'] = f'option-{index}'
             multiple = False if raw.get('multiple') is False else True
             return {
                 'id': f'next-{run_id}',
@@ -319,6 +321,8 @@ def next_question(run_id, suggestions, chosen=None, context=None):
             break
     if not options:
         return None
+    for index, option in enumerate(options, 1):
+        option['id'] = f'option-{index}'
     return {
         'id': f'next-{run_id}',
         'header': '下一步分析',

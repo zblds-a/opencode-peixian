@@ -74,13 +74,22 @@ class ProviderState(FactsState):
         event(self.store,rid,'provider.'+module,'plugin',label,
               {'pending':'running','unknown':'failed'}.get(status,status),
               completed=now() if status!='pending' else None,capability=pid(kind))
+    def _progress(self,row,snap,key,status):
+        from .live_push import after_commit,progress_notice
+        from shared.capability_labels import display
+        kind=snap.get('native_calls',{}).get(key,{}).get('frozen',{}).get('kind',key)
+        label=display(kind,(v2.CATALOG.get(kind) or CATALOG.get(kind) or ('资料查询',))[0])
+        if status=='pending':phase,text='tool_running','正在查询「'+label+'」'
+        elif status=='completed':phase,text='tool_done','已取得「'+label+'」，正在分析'
+        else:phase,text='tool_failed','「'+label+'」未取得结果'
+        after_commit(self.store,row['uid'],progress_notice(row,phase,text))
     def reserve(self,uid,rid,revision,operation,module):
         with self.store.tx() as db:
             row,snap,state=self._owned(db,uid,rid,revision,operation);self.authorize(db,row,snap,module)
             key=snap.get('native_current_call') or module
             if key in state['modules']:return False
             state['modules'][key]={'status':'pending','started':now(),'reservation_count':1,'dispatch_attempts':0,'response_count':0,'may_have_sent':False}
-            self._save(db,rid,snap);self._event(rid,key,'pending')
+            self._save(db,rid,snap);self._event(rid,key,'pending');self._progress(row,snap,key,'pending')
             prior=db.execute('SELECT actual_plugins FROM invocations WHERE run_id=?',(rid,)).fetchone()
             if prior:db.execute('UPDATE invocations SET actual_plugins=? WHERE run_id=?',(encode(sorted(set(json.loads(prior[0]))|{pid(module)})),rid))
             return True
@@ -124,9 +133,11 @@ class ProviderState(FactsState):
                 if value.get('error_code'):call['error_code']=value['error_code']
                 if status=='completed':
                     call['public_response']=copy.deepcopy(value['public_response'])
-                    from .answer_delivery import record
-                    record(snap,row,key)
+                    from .answer_delivery import record,announce
+                    segment=record(snap,row,key)
+                    if segment:announce(self.store,row,snap,segment)
             self._save(db,rid,snap);self._event(rid,key,status)
+            self._progress(row,snap,key,status)
             return status
     def check(self,uid,rid,revision,operation,module=None):
         with self.store.tx() as db:
