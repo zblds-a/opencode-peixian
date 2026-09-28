@@ -82,6 +82,8 @@ export default function Chat() {
   const [graphAvailable, setGraphAvailable] = createSignal(false)
   const [selectedClue, setSelectedClue] = createSignal<AnalysisClue>()
   const [showClues, setShowClues] = createSignal(true)
+  const [pluginOpen, setPluginOpen] = createSignal<boolean>()
+  const [resultSeen, setResultSeen] = createSignal(false)
   const [insightTab, setInsightTab] = createSignal<"clues" | "graph">("clues")
   const [showHistory, setShowHistory] = createSignal(false)
   const [rename, setRename] = createSignal<Session>()
@@ -174,14 +176,22 @@ export default function Chat() {
   })
   const hasSent = createMemo(() => Boolean(selected() && (sentSession() === selected() || messages().some((message) => message.info.role === "user") || currentRun()?.user_message_id)))
   const hasClues = createMemo(() => Boolean(latestAnalysis()?.clues.length))
+  createEffect(() => {
+    if (loadingConversation() || resultSeen() || (!hasClues() && !graphAvailable())) return
+    setResultSeen(true)
+    setPluginOpen(false)
+    setShowClues(true)
+  })
   const rightMode = createMemo(() => {
     if (loading() || loadingConversation()) return "empty"
-    if (!hasSent()) return "plugins"
     if (selectedClue() && hasClues()) return "clue-detail"
-    if (!hasClues() && !graphAvailable()) return "empty"
-    if (!showClues()) return "collapsed"
-    if (hasClues() && graphAvailable()) return insightTab() === "graph" ? "graph" : "clues"
-    return hasClues() ? "clues" : "graph"
+    if (hasClues() || graphAvailable()) {
+      if (!showClues()) return "collapsed"
+      if (hasClues() && graphAvailable()) return insightTab() === "graph" ? "graph" : "clues"
+      return hasClues() ? "clues" : "graph"
+    }
+    if (resultSeen()) return "collapsed"
+    return (pluginOpen() ?? !hasSent()) ? "plugins" : "plugins-collapsed"
   })
   const sideMode = createMemo(() => rightMode() === "clues" || rightMode() === "graph" ? "insight" : rightMode())
   type ChatEntry = { message: Message; textParts: { part: Message["parts"][number]; id: string; afterTools: boolean }[]; toolParts: Message["parts"]; error?: Message["info"]["error"]; missingBody: boolean }
@@ -500,6 +510,8 @@ export default function Chat() {
     setRunEvidence(undefined)
     setSelectedClue(undefined)
     setShowClues(true)
+    setPluginOpen(undefined)
+    setResultSeen(false)
     setInsightTab("clues")
     setError("")
     setShowHistory(false)
@@ -537,6 +549,8 @@ export default function Chat() {
     setRunEvidence(undefined)
     setSelectedClue(undefined)
     setShowClues(true)
+    setPluginOpen(undefined)
+    setResultSeen(false)
     setInsightTab("clues")
     if (hadSession || !uncertain()) setDraft("")
     setSelectedFiles([])
@@ -978,7 +992,7 @@ export default function Chat() {
   }
   const RelatedCapabilities = () => (
     <div class="related-capabilities right-panel--plugins">
-      <div class="related-capabilities-head"><strong>相关插件</strong></div>
+      <div class="related-capabilities-head"><strong>相关插件</strong><button class="insight-icon-button" onClick={() => setPluginOpen(false)} aria-label="收起相关插件" title="收起相关插件"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 5 7 7-7 7" /></svg></button></div>
       <div class="related-capabilities-list">
         <For each={relatedPlugins()}>
           {(item) => <article class="plugin-card"><img class="plugin-card-icon" src={pluginIcon(capabilities().find((value) => value.id === item.id)?.name ?? item.name)} alt="" /><div class="plugin-card-body"><div class="plugin-card-title"><strong>{item.name}</strong><small>v{String(item.version).replace(/^v/i, "")}</small></div><p>{item.description}</p><span>插件工具</span></div><button onClick={() => toggleCapability(item)}>使用</button></article>}
@@ -1286,7 +1300,8 @@ export default function Chat() {
       </section>
       <aside class={"insight-sidebar rail-" + sideMode() + " right-panel--" + rightMode()} aria-label="研判侧栏">
           <Show when={sideMode() === "plugins"}><RelatedCapabilities /></Show>
-          <Show when={sideMode() === "collapsed"}><button class="insight-icon-button insight-reopen" onClick={() => setShowClues(true)} aria-label="展开研判侧栏" title="展开研判侧栏"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 5-7 7 7 7" /></svg></button></Show>
+          <Show when={sideMode() === "plugins-collapsed"}><button class="insight-icon-button insight-reopen" onClick={() => setPluginOpen(true)} aria-label="展开相关插件" title="展开相关插件"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 5-7 7 7 7" /></svg></button></Show>
+          <Show when={sideMode() === "collapsed"}><button class="insight-icon-button insight-reopen" onClick={() => setShowClues(true)} disabled={!hasClues() && !graphAvailable()} aria-label="展开研判侧栏" title="展开研判侧栏"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 5-7 7 7 7" /></svg></button></Show>
           <Show when={sideMode() === "insight"}>
             <div class="insight-single-head"><strong>{rightMode() === "clues" ? "智能发现线索" : "实体关系图谱"}</strong><div><Show when={hasClues() && graphAvailable()}><button class="insight-icon-button" aria-label="切换侧栏内容" title="切换侧栏内容" onClick={() => setInsightTab(rightMode() === "clues" ? "graph" : "clues")}><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h15l-4-4M20 16H5l4 4" /></svg></button></Show><button class="insight-icon-button" aria-label="收起侧栏" title="收起侧栏" onClick={() => setShowClues(false)}><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 5 7 7-7 7" /></svg></button></div></div>
             <Show when={rightMode() === "clues"} fallback={<RealEntityGraph sessionID={selected()} runID={graphRunID()} runStatus={currentRun()?.id === graphRunID() ? currentRun()?.status : undefined} />}>
