@@ -1,0 +1,41 @@
+.entity-graph-canvas { background: radial-gradient(circle at 50% 42%, #f8fbff, #eff5fc); }
+.entity-graph-canvas .graph-entity-card {
+  position: absolute;
+  z-index: 5;
+  display: grid;
+  gap: 5px;
+  width: min(250px, calc(100% - 16px));
+  max-height: min(270px, calc(100% - 16px));
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid #b9d7f2;
+  border-radius: 10px;
+  color: #345979;
+  background: #fff;
+  box-shadow: 0 9px 28px #1b4d7930;
+  pointer-events: none;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.graph-entity-card strong { margin-bottom: 2px; color: #173f6c; font-size: 14px; }
+.graph-entity-card span { font-size: 12px; }
+.entity-graph-panel .graph-path { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.entity-graph-panel .graph-path-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.entity-graph-panel .graph-path-fields label { display: grid; gap: 5px; min-width: 0; }
+.entity-graph-panel .graph-path-fields select { width: 100%; max-width: none; }
+.entity-graph-panel .graph-path > button { width: 100%; }
+.graph-preview-page { min-height: 100vh; padding: clamp(20px, 4vw, 52px); background: #f4f8fd; }
+.graph-preview-page > header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; max-width: 1200px; margin: 0 auto 20px; color: #244b75; }
+.graph-preview-page > header small { color: #547da6; }
+.graph-preview-page > header h1 { margin: 5px 0 0; font-size: 27px; }
+.graph-preview-page > header p { margin: 0; font-size: 13px; }
+.graph-preview-page > .entity-graph-panel { max-width: 1200px; margin: auto; padding: 20px; border: 1px solid #d7e6f5; border-radius: 14px; background: #fff; box-shadow: 0 12px 34px #214b7210; }
+.graph-preview-page .entity-graph-canvas.large { height: min(65vh, 720px); min-height: 390px; }
+.graph-preview-page .graph-detail { max-width: 100%; }
+.graph-preview-page .graph-path { margin-top: 18px; }
+.graph-preview-not-found { display: grid; place-content: center; min-height: 100vh; color: #28496b; text-align: center; }
+.graph-preview-not-found h1 { margin: 0; font-size: 64px; }
+@media (max-width: 620px) {
+  .entity-graph-panel .graph-path-fields { grid-template-columns: 1fr; }
+  .graph-preview-page > .entity-graph-panel { padding: 12px; }
+}

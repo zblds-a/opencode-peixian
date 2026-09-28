@@ -43,13 +43,17 @@ export default function RealEntityGraph(props: { sessionID?: string; runID?: str
   }
   onCleanup(() => pending.forEach((controller) => controller.abort()))
   const base = () => "/sessions/" + encodeURIComponent(sessionID() ?? "") + "/runs/" + encodeURIComponent(runID() ?? "") + "/graphs"
-  const nodes = () => (page()?.nodes ?? []).filter((node) => filter() === "all" || node.type === filter())
-  const edges = () => (page()?.edges ?? []).filter((edge) => nodes().some((node) => node.id === edge.source) && nodes().some((node) => node.id === edge.target))
-  const canvasNodes = () => nodes().map((node) => ({
+  const nodes = createMemo(() => (page()?.nodes ?? []).filter((node) => filter() === "all" || node.type === filter()))
+  const edges = createMemo(() => {
+    const ids = new Set(nodes().map((node) => node.id))
+    return (page()?.edges ?? []).filter((edge) => ids.has(edge.source) && ids.has(edge.target))
+  })
+  const canvasNodes = createMemo(() => nodes().map((node) => ({
     id: node.id, label: node.label,
     type: node.type,
-    properties: {},
-  }))
+    properties: node.properties,
+    evidence_refs: node.evidence_refs,
+  })))
   const graphBase = () => base() + "/" + encodeURIComponent(entry()?.id ?? "")
   const resetRevision = () => {
     setPage(undefined)
@@ -66,7 +70,6 @@ export default function RealEntityGraph(props: { sessionID?: string; runID?: str
   }
   createEffect(() => {
     const sid = sessionID(), rid = runID(), version = epoch()
-    props.runStatus
     refresh()
     setEntry(undefined)
     setPage(undefined)
