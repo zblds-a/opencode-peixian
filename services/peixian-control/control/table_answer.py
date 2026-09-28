@@ -125,8 +125,9 @@ INSTRUCTION = """
 格式：{"format":"person-tables-v3","mode":"data","source_refs":["已取得的记录编号"],"scoring":{"requested":true},"suggestions":[]}。
 scoring仅当用户明确要求综合研判、嫌疑评估、评分或排序，且处于由人到案或由案到人工作流时才声明requested=true；其余场景省略该字段。评分与排名由平台按确定性规则计算并在终稿表格中呈现，你不得自行给出、修改分数或排序。
 source_refs只能引用当前任务已取得资料；平台逐字段核对并生成事实表，不把自由文字当作已核验结论。
-suggestions默认留空。已取得资料能回答当前问题时不提建议；只有存在影响结论的具体缺口，且补上它需要新的查询或需要用户确认时间、半径、人员等条件时才提出，一般一项，最多两项。action只用query或clarify_scope：query须提供当前授权的kind，缺项放fields；clarify_scope写明要确认的条件。具体建议用text、reason、conditions、reply，reason写清对应哪条结论或缺口。不要把「查看来源详情」「查看已有记录」「继续核实」「持续关注」这类不产生新资料的事项写成建议。不得自动执行建议。
-不要求查完全部接口，未查询不是失败。失败、零条和未知分别说明；不输出个人犯罪倾向，不下确定性罪责结论，评分相关表述用「可能性研判」措辞。
+suggestions默认留空。已取得资料能回答当前问题时不提建议；只有存在影响结论的具体缺口，且补上它需要新的查询或需要用户确认时间、半径、人员等条件时才提出，一般一项，最多两项。action只用query或clarify_scope：条件已齐、可以直接查询时用query，须提供当前授权的kind，reply写成民警口吻的查询请求（如「查询此人2026-09-01至2026-09-15的夜间活动记录」）；还缺位置、半径、时间、人员等条件时用clarify_scope，缺项放fields，reply写成带空位、民警补全后即可发送的句子（如「核对案发地周边抓拍：位置＿＿，半径＿＿米，时间＿＿至＿＿」），不要写成「请提供……」这类向民警索要条件的话。具体建议用text、reason、conditions、reply，reason写清对应哪条结论或缺口。不要把「查看来源详情」「查看已有记录」「继续核实」「持续关注」这类不产生新资料的事项写成建议。不得自动执行建议。
+取得跨小区、夜间活动或人员轨迹记录时，在activity_summaries中按资料类型各写一条概括，格式：{"kind":"community","text":"……","source_refs":["记录编号"]}，kind为community、night或tracks。先写事实：跨小区写清每段时间范围、流经的小区名称和数量（如「9月3日07:10至18:40跨A、B、C、D共4个小区流动，约11.5小时」），多段按时间顺序最多列5段，其余写合计段数；夜间写清出现日期或次数、集中时段和主要地点；轨迹写清时段和依次经过的主要地点。时间、小区和地点用来源原文。再写研判：可结合时段、频次、路线和案发时空推测活动目的或行为特点（如踩点、流窜作案、规律性往返），并给出嫌疑研判；推测与研判另起一句，以「研判：」开头，用「可能」「疑似」等措辞，不写成确定性罪责结论。没有这三类记录时省略该字段。
+不要求查完全部接口，未查询不是失败。失败、零条和未知分别说明；可以结合资料对人员的活动目的、行为特点和嫌疑作出研判。
 问候、能力说明和缺项追问使用自然中文，不输出JSON；需要补充时用question。取消补充后整理已有结果。
 """
 
@@ -271,6 +272,32 @@ def model_case_checks(chosen, record_ids):
     }
 
 
+ACTIVITY_KINDS = {'community': '跨小区流动', 'night': '夜间活动', 'tracks': '人员轨迹'}
+
+
+def model_activity_summaries(chosen, records, aliases):
+    """Model-written activity summaries, kept only when bound to records of the same kind."""
+    raw = chosen.get('activity_summaries') if isinstance(chosen, dict) else None
+    if not isinstance(raw, list):
+        return []
+    modules = {r['record_id']: r['module'] for r in records}
+    out, seen = [], set()
+    for item in raw[:6]:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get('kind')
+        text = _clip(item.get('text'), 600)
+        if kind not in ACTIVITY_KINDS or kind in seen or not text:
+            continue
+        refs = item.get('source_refs') if isinstance(item.get('source_refs'), list) else []
+        ids = list(dict.fromkeys(i for ref in refs if isinstance(ref, str) for i in aliases.get(ref, [])))
+        if not ids or any(modules.get(i) != kind for i in ids):
+            continue
+        seen.add(kind)
+        out.append({'kind': kind, 'label': ACTIVITY_KINDS[kind], 'text': text, 'source_ids': ids})
+    return out
+
+
 CARD_ACTIONS = ('query', 'clarify_scope')
 CARD_MAX_OPTIONS = 2
 
@@ -321,6 +348,8 @@ def next_question(run_id, suggestions, chosen=None, context=None):
         action = item.get('action')
         if not reply or action not in CARD_ACTIONS:
             continue
+        if action == 'query' and item.get('fields'):
+            action = 'clarify_scope'
         options.append({
             'label': reply[:200],
             'description': item.get('reason') or '',
@@ -558,6 +587,7 @@ def build(result, snapshot):
         'selection_status': 'accepted' if chosen else 'fallback',
         'source_runs': sorted({r['source_run_id'] for r in records}),
         'scoring': scoring, 'ranking': ranking, 'case_checks': case_view,
+        'activity_summaries': model_activity_summaries(chosen, records, aliases),
         'coverage': coverage,
         'track_gaps': track_gaps,
         'direction': direction,
@@ -588,6 +618,15 @@ def markdown(view):
     if view.get('conclusions'):
         sections += ['### 研判摘要' if revised else '### 基本结论',
             table(['结论', '依据'], [(x['text'], '、'.join(x['source_ids']) or '本轮已确认响应统计') for x in view['conclusions']])]
+    if view.get('activity_summaries'):
+        if not view.get('conclusions'):
+            sections += ['### 研判摘要' if revised else '### 基本结论']
+        lines = []
+        for x in view['activity_summaries']:
+            ids = x['source_ids']
+            refs = '、'.join(ids[:3]) + (f' 等 {len(ids)} 条' if len(ids) > 3 else '')
+            lines.append(f"- {x['label']}：{escape(x['text'])}（来源：{escape(refs)}）")
+        sections += ['**活动概括与研判**（模型根据来源整理）\n\n' + '\n'.join(lines)]
 
     def evidence(rows):
         return table(['资料类型', '时间／范围', '记录摘要', '来源'], [(x['label'], x['time'], x['text'], '、'.join(x['source_ids'])) for x in rows])

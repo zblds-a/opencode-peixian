@@ -30,3 +30,13 @@ def test_legacy_projection_maps_wifi_to_nonmotor():
 def test_wifi_desc_without_code_two():
     fields={'trackType':99,'trackTypeDesc':'wif探针'}
     assert track_type_label(fields)=='非机动车'
+
+
+def test_community_sentence_lists_names_only_for_new_version():
+    fields = {'timeRangeStart': '2026-09-03 07:10:00', 'timeRangeEnd': '2026-09-03 18:40:00',
+              'crossHours': 11.5, 'communityCount': 4, 'communityList': '甲苑、乙苑、丙苑、丁苑'}
+    text = sentence('community', fields, SOURCE_SENTENCE_VERSION)
+    assert '约 11.5 小时' in text and '跨 4 个小区：甲苑、乙苑、丙苑、丁苑' in text
+    old = sentence('community', fields, 'provider-source-text-v2')
+    assert old.startswith('来源时间范围') and '甲苑' not in old
+    assert '轨迹类型' in sentence('tracks', {'trackType': 0}, 'provider-source-text-v2')

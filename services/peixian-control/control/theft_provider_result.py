@@ -6,7 +6,8 @@ from .backend_contract import iso
 from shared.theft_provider import CATALOG,LIMITATIONS
 from shared import theft_provider_v2 as v2
 
-SOURCE_SENTENCE_VERSION='provider-source-text-v2'
+TRACK_SENTENCE_VERSIONS=('provider-source-text-v2','provider-source-text-v3')
+SOURCE_SENTENCE_VERSION='provider-source-text-v3'
 _WIFI_DESC=re.compile(r'(?i)wi[- ]?fi|wif.?探针')
 
 
@@ -50,7 +51,7 @@ def profile_sentence(f):
 def sentence(kind,f,version=None):
     if kind=='tracks':
         label=track_type_label(f)
-        if version==SOURCE_SENTENCE_VERSION:
+        if version in TRACK_SENTENCE_VERSIONS:
             code=f.get('trackType')
             code=str(code) if type(code) is int else '未提供'
             return f"观测时间 {f.get('captureTime','未提供')}；设备 {f.get('deviceId','未提供')}；来源地点 {f.get('deviceName','未提供')}；轨迹类型 {label}；来源类型代码 {code}。"
@@ -64,6 +65,13 @@ def sentence(kind,f,version=None):
         count=f.get('warningCount','未提供')
         return f"{f.get('personName','对象未提供')}（{f.get('idCard','未提供')}）：来源预警类型 {types}；预警类型数量 {count}；最新触发时间 {f.get('latestTime','未提供')}。"
     if kind=='night':return f"来源夜间观测时间 {f.get('captureTime','未提供')}；来源地点 {f.get('location','未提供')}。"
+    if kind=='community' and version==SOURCE_SENTENCE_VERSION:
+        hours=f.get('crossHours')
+        names=f.get('communityList')
+        names='、'.join(str(x) for x in names) if isinstance(names,list) else names
+        span=f"（约 {hours} 小时）" if isinstance(hours,(int,float)) and not isinstance(hours,bool) else ''
+        desc=f"；来源描述 {f['trajectoryDesc']}" if f.get('trajectoryDesc') else ''
+        return f"{f.get('timeRangeStart','未提供')} 至 {f.get('timeRangeEnd','未提供')}{span}跨 {f.get('communityCount','未提供')} 个小区：{names or '小区名称未提供'}{desc}。"
     if kind=='community':return f"来源时间范围 {f.get('timeRangeStart','未提供')} 至 {f.get('timeRangeEnd','未提供')}；小区数量 {f.get('communityCount','未提供')}；来源描述 {f.get('trajectoryDesc','未提供')}。"
     if kind=='profile':return profile_sentence(f)
     return f"来源预警类型 {f.get('warningType','未提供')}；来源近7天规则触发 {f.get('count','未提供')} 次。"

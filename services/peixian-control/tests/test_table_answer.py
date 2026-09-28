@@ -516,3 +516,51 @@ def test_model_next_question_filters_actions():
 def test_prompts_default_to_no_suggestions():
     assert '"suggestions":[]' in t.INSTRUCTION
     assert 'inspect_sources' not in t.INSTRUCTION
+
+
+def community_fixture():
+    result, snap = fixture()
+    result['records'].append({'record_id': 'run:call:snap-c:1', 'source_run_id': 'run', 'call_id': 'call',
+        'module': 'community', 'snapshot_id': 'snap-c',
+        'fields': {'timeRangeStart': '2026-09-03 07:10:00', 'timeRangeEnd': '2026-09-03 18:40:00',
+                   'crossHours': 11.5, 'communityCount': 4, 'communityList': '甲苑、乙苑、丙苑、丁苑'}})
+    return result, snap
+
+
+def test_query_with_missing_fields_becomes_clarify_on_card():
+    q = t.next_question('r', [{'reply': '核对案发地周边抓拍：位置＿＿', 'reason': 'x', 'action': 'query',
+                               'kind': 'captures', 'fields': ['lon', 'lat']}])
+    assert [(o['action'], o['send']) for o in q['options']] == [('clarify_scope', False)]
+
+
+def test_activity_summary_bound_to_same_kind_is_rendered():
+    result, snap = community_fixture()
+    choose(snap, activity_summaries=[
+        {'kind': 'community', 'text': '9月3日07:10至18:40跨甲苑、乙苑、丙苑、丁苑共4个小区流动。研判：疑似踩点。',
+         'source_refs': ['run:call:snap-c:1']},
+        {'kind': 'night', 'text': '引用错误类型', 'source_refs': ['run:call:snap-c:1']},
+        {'kind': 'tracks', 'text': '引用不存在的记录', 'source_refs': ['missing']},
+    ])
+    view = t.build(result, snap)
+    assert [x['kind'] for x in view['activity_summaries']] == ['community']
+    output = t.markdown(view)
+    assert '**活动概括与研判**' in output and '研判：疑似踩点' in output
+    assert output.index('活动概括与研判') < output.index('判断依据')
+
+
+def test_no_activity_summary_without_matching_records():
+    result, snap = fixture()
+    choose(snap, activity_summaries=[{'kind': 'community', 'text': '跨小区', 'source_refs': ['run:call:snapshot:1']}])
+    view = t.build(result, snap)
+    assert view['activity_summaries'] == []
+    assert '活动概括' not in t.markdown(view)
+
+
+def test_judgement_limits_removed_from_prompts():
+    from control.agents.runtime import POLICY
+    from control import native_tool_scope as scope
+    rules = scope.model_context({'scope_version': 1, 'confirmed': {}, 'source_refs': []})
+    for text in (t.INSTRUCTION, POLICY, rules):
+        for phrase in ('犯罪倾向', '罪责结论，评分', '作案人认定', '犯罪结论'):
+            assert phrase not in text, phrase
+    assert 'activity_summaries' in t.INSTRUCTION

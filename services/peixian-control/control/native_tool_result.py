@@ -3,7 +3,7 @@ import copy
 
 from .backend_contract import iso
 from .trusted_results import claim
-from .theft_provider_result import sentence, SOURCE_SENTENCE_VERSION
+from .theft_provider_result import sentence, SOURCE_SENTENCE_VERSION, TRACK_SENTENCE_VERSIONS
 from shared import theft_provider_v2 as adapter
 
 VERSION='native-provider-result-v1'
@@ -45,7 +45,7 @@ def project(row,snapshot):
             fields=copy.deepcopy(entry['fields'])
             records.append({'record_id':rid,'module':kind,'source_run_id':row['id'],
                 'call_id':call_id,'snapshot_id':public['response_snapshot_id'],'fields':fields, **({'subject_ref':subject} if subject else {})})
-            claims.append(claim(row,identity,'fact','provider.'+kind+('.record.v2' if kind=='tracks' and sentence_version==SOURCE_SENTENCE_VERSION else '.record.v1'),
+            claims.append(claim(row,identity,'fact','provider.'+kind+('.record.v2' if (kind=='tracks' and sentence_version in TRACK_SENTENCE_VERSIONS) or (kind=='community' and sentence_version==SOURCE_SENTENCE_VERSION) else '.record.v1'),
                 sentence(kind,fields,sentence_version),{'record_id':rid,'fields':fields,
                 'snapshot_id':public['response_snapshot_id'], **({'subject_ref':subject} if subject else {})},[rid]))
         count=public.get('returned_count')

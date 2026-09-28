@@ -23,7 +23,7 @@ query 返回 kind 和 slot_ids（字段名到输入槽编号），不直接生�
 clarify 返回 missing（缺少的字段名数组）。explain/stop 不取数。
 结构严格为 {"action":"...","kind":null或接口标识,"slot_ids":{},"missing":[],"skill_id":null或已生效官方方法id}。
 警情空间查询只有坐标半径分页，不能满足近期或仅盗窃等过滤；遇到这些限制必须澄清，不能丢弃条件。
-不输出个人嫌疑评分、排名或犯罪结论。只用简体中文字段说明。"""
+只用简体中文字段说明。"""
 FIELDS={'lon','lat','radius_m','start','end','page','page_size','person_identity'}
 
 
