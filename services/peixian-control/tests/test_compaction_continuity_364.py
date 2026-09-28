@@ -135,3 +135,5 @@ def test_profile_sentence_renders_person_and_captures():
     lines = text.split('\n')[1:]
     assert lines == ['- 2026-09-18 23:42:18，火车站广场（DEV-07）', '- 2026-09-18 21:37:01，龙城小区南门（DEV-03）；标签 夜间']
     assert '来源未返回最近抓拍' in sentence('profile', {'person': {'name': '王芳'}, 'captures': []})
+    from control.table_answer import escape
+    assert escape(text).endswith('最近 2 条抓拍：2026-09-18 23:42:18，火车站广场（DEV-07）；2026-09-18 21:37:01，龙城小区南门（DEV-03）；标签 夜间')

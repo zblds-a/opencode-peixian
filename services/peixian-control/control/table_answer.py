@@ -551,7 +551,8 @@ def build(result, snapshot):
 
 
 def escape(value):
-    text = html.escape(str(value), quote=True).replace('\r', ' ').replace('\n', ' ')
+    text = str(value).replace('：\n- ', '：').replace('\n- ', '；')
+    text = html.escape(text, quote=True).replace('\r', ' ').replace('\n', ' ')
     for char in ('\\', '`', '*', '_', '[', ']', '|', '#'):
         text = text.replace(char, '\\' + char)
     return text
