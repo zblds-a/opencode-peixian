@@ -51,6 +51,8 @@ def record(snapshot, row, call_id):
     gaps = [s for s in public.get('segments') or [] if isinstance(s, dict) and s.get('status') != 'ok']
     if gaps:
         text += '\n\n未核验时段：' + '；'.join(html.escape(str(s.get('start')) + ' 至 ' + str(s.get('end'))) for s in gaps) + '。'
+    from .display_identity import mapping, reveal
+    text = reveal(text, mapping(snapshot))
     sequence = len(delivery['segments']) + 1
     delivery['segments'].append({'sequence': sequence, 'content_revision': 1,
         'part_id': 'part_delivery_' + row['id'] + '_' + str(sequence), 'operation': 'append',

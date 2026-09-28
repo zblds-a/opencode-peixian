@@ -8,9 +8,9 @@ from datetime import datetime, timedelta, timezone
 VERSION = 'theft-score-v1'
 MAX_POINTS = {'d1': 25, 'd2': 20, 'd3': 15, 'd4': 20, 'd5': 12, 'd6': 8}
 LABELS = {
-    'd1': 'D1 抓拍频次',
+    'd1': 'D1 案发地周边抓拍频次',
     'd2': 'D2 夜间活动',
-    'd3': 'D3 跨区域流动',
+    'd3': 'D3 跨区域流动（来源规则）',
     'd4': 'D4 预警关联',
     'd5': 'D5 时空耦合度',
     'd6': 'D6 行为标签',
@@ -122,7 +122,7 @@ def score_d1(records, queried=None):
     rows = _module_records(records, 'captures')
     if not rows:
         if _queried(queried, 'captures'):
-            return _dim('d1', 'available', 0, '抓拍次数=0；' + EMPTY_EVIDENCE)
+            return _dim('d1', 'available', 0, '周边抓拍统计中无此人（该来源只统计限定人群，不等于没有抓拍）')
         return _dim('d1', 'unavailable', evidence='未取得周边抓拍汇总')
     total = 0
     sources = []
@@ -141,7 +141,7 @@ def score_d2(records, queried=None):
     rows = _module_records(records, 'night')
     if not rows:
         if _queried(queried, 'night'):
-            return _dim('d2', 'available', 0, '夜间记录数=0；' + EMPTY_EVIDENCE, limitation='来源夜间规则为23:00至次日05:00')
+            return _dim('d2', 'available', 0, '23:00至次日05:00夜间规则下 0 条（不代表没有夜间活动）', limitation='来源夜间规则为23:00至次日05:00')
         return _dim('d2', 'unavailable', evidence='未取得夜间来源记录')
     sources = [r['record_id'] for r in rows]
     n = len(rows)
@@ -153,7 +153,7 @@ def score_d3(records, queried=None):
     rows = _module_records(records, 'community')
     if not rows:
         if _queried(queried, 'community'):
-            return _dim('d3', 'available', 0, '跨小区数=0；' + EMPTY_EVIDENCE, limitation='来源规则为7至19小时窗口跨4个及以上小区')
+            return _dim('d3', 'available', 0, '无符合「7至19小时内跨4个及以上小区」规则的记录', limitation='来源规则为7至19小时窗口跨4个及以上小区')
         return _dim('d3', 'unavailable', evidence='未取得跨小区来源记录')
     best = 0
     sources = []
@@ -166,14 +166,14 @@ def score_d3(records, queried=None):
         sources = [r['record_id'] for r in rows]
         best = 0
     score = 0 if best < 4 else _bucket(best, ((4, 6, 8), (7, 10, 12), (11, 10**9, 15)))
-    return _dim('d3', 'available', score, f'跨小区数={best}', sources, '来源规则为7至19小时窗口跨4个及以上小区')
+    return _dim('d3', 'available', score, f'单个时段最多跨 {best} 个小区', sources, '来源规则为7至19小时窗口跨4个及以上小区')
 
 
 def score_d4(records, queried=None):
     rows = _module_records(records, 'warning_detail') or _module_records(records, 'warnings')
     if not rows:
         if _queried(queried, 'warning_detail', 'warnings'):
-            return _dim('d4', 'available', 0, '预警类型数量=0；' + EMPTY_EVIDENCE)
+            return _dim('d4', 'available', 0, '预警概况中预警类型数量为 0')
         return _dim('d4', 'unavailable', evidence='未取得预警概况')
     total = 0
     sources = []
@@ -309,8 +309,8 @@ def score_d6(records, queried=None):
     captures = _module_records(records, 'captures')
     profiles = _module_records(records, 'profile')
     if not captures and not profiles:
-        if _queried(queried, 'captures', 'profile'):
-            return _dim('d6', 'available', 0, '无标签；' + EMPTY_EVIDENCE)
+        if _queried(queried, 'profile'):
+            return _dim('d6', 'available', 0, '档案最近抓拍中无行为标签')
         return _dim('d6', 'unavailable', evidence='未取得抓拍标签或档案')
     tags = []
     sources = []
@@ -383,12 +383,10 @@ def _plain_reason(dim):
             return f'有{n}条夜间活动记录'
         except (ValueError, IndexError):
             pass
-    if dim.get('id') == 'd3' and '跨小区数=' in evidence:
-        try:
-            n = int(evidence.split('跨小区数=', 1)[1].split('；', 1)[0])
-            return f'跨{n}个小区活动'
-        except (ValueError, IndexError):
-            pass
+    if dim.get('id') == 'd3':
+        found = re.search(r'单个时段最多跨 (\d+) 个小区', evidence)
+        if found:
+            return f'跨{found.group(1)}个小区活动'
     if dim.get('id') == 'd4' and '预警类型数量=' in evidence:
         try:
             n = int(evidence.split('预警类型数量=', 1)[1].split('；', 1)[0])
@@ -400,7 +398,7 @@ def _plain_reason(dim):
             return '标签与侵财类表述高度关联'
         if '部分关联' in evidence:
             return '标签与警情类别部分关联'
-        if '无明显关联' in evidence or '无标签' in evidence:
+        if '无明显关联' in evidence or '无标签' in evidence or '无行为标签' in evidence:
             return '标签无明显侵财关联'
     if evidence:
         short = evidence.split('；', 1)[0]

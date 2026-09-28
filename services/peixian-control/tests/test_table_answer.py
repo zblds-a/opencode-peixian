@@ -614,6 +614,102 @@ def test_prompt_requires_json_every_data_round():
     from pathlib import Path
     assert '每次答复（包括追问、对比、复核' in t.INSTRUCTION
     assert '只有本轮完全没有调用资料工具时' in t.INSTRUCTION
+    assert '查询条件不全时用question工具询问缺项' in t.INSTRUCTION
     assert '资料终稿只输出' not in t.INSTRUCTION
     prompt = (Path(t.__file__).parent / 'agents/profiles/theft_prompt.md').read_text(encoding='utf-8')
     assert '由你填进JSON对应字段，平台负责排版' in prompt and '不询问是否输出终稿' in prompt
+
+
+
+def _scored(records, queried):
+    from control import theft_scoring
+    return {d['id']: d for d in theft_scoring.compute(records, queried=queried)['dimensions']}
+
+
+def test_zero_evidence_states_source_rule():
+    dims = _scored([], {'captures', 'night', 'community', 'warning_detail', 'profile'})
+    assert dims['d1']['label'] == 'D1 案发地周边抓拍频次' and '周边抓拍统计中无此人' in dims['d1']['evidence']
+    assert '23:00至次日05:00夜间规则下 0 条' in dims['d2']['evidence']
+    assert '7至19小时内跨4个及以上小区' in dims['d3']['evidence'] and dims['d3']['label'] == 'D3 跨区域流动（来源规则）'
+    assert dims['d4']['evidence'] == '预警概况中预警类型数量为 0'
+    assert dims['d6']['evidence'] == '档案最近抓拍中无行为标签'
+    assert all('已查询，无记录' not in d['evidence'] for k, d in dims.items() if k != 'd5')
+
+
+def test_d6_needs_profile_query_not_location_captures():
+    dims = _scored([], {'captures'})
+    assert dims['d6']['status'] == 'unavailable'
+
+
+def test_d3_nonzero_wording_and_reason():
+    from control import theft_scoring
+    rec = {'record_id': 'c1', 'module': 'community', 'fields': {'communityCount': 7}}
+    dims = _scored([rec], {'community'})
+    assert dims['d3']['evidence'] == '单个时段最多跨 7 个小区'
+    assert theft_scoring._plain_reason(dims['d3']) == '跨7个小区活动'
+
+
+def _person_records():
+    profile = {'record_id': 'p1', 'module': 'profile', 'fields': {'person': {'sfz': 'person-one'},
+        'warning': {'warningCount': 3}, 'captures': [{'captureTime': '2026-09-01 10:00:00'}, {'captureTime': '2026-09-02 10:00:00'}]}}
+    tracks = [{'record_id': f't{i}', 'module': 'tracks', 'fields': {'captureTime': when, 'deviceName': place}}
+              for i, (when, place) in enumerate([('2026-09-01 01:30:00', 'A'), ('2026-09-01 04:10:00', 'B'),
+                                                 ('2026-09-01 12:00:00', 'C'), ('2026-09-01 15:00:00', 'D')])]
+    logs = [{'record_id': 'w1', 'module': 'warning_logs', 'fields': {'warningType': '夜间游荡预警', 'count': 2}}]
+    return [profile] + tracks + logs
+
+
+def test_cross_notes_explain_contradicting_zeros():
+    from control import theft_scoring
+    records = _person_records()
+    queried = {'captures', 'night', 'community', 'warning_detail', 'profile', 'tracks'}
+    view = t.cross_notes(records, theft_scoring.compute(records, queried=queried))
+    dims = {d['id']: d['evidence'] for d in view['dimensions']}
+    assert '档案最近抓拍 2 条，不在周边统计范围内，不计分' in dims['d1']
+    assert '轨迹中有 2 个 23:00 至 05:00 的点位' in dims['d2']
+    assert '轨迹经过 4 个不同地点' in dims['d3']
+    assert '档案来源预警类型 3 个／近七天预警明细触发 2 次，未计入 D4' in dims['d4']
+
+
+def test_cross_notes_absent_without_other_sources():
+    from control import theft_scoring
+    view = t.cross_notes([], theft_scoring.compute([], queried={'captures', 'night', 'community', 'warning_detail', 'profile'}))
+    assert all('；' not in d['evidence'] for d in view['dimensions'] if d['id'] != 'd5')
+
+
+def test_cross_notes_skip_scored_dimensions():
+    from control import theft_scoring
+    records = _person_records() + [{'record_id': 'n1', 'module': 'night', 'fields': {'captureTime': '2026-09-01 01:30:00'}}]
+    view = t.cross_notes(records, theft_scoring.compute(records, queried={'night'}))
+    d2 = next(d for d in view['dimensions'] if d['id'] == 'd2')
+    assert d2['score'] > 0 and '轨迹中有' not in d2['evidence']
+
+
+def test_oversized_history_is_not_counted_as_queried(monkeypatch):
+    from control import trusted_results
+    result, snap = fixture()
+    result['records'][0]['fields']['pad'] = 'x' * 130000
+    snap['native_calls']['call']['frozen']['kind'] = 'profile'
+    snap['native_calls']['call']['frozen']['identities'] = {'person-' + 'a' * 32: '320322198803159911'}
+    class Store:
+        worker_key = 'test-key'
+        def rows(self, sql, args):
+            return [{'request_ciphertext': snap, 'result': result}]
+        def decrypt(self, value): return value
+    monkeypatch.setattr(t, 'person', lambda *args: 'person-one')
+    monkeypatch.setattr(trusted_results, 'checked_result', lambda store, row: row['result'])
+    target = {'native_tool_context': {'task_id': 'task', 'confirmed': {}}}; payload = {}
+    t.freeze(Store(), 'account', 'session', target, payload)
+    policy = target['table_answer_policy']
+    assert policy['history'] == [] and policy['omitted_runs'] == 1
+    assert policy['omitted_kinds'] == ['profile'] and policy['queried'] == []
+    assert policy['display_identities'] == {'person-' + 'a' * 32: '320322198803159911'}
+    assert '320322198803159911' not in payload['system']
+    cur, cur_snap = fixture()
+    cur_snap['table_answer_policy'].update(omitted_runs=1, omitted_kinds=['profile'])
+    assert any('未纳入本轮整理和评分：档案与最近抓拍' in m for m in t.build(cur, cur_snap)['missing'])
+
+
+def test_basic_identity_row_label():
+    result, snap = fixture()
+    assert any(x['label'] == '身份证号' for x in t.build(result, snap)['basic'])

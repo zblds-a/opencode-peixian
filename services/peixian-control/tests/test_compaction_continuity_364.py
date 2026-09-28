@@ -131,7 +131,7 @@ def test_profile_sentence_renders_person_and_captures():
                            {'captureTime': '2026-09-18 23:42:18', 'deviceId': 'DEV-07', 'deviceName': '火车站广场'}],
               'warning': {'warningCount': 3}}
     text = sentence('profile', fields)
-    assert text.startswith('王芳（person-abc）；性别 女；年龄 47 岁；来源预警 3 条。最近 2 条抓拍：')
+    assert text.startswith('王芳（person-abc）；性别 女；年龄 47 岁；来源预警类型 3 个。最近 2 条抓拍：')
     lines = text.split('\n')[1:]
     assert lines == ['- 2026-09-18 23:42:18，火车站广场（DEV-07）', '- 2026-09-18 21:37:01，龙城小区南门（DEV-03）；标签 夜间']
     assert '来源未返回最近抓拍' in sentence('profile', {'person': {'name': '王芳'}, 'captures': []})

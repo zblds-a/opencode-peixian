@@ -36,17 +36,20 @@ def freeze(store, uid, sid, snapshot, payload):
     context = snapshot['native_tool_context']
     subject = person(store, uid, sid, context)
     candidates = _candidate_refs(context)
+    from .display_identity import collect as collect_identities
     history = []
     queried = []
     omitted = 0
+    omitted_kinds = set()
+    identities = {}
     rows = store.rows("SELECT b.request_ciphertext, r.* FROM business_runs b JOIN run_results r ON r.run_id=b.id WHERE b.uid=? AND b.session_id=? ORDER BY b.rowid DESC LIMIT 50", (uid, sid))
     for row in rows:
         prior = store.decrypt(row['request_ciphertext'])
+        identities = {**collect_identities(prior), **identities}
         scope = prior.get('native_tool_context', {})
         if scope.get('task_id') != context['task_id']:
             continue
         result = checked_result(store, row)
-        queried += completed_queries(prior)
         selected = []
         if subject:
             selected = select_records(result, prior, subject)
@@ -64,10 +67,13 @@ def freeze(store, uid, sid, snapshot, payload):
                 'records': selected, 'claims': [c for c in result.get('claims', []) if c.get('source_ids') and set(c['source_ids']) <= ids]}
             if len(provider.canonical(history + [entry]).encode()) > 120000:
                 omitted += 1
+                omitted_kinds.update(kind for kind, _ in completed_queries(prior))
                 continue
             history.append(entry)
+        queried += completed_queries(prior)
     snapshot['table_answer_policy'] = {'version': VERSION, 'person_ref': subject, 'history': history,
-        'omitted_runs': omitted, 'history_window': 50, 'history_window_full': len(rows) == 50,
+        'omitted_runs': omitted, 'omitted_kinds': sorted(omitted_kinds), 'display_identities': identities,
+        'history_window': 50, 'history_window_full': len(rows) == 50,
         'candidate_refs': sorted(candidates), 'direction': context.get('direction') or 'unknown',
         'layout_version':'theft-four-sections-v1',
         'queried': sorted({tuple(x) for x in queried}, key=lambda x: (x[0], x[1] or ''))}
@@ -102,6 +108,55 @@ def queried_kinds(policy, snapshot, person_ref):
     return kinds
 
 
+def cross_notes(records, scoring):
+    """Explain zero or missing dimensions that other sources for the same person appear to contradict."""
+    if not scoring:
+        return scoring
+    def rows(module):
+        return [r for r in records or [] if r.get('module') == module]
+    notes = {}
+    captures = [c for r in rows('profile') for c in (r.get('fields') or {}).get('captures') or [] if isinstance(c, dict)]
+    if captures:
+        notes['d1'] = f'档案最近抓拍 {len(captures)} 条，不在周边统计范围内，不计分'
+    night, places = 0, set()
+    for r in rows('tracks'):
+        f = r.get('fields') or {}
+        when = theft_scoring._parse_time(f.get('captureTime'))
+        if when and (when.hour >= 23 or when.hour < 5):
+            night += 1
+        if f.get('deviceName'):
+            places.add(str(f['deviceName']))
+    if night:
+        notes['d2'] = f'轨迹中有 {night} 个 23:00 至 05:00 的点位，未命中夜间来源规则'
+    if len(places) >= 4:
+        notes['d3'] = f'轨迹经过 {len(places)} 个不同地点，未命中跨小区规则'
+    warn = []
+    types = [((r.get('fields') or {}).get('warning') or {}).get('warningCount') for r in rows('profile')]
+    types = [n for n in types if type(n) is int and n > 0]
+    if types:
+        warn.append(f'档案来源预警类型 {max(types)} 个')
+    logs = rows('warning_logs')
+    if logs:
+        hits = sum(n for n in ((r.get('fields') or {}).get('count') for r in logs) if type(n) is int and n > 0)
+        warn.append(f'近七天预警明细触发 {hits} 次' if hits else f'近七天预警明细 {len(logs)} 条')
+    if warn:
+        notes['d4'] = '／'.join(warn) + '，未计入 D4'
+    for dim in scoring.get('dimensions') or []:
+        note = notes.get(dim.get('id'))
+        zero = dim.get('status') == 'available' and dim.get('score') == 0
+        if note and (zero or (dim['id'] == 'd4' and dim.get('status') != 'available')):
+            dim['evidence'] = ((dim.get('evidence') or '') + '；' + note).lstrip('；')
+    return scoring
+
+
+def ranking_notes(ranking, groups):
+    for item in (ranking or {}).get('items', []) + (ranking or {}).get('insufficient', []):
+        view = cross_notes(groups.get(item.get('person_ref'), []), item.get('scoring'))
+        if view and 'gaps' in item:
+            item['gaps'] = [d['label'] + '：' + (d.get('evidence') or '不可用') for d in view['dimensions'] if d['status'] != 'available']
+    return ranking
+
+
 def select_records(result, snapshot, subject, spatial=False, subjects=None):
     records = []
     allowed = set(subjects or [])
@@ -128,7 +183,7 @@ source_refs只能引用当前任务已取得资料；平台逐字段核对并生
 suggestions默认留空。已取得资料能回答当前问题时不提建议；只有存在影响结论的具体缺口，且补上它需要新的查询或需要用户确认时间、半径、人员等条件时才提出，一般一项，最多两项。action只用query或clarify_scope：条件已齐、可以直接查询时用query，须提供当前授权的kind，reply写成民警口吻的查询请求（如「查询此人2026-09-01至2026-09-15的夜间活动记录」）；还缺位置、半径、时间、人员等条件时用clarify_scope，缺项放fields，reply写成带空位、民警补全后即可发送的句子（如「核对案发地周边抓拍：位置＿＿，半径＿＿米，时间＿＿至＿＿」），不要写成「请提供……」这类向民警索要条件的话。具体建议用text、reason、conditions、reply，reason写清对应哪条结论或缺口。不要把「查看来源详情」「查看已有记录」「继续核实」「持续关注」这类不产生新资料的事项写成建议。不得自动执行建议。
 取得跨小区、夜间活动或人员轨迹记录时，在activity_summaries中按资料类型各写一条概括，格式：{"kind":"community","text":"……","source_refs":["记录编号"]}，kind为community、night或tracks。先写事实：跨小区写清每段时间范围、流经的小区名称和数量（如「9月3日07:10至18:40跨A、B、C、D共4个小区流动，约11.5小时」），多段按时间顺序最多列5段，其余写合计段数；夜间写清出现日期或次数、集中时段和主要地点；轨迹写清时段和依次经过的主要地点。时间、小区和地点用来源原文。再写研判：可结合时段、频次、路线和案发时空推测活动目的或行为特点（如踩点、流窜作案、规律性往返），并给出嫌疑研判；推测与研判另起一句，以「研判：」开头，用「可能」「疑似」等措辞，不写成确定性罪责结论。没有这三类记录时省略该字段。
 不要求查完全部接口，未查询不是失败。失败、零条和未知分别说明；可以结合资料对人员的活动目的、行为特点和嫌疑作出研判。
-只有本轮完全没有调用资料工具时（问候、能力说明、查询前的缺项追问），才使用自然中文且不输出JSON；需要补充时用question。取消补充后用JSON整理已有结果。
+只有本轮完全没有调用资料工具时（问候、能力说明），才使用自然中文且不输出JSON。查询条件不全时用question工具询问缺项，不用普通文字提问。取消补充后用JSON整理已有结果。
 """
 
 
@@ -475,7 +530,7 @@ def build(result, snapshot):
         if not isinstance(data, dict) or (policy.get('person_ref') and data.get('sfz') != policy.get('person_ref')):
             if not candidates or data.get('sfz') not in candidates:
                 continue
-        for key, label in [('name', '姓名'), ('sfz', '人员编号'), ('gender', '性别'), ('age', '年龄')]:
+        for key, label in [('name', '姓名'), ('sfz', '身份证号'), ('gender', '性别'), ('age', '年龄')]:
             v = data.get(key)
             value = str(v) if isinstance(v, (str, int)) and not isinstance(v, bool) else '来源未提供'
             basic.append({'label': label, 'value': value, 'source_ids': [r['record_id']],
@@ -483,7 +538,8 @@ def build(result, snapshot):
     missing = list(result.get('missing', []))
     track_gaps = track_segment_gaps(snapshot)
     if policy.get('omitted_runs'):
-        missing.append('历史上下文达到资源上限，部分执行未纳入本次整理；可指定来源另行解释。')
+        kinds = '、'.join(provider.CATALOG[k][0] for k in policy.get('omitted_kinds') or [] if k in provider.CATALOG)
+        missing.append('部分历史资料过大，未纳入本轮整理和评分' + ('：' + kinds if kinds else '') + '；可指定来源另行解释。')
     if policy.get('history_window_full'):
         missing.append('历史引用限于当前会话最近50次执行，未声称覆盖更早资料。')
     evidence = []
@@ -520,8 +576,8 @@ def build(result, snapshot):
         if context.get('candidate_set'):
             groups = theft_scoring.group_by_person(records, snapshot)
             authorized = {item['person_ref']: groups.get(item['person_ref'], []) for item in context['candidate_set']}
-            ranking = theft_scoring.rank(authorized, case_ref=case_ref,
-                                         queried_by_person={ref: queried_kinds(policy, snapshot, ref) for ref in authorized})
+            ranking = ranking_notes(theft_scoring.rank(authorized, case_ref=case_ref,
+                                         queried_by_person={ref: queried_kinds(policy, snapshot, ref) for ref in authorized}), authorized)
         else:
             # No authorize step required: rank people who already have non-capture records,
             # else fall back to stage-1 capture ranking.
@@ -531,8 +587,8 @@ def build(result, snapshot):
                 if ref and any(r.get('module') != 'captures' for r in rows)
             }
             if enriched:
-                ranking = theft_scoring.rank(enriched, case_ref=case_ref,
-                                             queried_by_person={ref: queried_kinds(policy, snapshot, ref) for ref in enriched})
+                ranking = ranking_notes(theft_scoring.rank(enriched, case_ref=case_ref,
+                                             queried_by_person={ref: queried_kinds(policy, snapshot, ref) for ref in enriched}), enriched)
             elif captures and len(_distinct_capture_persons(captures, snapshot)) >= 2:
                 ranking = theft_scoring.stage1_rank(captures)
         if ranking and ranking.get('items'):
@@ -554,8 +610,8 @@ def build(result, snapshot):
         person_records = [r for r in records if r.get('module') == 'incidents' or r['record_id'] in history_ids
                           or theft_scoring.subject_of(r, snapshot) == person_ref
                           or calls.get(r.get('call_id'), {}).get('frozen', {}).get('query', {}).get('person_ref') == person_ref]
-        scoring = theft_scoring.compute(person_records, include_d5=True,
-                                        queried=queried_kinds(policy, snapshot, person_ref))
+        scoring = cross_notes(person_records, theft_scoring.compute(person_records, include_d5=True,
+                                        queried=queried_kinds(policy, snapshot, person_ref)))
         if scoring.get('status') == 'ready':
             conclusions = [{
                 'text': f"有效得分率 {scoring['rate']}%（{scoring['earned']} / {scoring['available_max']}），{scoring['band']}。",
@@ -587,7 +643,7 @@ def build(result, snapshot):
             if not person_records:
                 person_records = [r for r in records if r.get('module') in (
                     'tracks', 'night', 'community', 'warning_detail', 'warnings', 'warning_logs', 'profile', 'incidents')]
-            scoring = theft_scoring.compute(person_records, include_d5=True)
+            scoring = cross_notes(person_records, theft_scoring.compute(person_records, include_d5=True))
             if scoring.get('status') == 'ready':
                 conclusions = [{
                     'text': f"关联可疑度（辅助）有效得分率 {scoring['rate']}%（{scoring['earned']} / {scoring['available_max']}），{scoring['band']}。",
