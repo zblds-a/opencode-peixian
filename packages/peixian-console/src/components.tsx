@@ -166,7 +166,7 @@ export function Status(props: { value?: string }) {
   )
 }
 let markdownDiagramId = 0
-export function Markdown(props: { text: string }) {
+export function Markdown(props: { text: string; incremental?: boolean }) {
   let host!: HTMLDivElement
   let generation = 0
   const cache = new Map<string, string>()
@@ -179,25 +179,53 @@ export function Markdown(props: { text: string }) {
   )
   createEffect(() => {
     const next = html()
-    const opened = Array.from(host.querySelectorAll<HTMLDetailsElement>("details")).flatMap((item, index) => item.open ? [index] : [])
-    host.innerHTML = next
-    const details = host.querySelectorAll<HTMLDetailsElement>("details")
-    opened.forEach((index) => { if (details[index]) details[index].open = true })
+    const staged = document.createElement("div")
+    staged.innerHTML = next
+    staged.querySelectorAll<HTMLAnchorElement>('a[href^="#source-"]').forEach((link) => {
+      if (!/^#source-[a-zA-Z0-9-]+$/.test(link.getAttribute("href") ?? "") || !/^来源\d+$/.test(link.textContent?.trim() ?? "")) return
+      link.classList.add("source-link")
+      link.setAttribute("aria-label", `查看${link.textContent?.trim()}`)
+    })
+    staged.querySelectorAll<HTMLTableElement>("table").forEach((table) => {
+      const headings = Array.from(table.querySelectorAll("thead th"), (cell) => cell.textContent?.trim() ?? "")
+      const count = headings.length || table.rows[0]?.cells.length || 1
+      const scores = headings.map((heading) => /支持来源/.test(heading) ? 2 : /主要依据/.test(heading) ? 2.4 : 1)
+      const total = scores.reduce((sum, score) => sum + score, 0)
+      const columns = document.createElement("colgroup")
+      for (let index = 0; index < count; index++) {
+        const column = document.createElement("col")
+        column.style.width = `${((scores[index] ?? 1) / (total || count) * 100).toFixed(3)}%`
+        columns.append(column)
+      }
+      table.prepend(columns)
+      table.classList.add("result-table")
+      table.style.minWidth = `${Math.max(560, count * 150)}px`
+      table.querySelectorAll<HTMLTableCellElement>("td").forEach((cell) => {
+        const links = cell.querySelectorAll<HTMLAnchorElement>("a.source-link")
+        if (!links.length || (cell.textContent ?? "").replace(/来源\d+|[、，,;；\s]/g, "")) return
+        const list = document.createElement("span")
+        list.className = "source-list"
+        links.forEach((link) => list.append(link))
+        cell.replaceChildren(list)
+      })
+      const wrapper = document.createElement("div")
+      wrapper.className = "markdown-table-scroll result-table-wrap"
+      wrapper.tabIndex = 0
+      wrapper.setAttribute("role", "region")
+      wrapper.setAttribute("aria-label", "资料表格，可横向滚动")
+      table.replaceWith(wrapper)
+      wrapper.append(table)
+    })
+    if (props.incremental) reconcileMarkdown(host, staged)
+    else {
+      const opened = Array.from(host.querySelectorAll<HTMLDetailsElement>("details")).flatMap((item, index) => item.open ? [index] : [])
+      host.replaceChildren(...Array.from(staged.childNodes))
+      const details = host.querySelectorAll<HTMLDetailsElement>("details")
+      opened.forEach((index) => { if (details[index]) details[index].open = true })
+    }
     const current = ++generation
     queueMicrotask(() => {
       if (current !== generation || !host?.isConnected) return
-      host.querySelectorAll<HTMLTableElement>("table").forEach((table) => {
-        if (table.parentElement?.classList.contains("markdown-table-scroll")) return
-        const wrapper = document.createElement("div")
-        wrapper.className = "markdown-table-scroll"
-        wrapper.style.maxWidth = "100%"
-        wrapper.style.overflowX = "auto"
-        wrapper.tabIndex = 0
-        wrapper.setAttribute("role", "region")
-        wrapper.setAttribute("aria-label", "资料表格，可横向滚动")
-        table.replaceWith(wrapper)
-        wrapper.append(table)
-      })
       host.querySelectorAll<HTMLElement>("pre > code.language-mermaid, pre > code.language-flowchart").forEach((code) => {
         const source = code.textContent?.trim() ?? ""
         const pre = code.parentElement
@@ -206,6 +234,7 @@ export function Markdown(props: { text: string }) {
           if (current !== generation || !pre.isConnected) return
           const container = document.createElement("div")
           container.className = "markdown-flowchart"
+          container.dataset.markdownSource = source
           container.setAttribute("aria-label", "流程图")
           container.innerHTML = svg
           const details = document.createElement("details")
@@ -260,6 +289,34 @@ export function Markdown(props: { text: string }) {
     const summary = target.querySelector<HTMLElement>("summary")
     summary?.focus({ preventScroll: true })
   }} />
+}
+
+// Keep completed rows and their anchors mounted as later rows arrive.
+function reconcileMarkdown(current: Node, incoming: Node) {
+  const left = current.childNodes
+  const right = Array.from(incoming.childNodes)
+  right.forEach((next, index) => {
+    const existing = left[index]
+    if (!existing) { current.appendChild(next); return }
+    if (existing.isEqualNode(next)) return
+    if (existing instanceof HTMLElement && existing.classList.contains("markdown-flowchart") && next instanceof HTMLPreElement && existing.dataset.markdownSource === next.textContent?.trim()) return
+    if (existing.nodeType !== next.nodeType || existing instanceof Element && next instanceof Element && existing.tagName !== next.tagName) {
+      current.replaceChild(next, existing)
+      return
+    }
+    if (existing.nodeType === Node.TEXT_NODE) { existing.textContent = next.textContent; return }
+    if (!(existing instanceof Element) || !(next instanceof Element)) { current.replaceChild(next, existing); return }
+    for (const attribute of Array.from(existing.attributes)) {
+      if (existing instanceof HTMLDetailsElement && attribute.name === "open") continue
+      if (!next.hasAttribute(attribute.name)) existing.removeAttribute(attribute.name)
+    }
+    for (const attribute of Array.from(next.attributes)) {
+      if (existing instanceof HTMLDetailsElement && attribute.name === "open") continue
+      if (existing.getAttribute(attribute.name) !== attribute.value) existing.setAttribute(attribute.name, attribute.value)
+    }
+    reconcileMarkdown(existing, next)
+  })
+  while (left.length > right.length) current.removeChild(left[left.length - 1])
 }
 export function Modal(props: {
   title: string

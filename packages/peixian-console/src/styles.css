@@ -1150,6 +1150,47 @@ svg {
   padding: 8px 12px;
   border: 1px solid var(--line);
 }
+.markdown .result-table-wrap {
+  max-width: 100%;
+  margin: 14px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.markdown .result-table {
+  display: table;
+  width: 100%;
+  margin: 0;
+  overflow: visible;
+  table-layout: fixed;
+}
+.markdown .result-table th,
+.markdown .result-table td {
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.markdown .source-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.markdown .source-link {
+  display: inline-flex;
+  white-space: nowrap;
+}
+.stream-table-pending {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--soft);
+  font-size: 12px;
+}
+.stream-interrupted { color: var(--muted); font-size: 12px; }
 .thinking {
   display: flex;
   align-items: center;

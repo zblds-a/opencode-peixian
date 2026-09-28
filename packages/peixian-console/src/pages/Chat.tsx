@@ -11,6 +11,7 @@ import type { TrustedResult } from "../trusted-v2"
 import { ClueDetailPanel, CluePanel } from "../TrustedAnalysis"
 import RealEntityGraph from "../RealEntityGraph"
 import SmoothMarkdown from "../SmoothMarkdown"
+import { FollowScroll } from "../follow-scroll"
 import { applyLive, fromPage, needsBackfill, withLive, type LiveAnswer } from "../live-answer"
 import type { TrustedEvidence } from "../TrustedAnalysis"
 import { isAnalysisResult, legacyPresentation, sourcePresentation } from "../result-contract"
@@ -105,7 +106,10 @@ export default function Chat() {
   let suggestionWasDragged = false
   const displayedText = new Map<string, number>()
   let scrollFrame = 0
-  let followOutput = true
+  let scrollResetFrame = 0
+  let programmaticScroll = false
+  let touchY: number | undefined
+  const follow = new FollowScroll()
   let selectingText = false
   const animatedRuns = new Set<string>()
   const terminalSince = new Map<string, number>()
@@ -467,15 +471,25 @@ export default function Chat() {
     selectionRevision++
     clearInterval(poll)
     cancelAnimationFrame(scrollFrame)
+    cancelAnimationFrame(scrollResetFrame)
   })
   createEffect(()=>{if(!available()){selectionRevision++;setTrusted(undefined);setSelectedClue(undefined)}})
+  function scheduleFollowScroll() {
+    if (!scroll || !follow.following || scrollFrame) return
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = 0
+      if (!scroll || !follow.following || selectingText || selectionInConversation()) return
+      programmaticScroll = true
+      scroll.scrollTop = scroll.scrollHeight
+      setReplyJump(false)
+      cancelAnimationFrame(scrollResetFrame)
+      scrollResetFrame = requestAnimationFrame(() => { programmaticScroll = false; scrollResetFrame = 0 })
+    })
+  }
   createEffect(() => {
     messages()
     busy()
-    cancelAnimationFrame(scrollFrame)
-    scrollFrame = requestAnimationFrame(() => {
-      if (scroll && followOutput && !selectingText && !selectionInConversation()) scroll.scrollTop = scroll.scrollHeight
-    })
+    scheduleFollowScroll()
   })
   function selectionInConversation() {
     const selection = window.getSelection()
@@ -489,7 +503,7 @@ export default function Chat() {
     animatedRuns.clear()
     completedToolTraces.clear()
     toolStatuses.clear()
-    followOutput = true
+    follow.resume()
     setReplyJump(false)
     setSelected(id)
     setSentSession(undefined)
@@ -533,7 +547,7 @@ export default function Chat() {
     animatedRuns.clear()
     completedToolTraces.clear()
     toolStatuses.clear()
-    followOutput = true
+    follow.resume()
     setReplyJump(false)
     setSelected(undefined)
     setSentSession(undefined)
@@ -1086,7 +1100,16 @@ export default function Chat() {
             <Status value={app.user().runtime?.status} />
           </div>
         </Show>
-        <div class="messages-scroll" ref={scroll} onPointerDown={() => { selectingText = true }} onPointerUp={() => { requestAnimationFrame(() => { selectingText = false }) }} onPointerCancel={() => { selectingText = false }} onScroll={() => { followOutput = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 96; if (followOutput) setReplyJump(false) }}>
+        <div class="messages-scroll" ref={scroll}
+          onPointerDown={() => { selectingText = true; follow.pointerDown() }}
+          onPointerUp={() => { follow.pointerUp(); if (scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 24) { follow.resume(); setReplyJump(false) }; requestAnimationFrame(() => { selectingText = false }) }}
+          onPointerCancel={() => { follow.pointerUp(); selectingText = false }}
+          onWheel={(event) => { const now = performance.now(); follow.wheel(event.deltaY, now); if (event.deltaY > 0 && scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 24) follow.scroll(0, false, now); setReplyJump(!follow.following) }}
+          onTouchStart={(event) => { touchY = event.touches[0]?.clientY }}
+          onTouchMove={(event) => { const next = event.touches[0]?.clientY; if (next === undefined || touchY === undefined) return; follow.wheel(touchY - next, performance.now()); touchY = next; if (!follow.following) setReplyJump(true) }}
+          onKeyDown={(event) => { const now = performance.now(); follow.key(event.key, now); if (["ArrowDown", "PageDown", "End"].includes(event.key) && scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 24) follow.scroll(0, false, now); setReplyJump(!follow.following) }}
+          onClick={(event) => { if ((event.target as Element).closest('a.source-link')) { follow.pause(); setReplyJump(true) } }}
+          onScroll={() => { const distance = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight; if (follow.scroll(distance, programmaticScroll, performance.now())) setReplyJump(false); else if (distance > 24) setReplyJump(true) }}>
           <Show
             when={!loadingConversation() && (messages().length || pendingPrompt() || awaitingReply())}
             fallback={loadingConversation() ? <div class="loading" role="status"><Spinner /><span>正在加载对话…</span></div> : <div class="chat-welcome"><strong>你好，我是你的智能研判助手</strong><p>可以从一个问题开始，重要结论请结合原始资料核验。</p></div>}
@@ -1099,7 +1122,7 @@ export default function Chat() {
                   const attachments = () => message().attachments ?? sentAttachments()[message().info.id] ?? []
                   const textParts = () => entry().textParts
                   const toolParts = () => entry().toolParts
-                  const renderText = (item: () => ChatEntry["textParts"][number]) => message().info.role === "assistant" ? <div><Show when={item().part.display_kind === "source_answer"}><span class="chat-source-answer-label">已核对资料</span></Show><SmoothMarkdown id={`${selected()}:${item().id}`} text={item().part.text ?? ""} live={animatedRuns.has(message().info.run_id ?? "") || busy() && currentRun()?.id === message().info.run_id} cache={displayedText} pause={() => selectingText || selectionInConversation()} onProgress={() => { if (scroll && followOutput && !selectingText && !selectionInConversation()) scroll.scrollTop = scroll.scrollHeight }} /></div> : <Markdown text={item().part.text ?? ""} />
+                  const renderText = (item: () => ChatEntry["textParts"][number]) => message().info.role === "assistant" ? <div><Show when={item().part.display_kind === "source_answer"}><span class="chat-source-answer-label">已核对资料</span></Show><SmoothMarkdown id={`${selected()}:${item().id}`} text={item().part.text ?? ""} live={animatedRuns.has(message().info.run_id ?? "") || busy() && currentRun()?.id === message().info.run_id} complete={!busy() || currentRun()?.id !== message().info.run_id} interrupted={currentRun()?.id === message().info.run_id && ["failed", "cancelled"].includes(currentRun()?.status ?? "")} cache={displayedText} pause={() => selectingText || selectionInConversation()} onProgress={scheduleFollowScroll} /></div> : <Markdown text={item().part.text ?? ""} />
                   const traceComplete = () => {
                     const key = `${selected()}:${message().info.id}`
                     if (toolParts().length && toolParts().every((part, index) => ["completed", "succeeded"].includes(toolStatus(part, index, message().info.id)))) completedToolTraces.add(key)
@@ -1204,7 +1227,7 @@ export default function Chat() {
           </Show>
         </div>
         <div class="composer-area">
-          <Show when={replyJump()}><button type="button" class="reply-jump" aria-label={busy() || sending() ? "正在回复，跳转到最新消息" : "跳转到最新消息"} title={busy() || sending() ? "正在回复，点击查看" : "点击查看最新回复"} onClick={() => { followOutput = true; setReplyJump(false); if (scroll) scroll.scrollTop = scroll.scrollHeight }}><Show when={busy() || sending()} fallback={<span class="reply-jump-arrow" aria-hidden="true">↓</span>}><span class="reply-jump-dots" aria-hidden="true"><i/><i/><i/></span></Show></button></Show>
+          <Show when={replyJump()}><button type="button" class="reply-jump" aria-label={busy() || sending() ? "正在回复，跳转到最新消息" : "跳转到最新消息"} title={busy() || sending() ? "正在回复，点击查看" : "点击查看最新回复"} onClick={() => { follow.resume(); setReplyJump(false); scheduleFollowScroll() }}><Show when={busy() || sending()} fallback={<span class="reply-jump-arrow" aria-hidden="true">↓</span>}><span class="reply-jump-dots" aria-hidden="true"><i/><i/><i/></span></Show></button></Show>
           <Show when={!messages().length && !pendingPrompt() && !awaitingReply()}>
             <div class="chat-suggestions"><span>为你推荐</span>
               <div class="chat-suggestions-track"
