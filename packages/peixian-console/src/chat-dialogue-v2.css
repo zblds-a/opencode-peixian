@@ -136,15 +136,10 @@
 .business-shell .chat-layout .clue-detail-scroll { display: grid; align-content: start; gap: 12px; min-height: 0; padding: 12px; overflow-y: auto; }
 .business-shell .chat-layout .clue-detail-hero,
 .business-shell .chat-layout .clue-detail-section { padding: 15px; border: 1px solid #e2eaf4; border-radius: 11px; background: #fff; box-shadow: 0 2px 8px #153d6b0c; }
-.business-shell .chat-layout .clue-detail-hero { display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: start; gap: 9px; min-height: 100px; }
+.business-shell .chat-layout .clue-detail-hero { display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: start; gap: 9px; }
 .business-shell .chat-layout .clue-detail-hero > img { width: 40px; height: 40px; }
 .business-shell .chat-layout .clue-detail-hero h3 { margin: 0; color: #1b2738; font-size: 15px; }
 .business-shell .chat-layout .clue-detail-hero p { margin: 5px 0 0; color: #69798c; font-size: 12px; line-height: 1.5; }
-.business-shell .chat-layout .clue-detail-hero > button { grid-column: 2; justify-self: end; min-height: 29px; padding: 4px 9px; border: 0; border-radius: 6px; color: #fff; background: #176ad6; font-size: 11px; }
-.business-shell .chat-layout .clue-detail--funds .clue-detail-hero > button { background: #f27c11; }
-.business-shell .chat-layout .clue-detail--person .clue-detail-hero > button { background: #af3d35; }
-.business-shell .chat-layout .clue-detail--vehicle .clue-detail-hero > button { background: #149e78; }
-.business-shell .chat-layout .clue-detail--place .clue-detail-hero > button { background: #5547bd; }
 .business-shell .chat-layout .clue-detail-section h3 { display: flex; align-items: center; gap: 9px; margin: 0 0 11px; color: #1b2738; font-size: 16px; font-weight: 700; }
 .business-shell .chat-layout .clue-detail-section h3 img { width: 24px; height: 24px; object-fit: contain; }
 .business-shell .chat-layout .clue-detail-section h3 span { margin-left: auto; color: #176ad6; font-size: 13px; white-space: nowrap; }
