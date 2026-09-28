@@ -26,6 +26,27 @@ def track_type_label(fields):
     return '未明确'
 
 
+def profile_sentence(f):
+    person=f.get('person') if isinstance(f.get('person'),dict) else {}
+    age=person.get('age')
+    head=(f"{person.get('name') or '姓名未提供'}（{person.get('sfz') or '未提供'}）；"
+          f"性别 {person.get('gender') or '未提供'}；年龄 {str(age)+' 岁' if type(age) is int else '未提供'}")
+    warning=f.get('warning') if isinstance(f.get('warning'),dict) else {}
+    if type(warning.get('warningCount')) is int:
+        head+=f"；来源预警 {warning['warningCount']} 条"
+    captures=[c for c in f.get('captures') or [] if isinstance(c,dict)]
+    if not captures:
+        return head+'。来源未返回最近抓拍。'
+    captures=sorted(captures,key=lambda c:str(c.get('captureTime') or ''),reverse=True)[:10]
+    def tags(c):
+        value=c.get('xwbq') or c.get('tags')
+        value='、'.join(str(x) for x in value) if isinstance(value,list) else value
+        return f"；标签 {value}" if isinstance(value,(str,int)) and str(value) else ''
+    lines=[f"- {c.get('captureTime') or '时间未提供'}，{c.get('deviceName') or c.get('location') or '地点未提供'}"
+           +(f"（{c['deviceId']}）" if c.get('deviceId') else '')+tags(c) for c in captures]
+    return head+f"。最近 {len(captures)} 条抓拍：\n"+'\n'.join(lines)
+
+
 def sentence(kind,f,version=None):
     if kind=='tracks':
         label=track_type_label(f)
@@ -44,7 +65,7 @@ def sentence(kind,f,version=None):
         return f"{f.get('personName','对象未提供')}（{f.get('idCard','未提供')}）：来源预警类型 {types}；预警类型数量 {count}；最新触发时间 {f.get('latestTime','未提供')}。"
     if kind=='night':return f"来源夜间观测时间 {f.get('captureTime','未提供')}；来源地点 {f.get('location','未提供')}。"
     if kind=='community':return f"来源时间范围 {f.get('timeRangeStart','未提供')} 至 {f.get('timeRangeEnd','未提供')}；小区数量 {f.get('communityCount','未提供')}；来源描述 {f.get('trajectoryDesc','未提供')}。"
-    if kind=='profile':return f"本次取得来源档案及 {len(f.get('captures',[]))} 条最近抓拍。"
+    if kind=='profile':return profile_sentence(f)
     return f"来源预警类型 {f.get('warningType','未提供')}；来源近7天规则触发 {f.get('count','未提供')} 次。"
 
 def project(row,snapshot):

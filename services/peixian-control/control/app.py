@@ -311,8 +311,11 @@ def public_messages(values, displays=None):
     displays = displays or {}
     hidden_values = sorted({value for display in displays.values() for value in display.get("_secrets", [])
                             if isinstance(value, str) and value}, key=len, reverse=True)
+    from shared.opencode_messages import is_synthetic_user, is_compaction_summary
     result = []
     for message in values:
+        if is_synthetic_user(message) or is_compaction_summary(message):
+            continue
         info = message.get("info", {})
         output = {"info": {k: info[k] for k in ("id", "role", "time", "sessionID", "finish", "parentID") if k in info}, "parts": []}
         if info.get("error"):

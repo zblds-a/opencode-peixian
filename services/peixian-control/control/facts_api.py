@@ -56,7 +56,9 @@ def register(app):
         if action == 'begin':
             if set(data) != {'action','runtime_id','revision','gateway_boot_id','session_id','message_id'}: raise HTTPException(422,'事实协议无效')
             row=store.one("SELECT * FROM business_runs WHERE uid=? AND session_id=? AND message_id=?",(uid,data['session_id'],data['message_id']))
-            if not row: raise HTTPException(404,'执行记录不存在')
+            if not row:
+                from .backend_contract import error
+                error('run_not_found','执行记录不存在',404)
             operation=engine.begin(uid,row['id'],data['revision'],data['gateway_boot_id'])
             return {'uid':uid,'run_id':row['id'],'revision':data['revision'],'operation':operation,**engine.read(uid,row['id'],data['revision'])}
         if not {'action','runtime_id','revision','run_id','operation'} <= set(data):raise HTTPException(422,'事实协议无效')

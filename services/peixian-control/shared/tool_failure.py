@@ -40,6 +40,7 @@ MESSAGES = {
  'native_duplicate_call': ('相同资料已请求，请使用已有结果或核对原调用状态。', 'reconcile'),
  'native_no_progress': ('重复请求没有取得新条件或结果，已停止本次调用。', 'stop'),
  'run_not_active': ('当前执行已停止或配置发生变化。', 'stop'),
+ 'run_not_found': ('本次调用无法对应到当前执行，尚未访问资料接口。', 'stop'),
  'provider_response_invalid': ('资料响应不符合接口合同，不能解释为零条记录。', 'stop'),
  'provider_cancelled': ('资料调用已中止，保留此前确认的结果。', 'stop'),
  'provider_business_error': ('资料服务返回业务失败，不能解释为零条记录。', 'stop'),

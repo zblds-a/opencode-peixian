@@ -74,6 +74,10 @@ def _prepare(store,uid,sid,message_id,call_id,tool,args,revision):
             if item['status']=='completed':
                 return {'cached':True,'response':copy.deepcopy(item['public_response'])}
             error('tool_call_unconfirmed','该调用已进入核对或投递流程，结果未知时不会重发。',409)
+        # After auto-compaction the model may repeat a finished call under a new ID.
+        repeated=next((x for x in calls.values() if x['tool']==tool and x['args_digest']==digest(args) and x['status']=='completed' and x.get('public_response')),None)
+        if repeated:
+            return {'cached':True,'response':copy.deepcopy(repeated['public_response'])}
         if any(x['status'] in ('review_pending','approved','dispatching') for x in calls.values()):
             error('tool_call_busy','当前工具调用尚未结束。',409)
         context=snapshot.get('native_tool_context')

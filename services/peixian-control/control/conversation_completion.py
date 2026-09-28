@@ -15,7 +15,9 @@ def finish_dismissed(store, row, messages):
         compatible = snapshot.get('clarification_completion_version') == VERSION or snapshot.get('dialogue_policy') == 'adaptive-dialogue-v1'
         if not compatible or current['status'] in runs.TERMINAL or current['cancel_requested']:
             return False
-        selected = [m for m in messages if m.get('info', {}).get('role') == 'assistant' and m.get('info', {}).get('parentID') == current['message_id']]
+        from shared.opencode_messages import origin_user_id, is_compaction_summary
+        selected = [m for m in messages if m.get('info', {}).get('role') == 'assistant' and not is_compaction_summary(m)
+                    and origin_user_id(messages, m.get('info', {}).get('parentID')) == current['message_id']]
         if not selected or selected[-1]['info'].get('error'):
             return False
         parts = [p for m in selected for p in m.get('parts', []) if p.get('type') == 'tool']

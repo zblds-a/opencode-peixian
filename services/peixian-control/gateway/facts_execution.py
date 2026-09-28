@@ -60,6 +60,22 @@ async def process(input):
             elif child.returncode is None:child.kill()
             await child.wait()
 
+def not_found(response):
+    try:detail=response.json()
+    except ValueError:return False
+    detail=detail.get('detail',detail) if isinstance(detail,dict) else {}
+    return isinstance(detail,dict) and detail.get('code')=='run_not_found'
+
+
+async def origin_parent(app,config,authorization,session_id,parent):
+    # Auto-compaction re-parents later assistant messages to its own user
+    # messages; the business run stays bound to the user message that started it.
+    from shared.opencode_messages import origin_user_id
+    listing=await app.state.client.get(config.opencode_url+'/session/'+session_id+'/message',params={'directory':'/workspace'},
+        headers={'Authorization':'Basic '+authorization,'x-opencode-directory':'/workspace'},timeout=10)
+    listing.raise_for_status();messages=listing.json()
+    return origin_user_id(messages,parent) if isinstance(messages,list) else parent
+
 def register(app):
     @app.get('/internal/facts/status')
     async def status():
@@ -87,9 +103,18 @@ def register(app):
             params={'directory':'/workspace'},headers={'Authorization':'Basic '+authorization,'x-opencode-directory':'/workspace'},timeout=5)
         result.raise_for_status();info=result.json().get('info',{})
         if info.get('role')!='assistant' or info.get('sessionID')!=value['session_id'] or not isinstance(info.get('parentID'),str):raise HTTPException(409,'执行身份无法核对')
-        async def rpc(action,**fields):
-            response=await app.state.client.post(config.control_url+'/internal/runtime/facts',headers={'X-Runtime-Key':config.runtime_key},
+        resolved={}
+        async def send(action,fields):
+            return await app.state.client.post(config.control_url+'/internal/runtime/facts',headers={'X-Runtime-Key':config.runtime_key},
                 json={'action':action,'runtime_id':config.runtime_id,'revision':config.revision,'gateway_boot_id':gate.boot_id,**fields},timeout=5)
+        async def rpc(action,**fields):
+            parent=info['parentID']
+            if fields.get('message_id')==parent and parent in resolved:fields['message_id']=resolved[parent]
+            response=await send(action,fields)
+            if response.status_code==404 and fields.get('message_id')==parent and parent not in resolved and not_found(response):
+                resolved[parent]=await origin_parent(app,config,authorization,value['session_id'],parent)
+                if resolved[parent]!=parent:
+                    fields['message_id']=resolved[parent];response=await send(action,fields)
             if response.status_code>=400:
                 from shared.tool_failure import public
                 try:

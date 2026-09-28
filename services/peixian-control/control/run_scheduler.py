@@ -28,7 +28,9 @@ def track_messages(store,row,values,receipt):
     snapshot=store.decrypt(row['request_ciphertext']);tools={tool:p['id'] for p in snapshot['plugins'] for tool in p['tools']}
     starts=[i for i,m in enumerate(values) if m.get('info',{}).get('id')==row['message_id']]
     if not starts:return False
-    selected=values[starts[0]:];end=next((i for i,m in enumerate(selected[1:],1) if m.get('info',{}).get('role')=='user'),len(selected));selected=selected[:end]
+    from shared.opencode_messages import is_synthetic_user,is_compaction_summary
+    selected=values[starts[0]:];end=next((i for i,m in enumerate(selected[1:],1) if m.get('info',{}).get('role')=='user' and not is_synthetic_user(m)),len(selected))
+    selected=[selected[0]]+[m for m in selected[1:end] if not is_synthetic_user(m) and not is_compaction_summary(m)]
     usertime=selected[0]['info'].get('time',{}).get('created')
     runs.event(store,row['id'],'accepted','requirement','接收请求','completed',usertime//1000 if usertime else row['created'],usertime//1000 if usertime else row['created'])
     prior=store.one('SELECT actual_plugins FROM invocations WHERE run_id=?',(row['id'],))
