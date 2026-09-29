@@ -4,9 +4,9 @@ import { MarkdownStreamBuffer, type StreamProjection } from "./stream-markdown"
 
 // The server publishes change notices and complete text snapshots, not replayable token deltas.
 // Preserve the displayed prefix across message refreshes so a remount cannot restart the reveal.
-export default function SmoothMarkdown(props: { text: string; live: boolean; complete?: boolean; interrupted?: boolean; cache: Map<string, number>; id: string; onProgress?: () => void; onRevealProgress?: () => void; pause?: () => boolean }) {
-  const [count, setCount] = createSignal(props.cache.get(props.id) ?? (props.live ? 0 : Array.from(props.text).length))
-  const [projection, setProjection] = createSignal<StreamProjection>({ text: "", pendingTable: false, pendingSource: false })
+export default function SmoothMarkdown(props: { text: string; live: boolean; complete?: boolean; interrupted?: boolean; stopped?: boolean; cache: Map<string, number>; projectionCache: Map<string, StreamProjection>; id: string; onProgress?: () => void; onRevealProgress?: () => void; pause?: () => boolean }) {
+  const [count, setCount] = createSignal(props.cache.get(props.id) ?? (props.live || props.stopped ? 0 : Array.from(props.text).length))
+  const [projection, setProjection] = createSignal<StreamProjection>(props.projectionCache.get(props.id) ?? { text: "", pendingTable: false, pendingSource: false })
   const buffer = new MarkdownStreamBuffer()
   let consumed = ""
   let frame = 0
@@ -15,6 +15,11 @@ export default function SmoothMarkdown(props: { text: string; live: boolean; com
   let fractional = 0
   let lastRender = 0
   createEffect(() => {
+    if (props.stopped) {
+      cancelAnimationFrame(frame)
+      frame = 0
+      return
+    }
     target = props.text
     const characters = Array.from(target)
     const cached = props.cache.get(props.id)
@@ -32,6 +37,7 @@ export default function SmoothMarkdown(props: { text: string; live: boolean; com
       props.onRevealProgress?.()
     }
     const tick = (now: number) => {
+      if (props.stopped) { frame = 0; return }
       const characters = Array.from(target)
       const pending = characters.length - count()
       if (pending <= 0) { frame = 0; return }
@@ -66,6 +72,9 @@ export default function SmoothMarkdown(props: { text: string; live: boolean; com
     if (!frame && untrack(count) < characters.length) frame = requestAnimationFrame(tick)
   })
   createEffect(() => {
+    // Keep the exact visible projection at the moment Stop is clicked. A later
+    // /messages snapshot must not reveal the unreplayed suffix or remove a draft row.
+    if (props.stopped) return
     const characters = Array.from(props.text)
     const current = characters.slice(0, count()).join("")
     if (current.startsWith(consumed)) buffer.append(current.slice(consumed.length))
@@ -74,6 +83,7 @@ export default function SmoothMarkdown(props: { text: string; live: boolean; com
     const next = buffer.project((props.complete || !props.live) && count() >= characters.length, props.interrupted)
     const previous = untrack(projection)
     if (next.text === previous.text && next.pendingTable === previous.pendingTable && next.pendingSource === previous.pendingSource) return
+    props.projectionCache.set(props.id, next)
     setProjection(next)
     if (next.text !== previous.text || next.pendingTable !== previous.pendingTable) props.onProgress?.()
   })

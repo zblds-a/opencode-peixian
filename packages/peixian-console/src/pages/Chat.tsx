@@ -11,6 +11,7 @@ import type { TrustedResult } from "../trusted-v2"
 import { ClueDetailPanel, CluePanel } from "../TrustedAnalysis"
 import RealEntityGraph from "../RealEntityGraph"
 import SmoothMarkdown from "../SmoothMarkdown"
+import type { StreamProjection } from "../stream-markdown"
 import { FollowScroll } from "../follow-scroll"
 import { applyLive, fromPage, needsBackfill, withLive, type LiveAnswer } from "../live-answer"
 import type { TrustedEvidence } from "../TrustedAnalysis"
@@ -97,6 +98,8 @@ export default function Chat() {
   const [nextQuestion, setNextQuestion] = createSignal<NextQuestion>()
   const [dismissedNextRun, setDismissedNextRun] = createSignal<string>()
   const [nextQuestionBusy, setNextQuestionBusy] = createSignal(false)
+  const [stoppedReveal, setStoppedReveal] = createSignal<{ sessionID: string; runID?: string }>()
+  const [stopping, setStopping] = createSignal(false)
   const [revealRevision, setRevealRevision] = createSignal(0)
   const [revealedNextQuestion, setRevealedNextQuestion] = createSignal("")
   let nextQuestionSession: string | undefined
@@ -110,6 +113,7 @@ export default function Chat() {
   let suggestionDrag: { x: number; scroll: number; moved: boolean } | undefined
   let suggestionWasDragged = false
   const displayedText = new Map<string, number>()
+  const displayedProjection = new Map<string, StreamProjection>()
   let scrollFrame = 0
   let scrollResetFrame = 0
   let programmaticScroll = false
@@ -521,7 +525,9 @@ export default function Chat() {
     const revision = ++selectionRevision
     setLoadingConversation(true)
     displayedText.clear()
+    displayedProjection.clear()
     animatedRuns.clear()
+    setStoppedReveal(undefined)
     completedToolTraces.clear()
     toolStatuses.clear()
     follow.resume()
@@ -565,7 +571,9 @@ export default function Chat() {
     selectionRevision++
     setLoadingConversation(false)
     displayedText.clear()
+    displayedProjection.clear()
     animatedRuns.clear()
+    setStoppedReveal(undefined)
     completedToolTraces.clear()
     toolStatuses.clear()
     follow.resume()
@@ -663,6 +671,7 @@ export default function Chat() {
       setPendingPrompt({ text, attachments, messageID: result.message_id, questionAnswer })
       if (fileIDs.length) setSelectedFiles([])
       animatedRuns.add(result.run_id)
+      setStoppedReveal(undefined)
       setLatestRun(result.run_id)
       setCurrentRun({ id: result.run_id, session_id: id, status: "queued", phase: "accepted", user_message_id: result.message_id, created_at: new Date().toISOString() })
       setRunEvents([])
@@ -718,6 +727,7 @@ export default function Chat() {
       if (result.accepted !== true) throw new ApiError("提交结果待确认，请核对历史记录。", 0, "unknown_submission")
       setPendingPrompt({ text: result.answer_label, attachments: [], messageID: result.message_id, questionAnswer: true })
       animatedRuns.add(result.run_id)
+      setStoppedReveal(undefined)
       setLatestRun(result.run_id)
       setCurrentRun({ id: result.run_id, session_id: sid, status: "queued", phase: "accepted", user_message_id: result.message_id, created_at: new Date().toISOString() })
       setRunEvents([])
@@ -806,17 +816,25 @@ export default function Chat() {
   }
 
   async function abort() {
-    if (!selected()) return
+    const sid = selected()
+    if (!sid || stopping()) return
+    const active = currentRun()
+    const freeze = { sessionID: sid, runID: active?.id }
+    setStoppedReveal(freeze)
+    setStopping(true)
     try {
-      const path = currentRun() && !terminalRun(currentRun()!.status)
-        ? "/sessions/" + selected() + "/runs/" + currentRun()!.id + "/abort"
-        : "/sessions/" + selected() + "/abort"
+      const path = active && !terminalRun(active.status)
+        ? "/sessions/" + sid + "/runs/" + active.id + "/abort"
+        : "/sessions/" + sid + "/abort"
       const run = await post<Run>(path)
-      if (run?.id) setCurrentRun(run)
-      await refresh()
+      if (selected() === sid && run?.id) setCurrentRun(run)
+      if (selected() === sid) await refresh()
       app.notify(run?.status === "cancelled" ? "执行已停止。" : "停止请求已受理，正在等待执行状态确认。")
     } catch (error) {
-      setError((error as Error).message)
+      if (stoppedReveal() === freeze) setStoppedReveal(undefined)
+      if (selected() === sid) setError((error as Error).message)
+    } finally {
+      setStopping(false)
     }
   }
   async function deleteSession(item: Session) {
@@ -1151,7 +1169,7 @@ export default function Chat() {
                   const attachments = () => message().attachments ?? sentAttachments()[message().info.id] ?? []
                   const textParts = () => entry().textParts
                   const toolParts = () => entry().toolParts
-                  const renderText = (item: () => ChatEntry["textParts"][number]) => message().info.role === "assistant" ? <div><Show when={item().part.display_kind === "source_answer"}><span class="chat-source-answer-label">已核对资料</span></Show><SmoothMarkdown id={`${selected()}:${item().id}`} text={item().part.text ?? ""} live={animatedRuns.has(message().info.run_id ?? "") || busy() && currentRun()?.id === message().info.run_id} complete={!busy() || currentRun()?.id !== message().info.run_id} interrupted={currentRun()?.id === message().info.run_id && ["failed", "cancelled"].includes(currentRun()?.status ?? "")} cache={displayedText} pause={() => selectingText || selectionInConversation()} onProgress={scheduleFollowScroll} onRevealProgress={() => setRevealRevision((value) => value + 1)} /></div> : <Markdown text={item().part.text ?? ""} />
+                  const renderText = (item: () => ChatEntry["textParts"][number]) => message().info.role === "assistant" ? <div><Show when={item().part.display_kind === "source_answer"}><span class="chat-source-answer-label">已核对资料</span></Show><SmoothMarkdown id={`${selected()}:${item().id}`} text={item().part.text ?? ""} live={animatedRuns.has(message().info.run_id ?? "") || busy() && currentRun()?.id === message().info.run_id} complete={!busy() || currentRun()?.id !== message().info.run_id} interrupted={currentRun()?.id === message().info.run_id && ["failed", "cancelled"].includes(currentRun()?.status ?? "")} stopped={stoppedReveal()?.sessionID === selected() && (!stoppedReveal()?.runID || stoppedReveal()?.runID === (message().info.run_id ?? item().part.run_id))} cache={displayedText} projectionCache={displayedProjection} pause={() => selectingText || selectionInConversation()} onProgress={scheduleFollowScroll} onRevealProgress={() => setRevealRevision((value) => value + 1)} /></div> : <Markdown text={item().part.text ?? ""} />
                   const traceComplete = () => {
                     const key = `${selected()}:${message().info.id}`
                     if (toolParts().length && toolParts().every((part, index) => ["completed", "succeeded"].includes(toolStatus(part, index, message().info.id)))) completedToolTraces.add(key)
@@ -1339,8 +1357,8 @@ export default function Chat() {
                   />
                 }
               >
-                <Button icon="stop" onClick={abort}>
-                  停止生成
+                <Button icon="stop" disabled={stopping()} onClick={abort}>
+                  {stopping() ? "正在停止…" : "停止生成"}
                 </Button>
               </Show>
             </div>

@@ -92,6 +92,14 @@ test("ordinary bracketed prose is retained and cumulative snapshot resets do not
   assert.equal(buffer.project(true).text, "说明：[备注]与[来源研究]均为正文。\n补充。")
 })
 
+test("Chinese sentence remains visible when the next character arrives without a space", () => {
+  const buffer = new MarkdownStreamBuffer()
+  buffer.append("第一句。")
+  assert.equal(buffer.project().text, "第一句。")
+  buffer.append("第二句")
+  assert.equal(buffer.project().text, "第一句。")
+})
+
 test("content growth preserves follow state; user intent changes it", () => {
   const follow = new FollowScroll()
   assert.equal(follow.scroll(200, false, 100), true)

@@ -87,7 +87,7 @@ export class MarkdownStreamBuffer {
       const sourceStart = unfinishedSourceStart(partial)
       const safe = sourceStart < 0 ? partial : partial.slice(0, sourceStart)
       if (!hasStructuralPipe(safe)) {
-        const ends = [...safe.matchAll(/[。！？.!?](?:\s|$)/g)]
+        const ends = [...safe.matchAll(/(?:[。！？]|[.!?](?=\s|$))/g)]
         const last = ends.at(-1)
         if (last?.index !== undefined) text += safe.slice(0, last.index + last[0].length)
       }
