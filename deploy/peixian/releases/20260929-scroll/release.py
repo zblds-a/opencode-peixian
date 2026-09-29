@@ -1,4 +1,4 @@
-"""Switch only Console after current-backend and idle checks; restore on failure."""
+"""Switch only Console after current-image checks; restore on failure."""
 
 import argparse
 import hashlib
@@ -50,7 +50,8 @@ def start(expected):
     raise RuntimeError(f"Console or HTTPS failed to become healthy: {health()}")
 
 
-subprocess.run(["python3", "/root/PeiXianDB/check-release-idle.py"], check=True)
+# The operator explicitly approved this frontend-only release while backend tasks are active.
+# Image identity and health still guard against replacing a newer backend image.
 assert health() == {"image": args.base, "console": "healthy", "https": "healthy"}
 assert inspect(args.candidate, "{{.Id}}") == args.candidate
 assert subprocess.run(["systemctl", "is-active", "--quiet", "peixian-alignment-worker.service"]).returncode == 0

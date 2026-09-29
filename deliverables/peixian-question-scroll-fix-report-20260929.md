@@ -2,7 +2,7 @@
 
 ## 状态与范围
 
-本轮前端代码已修改并通过本地定向验证；**正式服务器发布尚未执行**。用户提供密钥目录后已建立交互式 SSH 会话。2026-09-29 09:26（北京时间）服务器检查显示 Gateway 存在活动任务，后端工作树仍有修改；因此遵循用户要求，等待后端发版、测试与空闲检查完成后再发布前端。未制作私网部署包，未修改“停止生成”逻辑或任何后端接口。
+本轮前端代码已修改并通过本地定向验证，**2026-09-29 09:39（北京时间）已正式发布**。用户明确与后端沟通并授权本轮忽略后端活动任务，因此本次只放宽了发布脚本的空闲门槛；仍以切换前实际运行的 Console 镜像为父镜像，核对后端文件一致，并保留镜像身份、服务健康和自动回滚检查。未制作私网部署包，未修改“停止生成”逻辑或任何后端接口。
 
 ## 排查事实与根因
 
@@ -31,16 +31,18 @@
 
 这些是本地合成数据和浏览器布局测试，尚不能替代真实账号及线上录屏验收。真实模型可能输出不同的长段落、图示或异步内容，需要正式发布后继续观察。
 
-## 后端对齐与正式发布关口
+## 后端对齐与正式发布
 
-2026-09-29 本地只读访问正式入口返回 HTTP 200，HTML 仍引用上一版 `/assets/index-js1DF52O.js` 与 `/assets/index-BRAfITZk.css`；公开 `/openapi.json` 返回 HTTP 200、`info.version=1.3.0`。服务器 09:26 检查确认 Console 仍为 `sha256:71ac6da1a478e66de36c0ad47b5ecef9feca409f611d4fe66b976357820d7d55` 且健康；后端仓库 `/root/PeiXianDB/theft-prompt-entry` 的 HEAD 为 `178bfb328a5bf5341a245dcc908cb86742be7a83`，工作树有多个后端文件未提交修改。`check-release-idle.py` 在第一个 Gateway 报告 `native_running=2`、`waiting_question=2`、`total=4`，并以 `Runtime busy` 退出。**这些是发布阻断条件，不得据此构建或切换候选镜像。**
+2026-09-29 09:26 的首次检查中，Console 为 `sha256:71ac6da1a478e66de36c0ad47b5ecef9feca409f611d4fe66b976357820d7d55` 且健康；后端仓库 `/root/PeiXianDB/theft-prompt-entry` 的 HEAD 为 `178bfb328a5bf5341a245dcc908cb86742be7a83`，工作树有未提交修改。`check-release-idle.py` 报告第一个 Gateway 有 `native_running=2`、`waiting_question=2`、`total=4`。因此原计划暂停。随后用户明确与后端沟通，授权直接发布；这些活动任务不再作为本次前端切换的门槛。
 
-服务器访问恢复后，先检查当前 Console 镜像 ID、后端仓库提交及工作树、`check-release-idle.py`、Gateway 活动数、`publishing`、Console/HTTPS/worker 状态；发现后端仍在发布或测试则等待并重新检查。然后以届时健康的生产镜像为父镜像，只替换 `/candidate/static`，逐文件核对 `/candidate/control` 与 `/candidate/shared` 和父镜像一致。备份 `platform.json` 与生成的 Compose，切换 Console 并检查健康、入口资源及哈希；失败时恢复备份配置并重启旧 Console。回执补记实际镜像 ID、源码提交、备份路径、哈希、发布时间和真实登录态结果。
+09:34 再次核对，Console 和 HTTPS 均为 `healthy`，worker 为 `active`，Console 镜像仍是上述 ID，运行用户为 `10001:10001`；未发现并行 Docker 构建或部署进程。候选从该生产镜像构建，仅清空和替换 `/candidate/static`，保持运行用户不变。上传的 65 个前端文件与本地文件数一致，`index.html` SHA-256 都是 `f63dff3469f4a1bfc3f27373e999903db93e367856897674f436117a71744f9a`。候选与父镜像的 `/candidate/control`、`/candidate/shared` 共 157 个后端文件哈希清单完全一致，清单 SHA-256 为 `3f3f67c7ceb0c1bb8862c1aa1860605ddb8053d91ba95eef4dc0d75e6863ccf9`。
 
-仓库已准备 `deploy/peixian/releases/20260929-scroll/` 的动态父镜像 Dockerfile、后端文件一致性核验脚本和带自动回滚的 Console 发布脚本。它们不使用交接文档中的旧镜像 ID；目前仅完成 Python 语法检查，尚未在服务器执行。
+正式镜像标签为 `peixian-control:question-scroll-20260929-r1`，镜像 ID 为 `sha256:b2afe14c3de62207216e2299812b0fa5b8dff08f97fe7bc98ed73efaf4b5677c`，前端修订标签为 `a9eae1994`。09:39 使用 `deploy/peixian/releases/20260929-scroll/release.py` 只重建 Console；切换后 Console、HTTPS 均为 `healthy`，worker 为 `active`，Console 日志显示 Uvicorn 启动完成。服务器 `https://127.0.0.1:19460/` 的首页哈希与候选一致，入口 JS `/assets/index-C7TczqKg.js` 和 CSS `/assets/index-B04nGFbd.css` 均返回 200；公网 `https://36.134.45.38:19460/` 返回 200 并引用这两个资源，`/openapi.json` 仍返回 200。09:41 后端源码 HEAD 仍为 `178bfb328a5bf5341a245dcc908cb86742be7a83`，工作树有 13 项未提交状态；实际运行的后端文件以父镜像逐文件哈希一致性为准。
+
+发布前配置备份：`/srv/peixian-alignment-20260917/platform.before-ui-scroll-20260929-093952.json` 和 `/srv/peixian-alignment-20260917/runtime/generated/compose.server.before-ui-scroll-20260929-093952.json`。若需回滚，先核对当前 Console 镜像和后端发布状态，将两份备份分别恢复为 `platform.json` 与 `runtime/generated/compose.server.json`，再执行 `docker compose -f /srv/peixian-alignment-20260917/runtime/generated/compose.server.json up -d --no-deps --no-build console`，核查 Console、HTTPS 健康和旧入口资源。回滚目标为 `peixian-control:frontend-stop-20260929-r1` / `sha256:71ac6da1a478e66de36c0ad47b5ecef9feca409f611d4fe66b976357820d7d55`。发布脚本在切换验证失败时也会自动恢复这两份原始配置并启动旧 Console。
 
 ## 未完成验收
 
-- 后端发版完成后的重新核对、发布空闲状态、正式镜像构建和生产切换：等待当前活动任务与后端发布结束。
-- 真实登录态的连续生成、卡片交互及与用户录屏逐帧对比：等待正式发布后执行。
+- 真实登录态的连续生成、卡片交互及与用户录屏逐帧对比：当前环境没有可复用的登录态或测试账号，本次只完成本地浏览器夹具和正式入口、资源、服务健康验证；不能据此声称线上交互已逐帧验收。
+- 后端后续独立发布：本次镜像保留了切换时运行的后端文件。若后端团队随后替换 Console 镜像，需要重新核对前端资源是否被覆盖。
 - “停止生成”真正终止及流式传输设计：明确不属于本轮修复。
