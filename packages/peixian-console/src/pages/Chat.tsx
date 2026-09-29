@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, Index, onCleanup, Show, untrack } from "solid-js"
+import { createEffect, createMemo, createSignal, For, Index, onCleanup, onMount, Show, untrack } from "solid-js"
 import { toolFailureMessage, toolPartStatus } from "../tool-trace-status"
 import { Portal } from "solid-js/web"
 import { api, ApiError, list, patch, post, remove, safeMessage } from "../api"
@@ -13,6 +13,7 @@ import RealEntityGraph from "../RealEntityGraph"
 import SmoothMarkdown from "../SmoothMarkdown"
 import type { StreamProjection } from "../stream-markdown"
 import { FollowScroll } from "../follow-scroll"
+import { ChatScroll } from "../chat-scroll"
 import { applyLive, fromPage, needsBackfill, withLive, type LiveAnswer } from "../live-answer"
 import type { TrustedEvidence } from "../TrustedAnalysis"
 import { isAnalysisResult, legacyPresentation, sourcePresentation } from "../result-contract"
@@ -114,12 +115,18 @@ export default function Chat() {
   let suggestionWasDragged = false
   const displayedText = new Map<string, number>()
   const displayedProjection = new Map<string, StreamProjection>()
-  let scrollFrame = 0
-  let scrollResetFrame = 0
-  let programmaticScroll = false
+  let scrollController: ChatScroll | undefined
+  let userScrollUntil = 0
   let touchY: number | undefined
   const follow = new FollowScroll()
   let selectingText = false
+  onMount(() => {
+    scrollController = new ChatScroll(scroll, follow, () => selectingText || selectionInConversation(), () => {
+      if (follow.following) setReplyJump(false)
+    })
+    scrollController.request("mount")
+    onCleanup(() => scrollController?.dispose())
+  })
   const animatedRuns = new Set<string>()
   const terminalSince = new Map<string, number>()
   let selectionRevision = 0
@@ -495,21 +502,10 @@ export default function Chat() {
   onCleanup(() => {
     selectionRevision++
     clearInterval(poll)
-    cancelAnimationFrame(scrollFrame)
-    cancelAnimationFrame(scrollResetFrame)
   })
   createEffect(()=>{if(!available()){selectionRevision++;setTrusted(undefined);setSelectedClue(undefined)}})
   function scheduleFollowScroll() {
-    if (!scroll || !follow.following || scrollFrame) return
-    scrollFrame = requestAnimationFrame(() => {
-      scrollFrame = 0
-      if (!scroll || !follow.following || selectingText || selectionInConversation()) return
-      programmaticScroll = true
-      scroll.scrollTop = scroll.scrollHeight
-      setReplyJump(false)
-      cancelAnimationFrame(scrollResetFrame)
-      scrollResetFrame = requestAnimationFrame(() => { programmaticScroll = false; scrollResetFrame = 0 })
-    })
+    scrollController?.request("message-update")
   }
   createEffect(() => {
     messages()
@@ -1149,14 +1145,14 @@ export default function Chat() {
         </Show>
         <div class="messages-scroll" ref={scroll}
           onPointerDown={() => { selectingText = true; follow.pointerDown() }}
-          onPointerUp={() => { follow.pointerUp(); if (scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 24) { follow.resume(); setReplyJump(false) }; requestAnimationFrame(() => { selectingText = false }) }}
+          onPointerUp={() => { follow.pointerUp(); if (scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 24) { follow.resume(); setReplyJump(false) }; requestAnimationFrame(() => { selectingText = false; scrollController?.request("selection-end") }) }}
           onPointerCancel={() => { follow.pointerUp(); selectingText = false }}
-          onWheel={(event) => { const now = performance.now(); follow.wheel(event.deltaY, now); if (event.deltaY > 0 && scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 24) follow.scroll(0, false, now); setReplyJump(!follow.following) }}
+          onWheel={(event) => { const now = performance.now(); userScrollUntil = now + 350; follow.wheel(event.deltaY, now); if (event.deltaY > 0 && scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 24) follow.scroll(0, false, now); setReplyJump(!follow.following) }}
           onTouchStart={(event) => { touchY = event.touches[0]?.clientY }}
-          onTouchMove={(event) => { const next = event.touches[0]?.clientY; if (next === undefined || touchY === undefined) return; follow.wheel(touchY - next, performance.now()); touchY = next; if (!follow.following) setReplyJump(true) }}
-          onKeyDown={(event) => { const now = performance.now(); follow.key(event.key, now); if (["ArrowDown", "PageDown", "End"].includes(event.key) && scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 24) follow.scroll(0, false, now); setReplyJump(!follow.following) }}
-          onClick={(event) => { if ((event.target as Element).closest('a.source-link')) { follow.pause(); setReplyJump(true) } }}
-          onScroll={() => { const distance = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight; if (follow.scroll(distance, programmaticScroll, performance.now())) setReplyJump(false); else if (distance > 24) setReplyJump(true) }}>
+          onTouchMove={(event) => { const next = event.touches[0]?.clientY; if (next === undefined || touchY === undefined) return; const now = performance.now(); userScrollUntil = now + 350; follow.wheel(touchY - next, now); touchY = next; if (!follow.following) setReplyJump(true) }}
+          onKeyDown={(event) => { const now = performance.now(); userScrollUntil = now + 350; follow.key(event.key, now); if (["ArrowDown", "PageDown", "End"].includes(event.key) && scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 24) follow.scroll(0, false, now); setReplyJump(!follow.following) }}
+          onClick={(event) => { if ((event.target as Element).closest('a.source-link')) { follow.pause(); setReplyJump(true); queueMicrotask(() => scrollController?.capture()) } }}
+          onScroll={() => { const now = performance.now(); const user = selectingText || now < userScrollUntil; const distance = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight; if (follow.scroll(distance, !user && (scrollController?.programmatic ?? false), now)) setReplyJump(false); else if (distance > 24) setReplyJump(true); if (user) scrollController?.capture() }}>
           <Show
             when={!loadingConversation() && (messages().length || pendingPrompt() || awaitingReply())}
             fallback={loadingConversation() ? <div class="loading" role="status"><Spinner /><span>正在加载对话…</span></div> : <div class="chat-welcome"><strong>你好，我是你的智能研判助手</strong><p>可以从一个问题开始，重要结论请结合原始资料核验。</p></div>}
@@ -1272,6 +1268,21 @@ export default function Chat() {
               <Show when={awaitingReply()}><div class="assistant-thinking" role="status"><span class="message-avatar"><img src={chatAssets.policeAvatar} alt="" /></span><span>{liveProgress() ? `智能助手${liveProgress()}…` : "智能助手正在思考…"}</span></div></Show>
             </div>
           </Show>
+          <div class="conversation-questions">
+            <BusinessConfirmations sessionID={selected()} available={available()} onAnswered={() => void refresh()} />
+            <Show when={selected() && currentRun()?.clarification?.version === "theft-clarification-v1"}>
+              <QuestionForm request={() => clarificationRequest(currentRun()!, selected()!)} busy={questionBusy() || sending() || !ready()} answer={(answers) => void answerClarification(answers)} />
+            </Show>
+            <Show when={selected() && nextQuestion() && revealedNextQuestion() === `${selected()}:${currentRun()?.id}:${nextQuestion()?.id}` && !currentRun()?.clarification && !uncertain()}>
+              <QuestionForm
+                title="下一步分析"
+                rejectLabel="不再追问，直接作答"
+                request={() => nextQuestionRequest(nextQuestion()!, selected()!)}
+                busy={nextQuestionBusy() || busy() || sending() || !ready()}
+                answer={(answers) => void answerNextQuestion(answers)}
+              />
+            </Show>
+          </div>
         </div>
         <div class="composer-area">
           <Show when={replyJump()}><button type="button" class="reply-jump" aria-label={busy() || sending() ? "正在回复，跳转到最新消息" : "跳转到最新消息"} title={busy() || sending() ? "正在回复，点击查看" : "点击查看最新回复"} onClick={() => { follow.resume(); setReplyJump(false); scheduleFollowScroll() }}><Show when={busy() || sending()} fallback={<span class="reply-jump-arrow" aria-hidden="true">↓</span>}><span class="reply-jump-dots" aria-hidden="true"><i/><i/><i/></span></Show></button></Show>
@@ -1288,19 +1299,6 @@ export default function Chat() {
             </div>
           </Show>
           <RuntimeStatus compact />
-          <BusinessConfirmations sessionID={selected()} available={available()} onAnswered={() => void refresh()} />
-          <Show when={selected() && currentRun()?.clarification?.version === "theft-clarification-v1"}>
-            <QuestionForm request={() => clarificationRequest(currentRun()!, selected()!)} busy={questionBusy() || sending() || !ready()} answer={(answers) => void answerClarification(answers)} />
-          </Show>
-          <Show when={selected() && nextQuestion() && revealedNextQuestion() === `${selected()}:${currentRun()?.id}:${nextQuestion()?.id}` && !currentRun()?.clarification && !uncertain()}>
-            <QuestionForm
-              title="下一步分析"
-              rejectLabel="不再追问，直接作答"
-              request={() => nextQuestionRequest(nextQuestion()!, selected()!)}
-              busy={nextQuestionBusy() || busy() || sending() || !ready()}
-              answer={(answers) => void answerNextQuestion(answers)}
-            />
-          </Show>
           <ErrorLine message={error()} />
           <Show when={uncertain()}>
             <div class="runtime-banner" role="status">

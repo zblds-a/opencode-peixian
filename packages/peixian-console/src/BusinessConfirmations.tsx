@@ -38,6 +38,11 @@ export function QuestionForm(props: { request: () => Pending; busy: boolean; ans
         : []),
     ])
   const limited = () => questions().some((question, index) => question.multiple !== true && answers()[index]?.length > 1)
+  const unanswered = () => questions().flatMap((question, index) => {
+    const needsCustom = question.custom !== false && customEnabled()[index] && !custom()[index]?.trim()
+    if (answers()[index]?.length && !needsCustom) return []
+    return [{ index, title: `第 ${index + 1} 题 ${safeMessage(question.header || "补充信息")}${needsCustom ? "（自行填写未完成）" : ""}` }]
+  })
   const valid = () => questions().length > 0 && answers().every((answer) => answer.length > 0) && !limited()
     && !questions().some((question, index) => question.custom !== false && customEnabled()[index] && !custom()[index]?.trim())
   function choose(index: number, value: string) {
@@ -160,11 +165,17 @@ export function QuestionForm(props: { request: () => Pending; busy: boolean; ans
       <Show when={limited()}>
         <small class="question-contract-note" role="alert">有题目当前仅支持提交一项。请返回该题取消多余选项，避免后端忽略所选内容。</small>
       </Show>
+      <Show when={page() === pages().length - 1 && unanswered().length > 0}>
+        <div class="question-incomplete" role="status">
+          <span>还需回答：{unanswered().map((item) => item.title).join("、")}</span>
+          <button type="button" disabled={props.busy} onClick={() => setPage(pages().findIndex((item) => item.questionIndex === unanswered()[0].index))}>返回未答题</button>
+        </div>
+      </Show>
       <div class="confirmation-actions">
         <Button type="button" disabled={props.busy} onClick={() => props.answer()}>
           {props.rejectLabel ?? "不选择，跳过"}
         </Button>
-        <Button type="submit" variant="primary" busy={props.busy} disabled={!valid() || page() < pages().length - 1}>
+        <Button type="submit" class="question-submit" variant="primary" busy={props.busy} disabled={!valid() || page() < pages().length - 1}>
           提交回答
         </Button>
       </div>

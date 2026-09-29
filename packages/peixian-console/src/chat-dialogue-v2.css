@@ -1,5 +1,6 @@
 /* User dialogue screen only; keep all overrides inside this page shell. */
 .business-shell .chat-layout .history-panel { padding-bottom: 14px; }
+.business-shell .chat-layout .messages-scroll { scroll-behavior: auto; }
 .business-shell .chat-layout .history-list { min-height: 0; overflow-y: auto; overflow-anchor: none; }
 .business-shell .chat-layout .chat-history-icon { display: block; flex: 0 0 22px; width: 22px; height: 22px; object-fit: contain; }
 .business-shell .chat-layout .message-avatar,
@@ -60,6 +61,14 @@
 .business-shell .chat-layout .question-pager button { min-width: 88px; padding: 6px 10px; border: 1px solid #bdd5f0; border-radius: 8px; color: #245688; background: #f5f9ff; cursor: pointer; }
 .business-shell .chat-layout .question-pager button:disabled { opacity: .45; cursor: default; }
 .business-shell .chat-layout .question-pager span { color: #687f9b; font-size: 12px; white-space: nowrap; }
+.business-shell .chat-layout .question-incomplete { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-top: 10px; color: #805017; font-size: 12px; }
+.business-shell .chat-layout .question-incomplete button { padding: 4px 8px; border: 1px solid #bdd5f0; border-radius: 6px; color: #1766bd; background: #f5f9ff; }
+.business-shell .chat-layout .question-incomplete button:hover:not(:disabled) { border-color: #1677ff; background: #eaf4ff; }
+.business-shell .chat-layout .question-submit.primary:hover:not(:disabled) { color: #fff; background: #0969da; border-color: #0969da; filter: none; }
+.business-shell .chat-layout .conversation-questions { width: min(100%, 880px); margin: 0 auto; padding: 0 32px 22px; }
+.business-shell .chat-layout .conversation-questions:empty { display: none; }
+.business-shell .chat-layout .conversation-questions .business-confirmations { max-height: none; overflow: visible; }
+@media (max-width: 600px) { .business-shell .chat-layout .conversation-questions { padding: 0 12px 18px; } }
 .business-shell .chat-layout .theft-run-panel { gap: 6px; padding: 9px 11px; }
 .business-shell .chat-layout .related-capabilities-head { min-height: 70px; padding: 14px 16px; }
 .business-shell .chat-layout .related-capabilities-head strong { color: #123b6d; font-size: 18px; font-weight: 700; }

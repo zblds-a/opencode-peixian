@@ -85,7 +85,7 @@ export default function SmoothMarkdown(props: { text: string; live: boolean; com
     if (next.text === previous.text && next.pendingTable === previous.pendingTable && next.pendingSource === previous.pendingSource) return
     props.projectionCache.set(props.id, next)
     setProjection(next)
-    if (next.text !== previous.text || next.pendingTable !== previous.pendingTable) props.onProgress?.()
+    if (next.text !== previous.text) props.onProgress?.()
   })
   onCleanup(() => cancelAnimationFrame(frame))
   return <div class="smooth-message-text" aria-live="off">
