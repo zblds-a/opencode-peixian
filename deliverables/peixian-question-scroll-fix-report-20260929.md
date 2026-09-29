@@ -46,3 +46,9 @@
 - 真实登录态的连续生成、卡片交互及与用户录屏逐帧对比：当前环境没有可复用的登录态或测试账号，本次只完成本地浏览器夹具和正式入口、资源、服务健康验证；不能据此声称线上交互已逐帧验收。
 - 后端后续独立发布：本次镜像保留了切换时运行的后端文件。若后端团队随后替换 Console 镜像，需要重新核对前端资源是否被覆盖。
 - “停止生成”真正终止及流式传输设计：明确不属于本轮修复。
+
+## 后端后续发布与源码同步（2026-09-29 11:19）
+
+后端团队随后将生产 Console 更新为 `peixian-control:question-probe-20260929-r2`，实际镜像 ID 为 `sha256:af094ada74a26a9bfeb10f2de15818f94708e423a3439825d8d12eb357a87545`，Console、HTTPS 仍为 `healthy`。该镜像的正式入口依然引用 `/assets/index-C7TczqKg.js` 与 `/assets/index-B04nGFbd.css`，线上 `index.html` SHA-256 仍是 `f63dff3469f4a1bfc3f27373e999903db93e367856897674f436117a71744f9a`；因此本轮前端并未被后端发布覆盖，无需再次切换生产镜像。后端源码 `/root/PeiXianDB/theft-prompt-entry` 当时的 HEAD 为 `cb721c1257e936ba5e41b38b4efc25dd4bbe49d8`。
+
+前端修复和本报告已推送至 `https://github.com/zblds-a/opencode-peixian.git` 的 `question-card-stability` 分支。服务器另建独立源码目录 `/root/PeiXianDB/frontend-question-scroll-20260929` 跟踪该分支；它与后端工作目录隔离，生产运行资源仍来自上述镜像。后续若再次修改前端，须重新构建并发布，单纯拉取源码不会改变线上资源。
